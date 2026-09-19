@@ -17,6 +17,56 @@ per shot, wire the references, hit Run once.
 
 ---
 
+## It runs on 8 GB
+
+**Reference machine: RTX 3070, 8192 MB VRAM, 40 GB system RAM.** Every number below was
+measured on it, at **864×480 (0.4 MP, 16:9)**, turbo LoRA, 8 steps.
+
+The model is 20 GB and the text encoder is another 25 GB. Neither fits in 8 GB, and
+neither is supposed to — ComfyUI streams both, staging them in system RAM and pulling
+weights in per step. The card is not the wall; the activation peak is.
+
+| | measured on the 8 GB RTX 3070 |
+| --- | --- |
+| One 11.5 s shot — 277 frames, 8 steps | **5 min 34 s – 5 min 37 s** |
+| A 4-shot chain → 41 s finished take | **25 min 38 s** |
+| Sampling, per step, at this size | **37 – 48 s/it** |
+
+For reference, the same pack's own benchmark table further down was taken on a 12 GB
+RTX 3060. 8 GB costs you time, not capability — a four-shot continuous take still lands
+under half an hour.
+
+### The two nodes that make it fit
+
+On 8 GB, put these between the LoRA loader and the model input. This is exactly what the
+shipped director workflow already does:
+
+```
+LoraLoaderModelOnly ──► MiniMaxChunkFeedForward ──► MiniMaxLowVRAMAttention ──► ModelAttentionBackend
+                          chunks = 4                   head_chunks = 4
+```
+
+| Node | Ships in | Setting | What it buys |
+| --- | --- | --- | --- |
+| `MiniMaxChunkFeedForward` | [ComfyUI-KJNodes](https://github.com/kijai/ComfyUI-KJNodes) | `chunks` **4**, `seq_threshold` **2048** | Chunks the H3 feedforward (SwiGLU) over the packed token dim. More chunks = lower peak VRAM, slightly more overhead. |
+| `MiniMaxLowVRAMAttention` | [ComfyUI-KJNodes](https://github.com/kijai/ComfyUI-KJNodes) | `head_chunks` **4** | Splits the attention call into head groups, so the kernel's internal transients — the int8 q/k copies and the fp32 accumulator — shrink by the chunk count, and frees the fused qkv buffer as soon as it is consumed. |
+
+Both are `KJNodes/experimental`, and both are **lossless**: their author documents each
+as *"Output is identical to the unpatched model."* You are trading speed for headroom,
+not quality. The director workflow wires them through a `LazySwitch` driven by a
+`BOOLConstant`, so the low-VRAM path can be switched out in one click once you move to a
+bigger card.
+
+### If you do run out
+
+* Drop the megapixel budget on **ResolutionSelector**. `0.3` MP (736×416 in 16:9) is the
+  next step down and roughly a third less to compute.
+* Raise `chunks` / `head_chunks` to 6 or 8. Overhead rises, output does not change.
+* Turn on `unload_models_after` on **only** the segment where it OOMs — see
+  [the knobs that matter](#the-knobs-that-matter).
+
+---
+
 ## Setup
 
 Two steps, about 42 GB of downloads, and a `git clone`. There is nothing to
@@ -67,6 +117,10 @@ The last one is the turbo LoRA. It is optional but you almost certainly want it:
 cuts sampling from 20 steps to 4. On a 12 GB card that is the difference between
 **5 minutes a shot and 31 minutes a shot**.
 
+On 8 GB it is not a trade-off at all — it is the difference between a take you can
+iterate on and one you cannot. Measured figures on the 8 GB reference card are in
+[It runs on 8 GB](#it-runs-on-8-gb).
+
 Once the files are in place, hit **R** on the ComfyUI canvas (or restart it) so the
 loader dropdowns pick them up.
 
@@ -96,8 +150,10 @@ spotlight, one continuous ~21-second take in three shots.
 
 **It runs as it opens.** Copy the two files in `example_inputs/` into `ComfyUI/input/`
 and hit Run — nothing else needs setting. About 27 minutes on a 12 GB card with the
-turbo LoRA on. Read its three prompts side by side afterwards; that is where the method
-is.
+turbo LoRA on, and the same engine has been measured on the 8 GB reference card at
+**5 min 34 s for one 11.5 s shot** and **25 min 38 s for a four-shot, 41-second take**
+(see [It runs on 8 GB](#it-runs-on-8-gb)). Read its three prompts side by side
+afterwards; that is where the method is.
 
 To make it yours, edit in place: rewrite the prompts, swap the `Load Image` nodes, and
 add or delete **H3 Render Segment** nodes to change the shot count. There is no separate
@@ -112,6 +168,8 @@ blank template — a worked example you edit beats an empty one you have to fill
 Same chain, but you do not hand-wire one **H3 Render Segment** per shot. You write
 the script, the **H3 Director** panel parses it into a storyboard, and the chain
 renders from that. This is the one to copy once you are doing real multi-shot work.
+
+![the director workflow](docs/director-workflow.png)
 
 > **⚠️ It does not run out of the box.** It is published as a reference for how the
 > panel is wired, and it loads checkpoints and reference images that are not in this
@@ -160,7 +218,9 @@ Then decide your quality/speed trade-off:
 * **Best quality:** leave the LoRA bypassed (it ships that way) and `steps` at 20.
 
 Set the canvas size on **ResolutionSelector** — pick an aspect ratio and a megapixel
-budget. `0.41` MP (480×864 in 9:16) is a good, safe starting point on 12 GB.
+budget. `0.41` MP (480×864 in 9:16) is a good, safe starting point on 12 GB. On 8 GB,
+**`0.4` MP / 16:9 → 864×480** is the setting every figure in
+[It runs on 8 GB](#it-runs-on-8-gb) was measured at.
 
 **2 — Shots (the purple group).** One **H3 Render Segment** node per shot, wired in a
 line: each node's `chain_state` output goes into the next node's `chain_state` input.
@@ -202,16 +262,34 @@ whose settings actually changed get re-rendered. See
 
 ### How long it takes
 
-Measured on a 12 GB RTX 3060 at 480×864, per shot:
+**8 GB — the author's own machine.** RTX 3070, 8192 MB, 40 GB RAM, 864×480, turbo LoRA
+at 8 steps:
+
+| | measured |
+| --- | --- |
+| One 11.5 s shot (277 frames) | **5 min 34 s – 5 min 37 s** |
+| A 4-shot chain → 41 s take | **25 min 38 s** |
+| Per sampling step | **37 – 48 s/it** |
+
+**12 GB — the pack's original benchmark.** RTX 3060 at 480×864, per shot:
 
 | | 4-second shot | 8-second shot |
 | --- | --- | --- |
 | turbo LoRA, 4 steps | ~5 min | ~9 min |
 | no LoRA, 20 steps | ~18 min | ~31 min |
 
-The model is 20 GB and does not fit in 12 GB, so it streams weights every step. More
-VRAM is a very large speed-up here. If you hit out-of-memory partway through a long
-chain, turn on `unload_models_after` on the single shot where it happens.
+The model is 20 GB and the text encoder is 25 GB. **Neither fits in 12 GB, and neither
+fits in 8 GB** — it streams weights every step, on both. That is why a 12 GB card and an
+8 GB card land within a factor of two of each other rather than 10×: the bottleneck is
+how fast weights can be pulled, not how much room you have to hold them. More VRAM is
+still a large speed-up, because it cuts the streaming.
+
+On 8 GB specifically, wire in `MiniMaxChunkFeedForward` and `MiniMaxLowVRAMAttention` —
+see [The two nodes that make it fit](#the-two-nodes-that-make-it-fit). They cap the
+activation peak, which is the part 8 GB actually runs out of.
+
+If you hit out-of-memory partway through a long chain, turn on `unload_models_after` on
+the single shot where it happens.
 
 ---
 
@@ -420,6 +498,71 @@ straight through.
 
 ---
 
+## The panel
+
+The Director panel is not a stock ComfyUI widget stack. It is built on Apple's
+**Liquid Glass** design language — the iOS 26 / macOS Tahoe material introduced at
+WWDC25 (Session 219, *Meet Liquid Glass*) — applied to a ComfyUI node.
+
+![the director panel](docs/director-panel.png)
+
+### The rules, and where they land
+
+Apple's guidance is unusually specific, so the panel implements it literally rather
+than approximately:
+
+| Apple's rule | In the panel |
+| --- | --- |
+| *"Liquid Glass forms a distinct functional layer for controls and navigation elements… Don't use Liquid Glass in the content layer."* | Glass appears only on functional overlays: the reference-image hover card, the PACK preview, the right-click menu, the `@`-mention popup, the floating segment bar. Thumbnails, video and prompt text — the **content** — are never put behind glass. |
+| *"The regular variant blurs and adjusts the luminosity of background content to maintain legibility."* | `blur(12px) brightness(.94) saturate(165%)`. The `brightness` term is not decoration — blur alone still leaves white text unreadable over a light background. |
+| *"If the underlying content is bright, consider adding a dark…"* — Apple's one hard number | A **35 %** black dimming layer. It is the only literal percentage in the documentation, and it is implemented as one. |
+| *"Use Liquid Glass effects sparingly."* | Buttons carry **no** `backdrop-filter`. They already sit on a glassy section, so a second blur would be glass-on-glass — which Apple explicitly warns against. They are *pressed into* the glass instead: translucent fill, 1px top highlight, no blur. |
+
+### The three visual signatures
+
+* **Specular rim** — a 1px light line on the top edge and a 1px dark line on the bottom.
+  That is what reads as thickness: light comes from above. Two strengths, `.14/.28` for
+  small elements and `.20/.30` for large floating layers, because a bigger surface needs
+  a stronger highlight before the eye registers it at all.
+* **Saturation pull** — `saturate(165%)` lets the glass take on the colour behind it.
+  This is what keeps it from reading as a fixed grey rectangle; the panel tints with the
+  canvas underneath it.
+* **One easing curve** — `cubic-bezier(.32, .72, 0, 1)` for every transition, Apple's
+  preferred decelerating curve. `ease` and `linear` both feel mechanical beside it.
+
+Corner radii run as a single graded scale — `6px` controls, `7px` inputs, `10px` cards,
+`12px` panels, `999px` pills — rather than each element choosing its own number.
+
+![the shot list, PACK preview and storyboard](docs/director-shotlist.png)
+
+### Accessibility is a constraint, not a patch
+
+Liquid Glass is defined to respect the system's accessibility settings. The CSS
+equivalents are wired across **every** floating layer, not just the obvious one — miss
+one and turning a setting on leaves you with a panel that is half opaque and half
+transparent:
+
+| Setting | What the panel does |
+| --- | --- |
+| **Reduce Motion** | Every transition and animation drops to `0.001ms`; glass stops morphing and pulsing, hover states stop translating. |
+| **Reduce Transparency** | `backdrop-filter` is removed and glass becomes near-opaque `rgba(18,18,20,.96)`. Pressed controls get a more solid fill so they stop reading as "dirty" against it. |
+| **Increase Contrast** | Glass darkens to `rgba(0,0,0,.78)`, edges gain a 1px white inset, text goes to pure white, and the timeline dots gain a white ring. |
+
+### Why it lives in a token layer
+
+The first pass had Liquid Glass on one card with the numbers inlined. Spreading it to
+twenty sections that way guarantees drift — twenty independent `rgba()` values that
+disagree within a month. Everything now comes from `--h3d-glass-*`, `--h3d-rim-*`,
+`--h3d-tint-*`, `--h3d-r-*` and `--h3d-ease`, so changing the material is one edit.
+`-webkit-backdrop-filter` is written alongside `backdrop-filter` for WebKit and older
+Chromium builds.
+
+> This layer is **not** derived from upstream. The chaining engine and the node set come
+> from [`loopforge0/ComfyUI-H3-Continuous`](https://github.com/loopforge0/ComfyUI-H3-Continuous);
+> the panel's interface is this repository's own work.
+
+---
+
 ## Troubleshooting
 
 **Segment 1 renders, segment 2 dies with `shape mismatch: value tensor of shape
@@ -541,6 +684,12 @@ The drift work came later, out of asking why a chain that joins perfectly can st
 end up somewhere else. Everything in that section was measured on a 12 GB RTX 3060 at
 480×864 — five six-shot chains rendered for the comparison, plus three earlier ones
 re-measured. `tools/bench_chain.py` reproduces it.
+
+The **8 GB figures** in [It runs on 8 GB](#it-runs-on-8-gb) and
+[How long it takes](#how-long-it-takes) are separate, and are this repository's own
+measurements — an RTX 3070 with 8192 MB at 864×480, read out of ComfyUI's own
+`Prompt executed in` lines and sampler progress bars, not extrapolated from the 12 GB
+numbers above.
 
 ---
 
