@@ -1,0 +1,2348 @@
+{
+  "id": "31ffbb1c-01c7-5e11-bc3e-e8f9fe832bbe",
+  "revision": 0,
+  "last_node_id": 741,
+  "last_link_id": 70,
+  "nodes": [
+    {
+      "id": 3,
+      "type": "LoraLoaderModelOnly",
+      "pos": [
+        2060,
+        290
+      ],
+      "size": [
+        440,
+        140
+      ],
+      "flags": {},
+      "order": 13,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "model",
+          "type": "MODEL",
+          "link": 21
+        }
+      ],
+      "outputs": [
+        {
+          "name": "MODEL",
+          "type": "MODEL",
+          "links": [
+            30
+          ]
+        }
+      ],
+      "title": "③-2 Turbo 加速 LoRA",
+      "properties": {
+        "Node name for S&R": "LoraLoaderModelOnly",
+        "cnr_id": "comfy-core",
+        "ver": "0.34.0",
+        "models": [
+          {
+            "name": "minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16.safetensors",
+            "url": "https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/loras/minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16.safetensors",
+            "directory": "loras"
+          }
+        ],
+        "ue_properties": {
+          "widget_ue_connectable": {
+            "lora_name": true,
+            "strength_model": true
+          },
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        }
+      },
+      "widgets_values": [
+        "minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16.safetensors",
+        1
+      ],
+      "widgets_values_named": {
+        "lora_name": "minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16.safetensors",
+        "strength_model": 1
+      },
+      "color": "#3f789e",
+      "bgcolor": "#1f3a4d"
+    },
+    {
+      "id": 4,
+      "type": "CLIPLoader",
+      "pos": [
+        3210,
+        100
+      ],
+      "size": [
+        520,
+        140
+      ],
+      "flags": {},
+      "order": 0,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "CLIP",
+          "type": "CLIP",
+          "links": [
+            22
+          ]
+        }
+      ],
+      "title": "⑤-1 Qwen3-VL 文本编码器",
+      "properties": {
+        "Node name for S&R": "CLIPLoader",
+        "cnr_id": "comfy-core",
+        "ver": "0.34.0",
+        "models": [
+          {
+            "name": "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",
+            "url": "https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/text_encoders/qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",
+            "directory": "text_encoders"
+          }
+        ],
+        "ue_properties": {
+          "widget_ue_connectable": {
+            "clip_name": true,
+            "type": true,
+            "device": true
+          },
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        }
+      },
+      "widgets_values": [
+        "qwen3vl_32b_minimax_h3_int8_convrot.safetensors",
+        "minimax",
+        "cpu"
+      ],
+      "widgets_values_named": {
+        "clip_name": "qwen3vl_32b_minimax_h3_int8_convrot.safetensors",
+        "type": "minimax",
+        "device": "cpu"
+      },
+      "color": "#3f5159",
+      "bgcolor": "#222d33"
+    },
+    {
+      "id": 5,
+      "type": "VAELoader",
+      "pos": [
+        3210,
+        290
+      ],
+      "size": [
+        520,
+        140
+      ],
+      "flags": {},
+      "order": 1,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "VAE",
+          "type": "VAE",
+          "links": [
+            23
+          ]
+        }
+      ],
+      "title": "⑤-2 视频 VAE",
+      "properties": {
+        "Node name for S&R": "VAELoader",
+        "cnr_id": "comfy-core",
+        "ver": "0.34.0",
+        "models": [
+          {
+            "name": "minimax_h3_video_vae_fp16.safetensors",
+            "url": "https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/vae/minimax_h3_video_vae_fp16.safetensors",
+            "directory": "vae"
+          }
+        ],
+        "ue_properties": {
+          "widget_ue_connectable": {
+            "vae_name": true
+          },
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        }
+      },
+      "widgets_values": [
+        "minimax_h3_video_vae_int8_convrot.safetensors"
+      ],
+      "widgets_values_named": {
+        "vae_name": "minimax_h3_video_vae_int8_convrot.safetensors"
+      },
+      "color": "#3f5159",
+      "bgcolor": "#222d33"
+    },
+    {
+      "id": 6,
+      "type": "VAELoader",
+      "pos": [
+        3210,
+        480
+      ],
+      "size": [
+        520,
+        140
+      ],
+      "flags": {},
+      "order": 2,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "VAE",
+          "type": "VAE",
+          "links": [
+            24
+          ]
+        }
+      ],
+      "title": "⑤-3 音频 VAE",
+      "properties": {
+        "Node name for S&R": "VAELoader",
+        "cnr_id": "comfy-core",
+        "ver": "0.34.0",
+        "models": [
+          {
+            "name": "minimax_h3_audio_vae_fp32.safetensors",
+            "url": "https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/vae/minimax_h3_audio_vae_fp32.safetensors",
+            "directory": "vae"
+          }
+        ],
+        "ue_properties": {
+          "widget_ue_connectable": {
+            "vae_name": true
+          },
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        }
+      },
+      "widgets_values": [
+        "minimax_h3_audio_vae_fp32.safetensors"
+      ],
+      "widgets_values_named": {
+        "vae_name": "minimax_h3_audio_vae_fp32.safetensors"
+      },
+      "color": "#3f5159",
+      "bgcolor": "#222d33"
+    },
+    {
+      "id": 7,
+      "type": "KSamplerSelect",
+      "pos": [
+        3210,
+        670
+      ],
+      "size": [
+        520,
+        140
+      ],
+      "flags": {},
+      "order": 3,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "SAMPLER",
+          "type": "SAMPLER",
+          "links": [
+            25
+          ]
+        }
+      ],
+      "title": "⑤-4 采样器",
+      "properties": {
+        "Node name for S&R": "KSamplerSelect",
+        "cnr_id": "comfy-core",
+        "ver": "0.34.0",
+        "ue_properties": {
+          "widget_ue_connectable": {
+            "sampler_name": true
+          },
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        }
+      },
+      "widgets_values": [
+        "res_multistep"
+      ],
+      "widgets_values_named": {
+        "sampler_name": "res_multistep"
+      },
+      "color": "#3f5159",
+      "bgcolor": "#222d33"
+    },
+    {
+      "id": 8,
+      "type": "BasicScheduler",
+      "pos": [
+        3210,
+        860
+      ],
+      "size": [
+        520,
+        170
+      ],
+      "flags": {},
+      "order": 17,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "model",
+          "type": "MODEL",
+          "link": 36
+        }
+      ],
+      "outputs": [
+        {
+          "name": "SIGMAS",
+          "type": "SIGMAS",
+          "links": [
+            38
+          ]
+        }
+      ],
+      "title": "⑤-5 调度：8 步（快）",
+      "properties": {
+        "Node name for S&R": "BasicScheduler",
+        "cnr_id": "comfy-core",
+        "ver": "0.34.0",
+        "ue_properties": {
+          "widget_ue_connectable": {
+            "scheduler": true,
+            "steps": true,
+            "denoise": true
+          },
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        }
+      },
+      "widgets_values": [
+        "simple",
+        8,
+        1
+      ],
+      "widgets_values_named": {
+        "scheduler": "simple",
+        "steps": 8,
+        "denoise": 1
+      },
+      "color": "#3f5159",
+      "bgcolor": "#222d33"
+    },
+    {
+      "id": 9,
+      "type": "H3ChainSettings",
+      "pos": [
+        3210,
+        1750
+      ],
+      "size": [
+        520,
+        620
+      ],
+      "flags": {},
+      "order": 25,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "model",
+          "type": "MODEL",
+          "link": 43
+        },
+        {
+          "name": "clip",
+          "type": "CLIP",
+          "link": 22
+        },
+        {
+          "name": "vae",
+          "type": "VAE",
+          "link": 23
+        },
+        {
+          "name": "audio_vae",
+          "type": "VAE",
+          "link": 24
+        },
+        {
+          "name": "sampler",
+          "type": "SAMPLER",
+          "link": 25
+        },
+        {
+          "name": "sigmas",
+          "type": "SIGMAS",
+          "link": 41
+        },
+        {
+          "name": "width",
+          "type": "INT",
+          "widget": {
+            "name": "width"
+          },
+          "link": 26
+        },
+        {
+          "name": "height",
+          "type": "INT",
+          "widget": {
+            "name": "height"
+          },
+          "link": 27
+        }
+      ],
+      "outputs": [
+        {
+          "name": "settings",
+          "type": "H3_SETTINGS",
+          "links": [
+            53
+          ]
+        }
+      ],
+      "title": "⑤-9 H3 连续链路设置",
+      "properties": {
+        "Node name for S&R": "H3ChainSettings",
+        "ue_properties": {
+          "widget_ue_connectable": {
+            "width": true,
+            "height": true,
+            "chain_seed": true,
+            "session_name": true,
+            "ref_image_size": true,
+            "handoff_mode": true,
+            "drift_arrest": true
+          },
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        }
+      },
+      "widgets_values": [
+        864,
+        480,
+        307045,
+        "h3_director_demo",
+        "match",
+        "latent",
+        0.05,
+        0.1
+      ],
+      "widgets_values_named": {
+        "width": 864,
+        "height": 480,
+        "chain_seed": 307045,
+        "session_name": "h3_director_demo",
+        "ref_image_size": "match",
+        "handoff_mode": "latent",
+        "drift_arrest": 0.05,
+        "seam_redraw": 0.1
+      },
+      "color": "#3f5159",
+      "bgcolor": "#222d33"
+    },
+    {
+      "id": 10,
+      "type": "ResolutionSelector",
+      "pos": [
+        3210,
+        1520
+      ],
+      "size": [
+        520,
+        180
+      ],
+      "flags": {},
+      "order": 4,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "width",
+          "type": "INT",
+          "links": [
+            26
+          ]
+        },
+        {
+          "name": "height",
+          "type": "INT",
+          "links": [
+            27
+          ]
+        }
+      ],
+      "title": "⑤-8 画布分辨率",
+      "properties": {
+        "Node name for S&R": "ResolutionSelector",
+        "cnr_id": "comfy-core",
+        "ver": "0.34.0",
+        "ue_properties": {
+          "widget_ue_connectable": {
+            "aspect_ratio": true,
+            "megapixels": true,
+            "multiple": true
+          },
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        }
+      },
+      "widgets_values": [
+        "16:9 (Widescreen)",
+        0.4,
+        32
+      ],
+      "widgets_values_named": {
+        "aspect_ratio": "16:9 (Widescreen)",
+        "megapixels": 0.4,
+        "multiple": 32
+      },
+      "color": "#3f5159",
+      "bgcolor": "#222d33"
+    },
+    {
+      "id": 18,
+      "type": "SaveVideo",
+      "pos": [
+        3850,
+        700
+      ],
+      "size": [
+        580,
+        126
+      ],
+      "flags": {},
+      "order": 28,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "video",
+          "type": "VIDEO",
+          "link": 56
+        }
+      ],
+      "outputs": [
+        {
+          "name": "video",
+          "type": "VIDEO",
+          "links": []
+        }
+      ],
+      "title": "⑥-3 保存最终成片（director.video）",
+      "properties": {
+        "Node name for S&R": "SaveVideo",
+        "cnr_id": "comfy-core",
+        "ver": "0.34.0",
+        "ue_properties": {
+          "widget_ue_connectable": {
+            "filename_prefix": true,
+            "format": true,
+            "format.codec": true,
+            "codec": true
+          },
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        }
+      },
+      "widgets_values": [
+        "video/h3_continuous",
+        "auto",
+        "auto",
+        "auto"
+      ],
+      "widgets_values_named": {
+        "filename_prefix": "video/h3_continuous",
+        "format": "auto",
+        "format.codec": "auto",
+        "codec": "auto"
+      },
+      "color": "#a1309b",
+      "bgcolor": "#38172f"
+    },
+    {
+      "id": 19,
+      "type": "PreviewAny",
+      "pos": [
+        3850,
+        100
+      ],
+      "size": [
+        580,
+        240
+      ],
+      "flags": {},
+      "order": 31,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "source",
+          "type": "*",
+          "link": 57
+        }
+      ],
+      "outputs": [
+        {
+          "name": "STRING",
+          "type": "STRING",
+          "links": []
+        }
+      ],
+      "title": "⑥-1 运行报告（director.report）",
+      "properties": {
+        "Node name for S&R": "PreviewAny",
+        "cnr_id": "comfy-core",
+        "ver": "0.34.0",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        }
+      },
+      "widgets_values": [],
+      "widgets_values_named": {},
+      "color": "#a1309b",
+      "bgcolor": "#38172f"
+    },
+    {
+      "id": 33,
+      "type": "LoraLoaderModelOnly",
+      "pos": [
+        2060,
+        890
+      ],
+      "size": [
+        440,
+        140
+      ],
+      "flags": {},
+      "order": 16,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "model",
+          "type": "MODEL",
+          "link": 29
+        }
+      ],
+      "outputs": [
+        {
+          "name": "MODEL",
+          "type": "MODEL",
+          "links": [
+            28
+          ]
+        }
+      ],
+      "title": "③-4 LoRA 动作（强度 0=关）",
+      "properties": {
+        "Node name for S&R": "LoraLoaderModelOnly",
+        "ue_properties": {
+          "widget_ue_connectable": {
+            "lora_name": true,
+            "strength_model": true
+          },
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        },
+        "cnr_id": "comfy-core",
+        "ver": "0.34.0",
+        "models": [
+          {
+            "name": "minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16.safetensors",
+            "url": "https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/loras/minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16.safetensors",
+            "directory": "loras"
+          }
+        ]
+      },
+      "widgets_values": [
+        "H3\\H3_Combat_V2.safetensors",
+        0
+      ],
+      "widgets_values_named": {
+        "lora_name": "H3\\H3_Combat_V2.safetensors",
+        "strength_model": 0
+      },
+      "color": "#3f789e",
+      "bgcolor": "#1f3a4d"
+    },
+    {
+      "id": 34,
+      "type": "LoraLoaderModelOnly",
+      "pos": [
+        2060,
+        1080
+      ],
+      "size": [
+        440,
+        140
+      ],
+      "flags": {},
+      "order": 19,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "model",
+          "type": "MODEL",
+          "link": 28
+        }
+      ],
+      "outputs": [
+        {
+          "name": "MODEL",
+          "type": "MODEL",
+          "links": [
+            35
+          ]
+        }
+      ],
+      "title": "③-5 LoRA 表情（强度 0=关）",
+      "properties": {
+        "Node name for S&R": "LoraLoaderModelOnly",
+        "ue_properties": {
+          "widget_ue_connectable": {
+            "lora_name": true,
+            "strength_model": true
+          },
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        },
+        "cnr_id": "comfy-core",
+        "ver": "0.34.0",
+        "models": [
+          {
+            "name": "minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16.safetensors",
+            "url": "https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/loras/minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16.safetensors",
+            "directory": "loras"
+          }
+        ]
+      },
+      "widgets_values": [
+        "H3\\minimax-h3-facial-realism-closeup-cp2000_comfy_prefix.safetensors",
+        0
+      ],
+      "widgets_values_named": {
+        "lora_name": "H3\\minimax-h3-facial-realism-closeup-cp2000_comfy_prefix.safetensors",
+        "strength_model": 0
+      },
+      "color": "#3f789e",
+      "bgcolor": "#1f3a4d"
+    },
+    {
+      "id": 35,
+      "type": "ModelAttentionBackend",
+      "pos": [
+        2620,
+        480
+      ],
+      "size": [
+        470,
+        140
+      ],
+      "flags": {},
+      "order": 23,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "model",
+          "type": "MODEL",
+          "link": 34
+        }
+      ],
+      "outputs": [
+        {
+          "name": "model",
+          "type": "MODEL",
+          "links": [
+            42
+          ]
+        }
+      ],
+      "title": "④-3 注意力后端",
+      "properties": {
+        "Node name for S&R": "ModelAttentionBackend",
+        "ue_properties": {
+          "widget_ue_connectable": {
+            "attention": true
+          },
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        }
+      },
+      "widgets_values": [
+        "comfy kitchen attention"
+      ],
+      "widgets_values_named": {
+        "attention": "comfy kitchen attention"
+      },
+      "color": "#8ca130",
+      "bgcolor": "#2e3a1a"
+    },
+    {
+      "id": 38,
+      "type": "LazySwitch",
+      "pos": [
+        2060,
+        480
+      ],
+      "size": [
+        440,
+        170
+      ],
+      "flags": {},
+      "order": 15,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "on_false",
+          "shape": 7,
+          "type": "*",
+          "link": 31
+        },
+        {
+          "name": "on_true",
+          "shape": 7,
+          "type": "*",
+          "link": 30
+        },
+        {
+          "name": "boolean",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "boolean"
+          },
+          "link": 32
+        }
+      ],
+      "outputs": [
+        {
+          "name": "value",
+          "type": "*",
+          "links": [
+            29,
+            36,
+            37
+          ]
+        }
+      ],
+      "title": "③-3 加速开关（懒）",
+      "properties": {
+        "Node name for S&R": "LazySwitch",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        }
+      },
+      "widgets_values": [
+        true
+      ],
+      "widgets_values_named": {
+        "boolean": true
+      },
+      "color": "#8a5a00",
+      "bgcolor": "#3b2700"
+    },
+    {
+      "id": 40,
+      "type": "BOOLConstant",
+      "pos": [
+        2060,
+        700
+      ],
+      "size": [
+        440,
+        140
+      ],
+      "flags": {},
+      "order": 5,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "value",
+          "type": "BOOLEAN",
+          "links": [
+            32,
+            40
+          ]
+        }
+      ],
+      "title": "🎛 总开关（LoRA + 步数）",
+      "properties": {
+        "Node name for S&R": "BOOLConstant",
+        "cnr_id": "ComfyUI-KJNodes",
+        "ver": "1.0",
+        "ue_properties": {
+          "widget_ue_connectable": {
+            "value": true
+          },
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        }
+      },
+      "widgets_values": [
+        true
+      ],
+      "widgets_values_named": {
+        "value": true
+      },
+      "color": "#8a5a00",
+      "bgcolor": "#3b2700"
+    },
+    {
+      "id": 41,
+      "type": "MiniMaxChunkFeedForward",
+      "pos": [
+        2620,
+        100
+      ],
+      "size": [
+        470,
+        140
+      ],
+      "flags": {},
+      "order": 21,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "model",
+          "type": "MODEL",
+          "link": 35
+        }
+      ],
+      "outputs": [
+        {
+          "name": "model",
+          "type": "MODEL",
+          "links": [
+            33
+          ]
+        }
+      ],
+      "title": "④-1 分块前馈",
+      "properties": {
+        "Node name for S&R": "MiniMaxChunkFeedForward",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "input_ue_unconnectable": {},
+          "version": "7.8"
+        },
+        "cnr_id": "comfyui-kjnodes",
+        "ver": "1.5.0"
+      },
+      "widgets_values": [
+        4,
+        2048
+      ],
+      "widgets_values_named": {
+        "chunks": 4,
+        "seq_threshold": 2048
+      },
+      "color": "#8ca130",
+      "bgcolor": "#2e3a1a"
+    },
+    {
+      "id": 42,
+      "type": "MiniMaxLowVRAMAttention",
+      "pos": [
+        2620,
+        290
+      ],
+      "size": [
+        470,
+        140
+      ],
+      "flags": {},
+      "order": 22,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "model",
+          "type": "MODEL",
+          "link": 33
+        }
+      ],
+      "outputs": [
+        {
+          "name": "model",
+          "type": "MODEL",
+          "links": [
+            34
+          ]
+        }
+      ],
+      "title": "④-2 低显存注意力",
+      "properties": {
+        "Node name for S&R": "MiniMaxLowVRAMAttention",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "input_ue_unconnectable": {},
+          "version": "7.8"
+        },
+        "cnr_id": "comfyui-kjnodes",
+        "ver": "1.5.0"
+      },
+      "widgets_values": [
+        4
+      ],
+      "widgets_values_named": {
+        "head_chunks": 4
+      },
+      "color": "#8ca130",
+      "bgcolor": "#2e3a1a"
+    },
+    {
+      "id": 43,
+      "type": "BasicScheduler",
+      "pos": [
+        3210,
+        1080
+      ],
+      "size": [
+        520,
+        170
+      ],
+      "flags": {},
+      "order": 18,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "model",
+          "type": "MODEL",
+          "link": 37
+        }
+      ],
+      "outputs": [
+        {
+          "name": "SIGMAS",
+          "type": "SIGMAS",
+          "links": [
+            39
+          ]
+        }
+      ],
+      "title": "⑤-6 调度：20 步（稳）",
+      "properties": {
+        "Node name for S&R": "BasicScheduler",
+        "cnr_id": "comfy-core",
+        "ver": "0.34.0",
+        "ue_properties": {
+          "widget_ue_connectable": {
+            "scheduler": true,
+            "steps": true,
+            "denoise": true
+          },
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        }
+      },
+      "widgets_values": [
+        "simple",
+        20,
+        1
+      ],
+      "widgets_values_named": {
+        "scheduler": "simple",
+        "steps": 20,
+        "denoise": 1
+      },
+      "color": "#3f5159",
+      "bgcolor": "#222d33"
+    },
+    {
+      "id": 44,
+      "type": "LazySwitch",
+      "pos": [
+        3210,
+        1300
+      ],
+      "size": [
+        520,
+        170
+      ],
+      "flags": {},
+      "order": 20,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "on_false",
+          "shape": 7,
+          "type": "*",
+          "link": 39
+        },
+        {
+          "name": "on_true",
+          "shape": 7,
+          "type": "*",
+          "link": 38
+        },
+        {
+          "name": "boolean",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "boolean"
+          },
+          "link": 40
+        }
+      ],
+      "outputs": [
+        {
+          "name": "value",
+          "type": "*",
+          "links": [
+            41
+          ]
+        }
+      ],
+      "title": "⑤-7 步数开关（懒）",
+      "properties": {
+        "Node name for S&R": "LazySwitch",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        }
+      },
+      "widgets_values": [
+        true
+      ],
+      "widgets_values_named": {
+        "boolean": true
+      },
+      "color": "#8a5a00",
+      "bgcolor": "#3b2700"
+    },
+    {
+      "id": 59,
+      "type": "BlockSparseAttention",
+      "pos": [
+        2620,
+        670
+      ],
+      "size": [
+        470,
+        250
+      ],
+      "flags": {},
+      "order": 24,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "model",
+          "type": "MODEL",
+          "link": 42
+        }
+      ],
+      "outputs": [
+        {
+          "name": "model",
+          "type": "MODEL",
+          "links": [
+            43
+          ]
+        }
+      ],
+      "title": "④-4 稀疏注意力 Sol-Attn",
+      "properties": {
+        "Node name for S&R": "BlockSparseAttention",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "input_ue_unconnectable": {},
+          "version": "7.8"
+        }
+      },
+      "widgets_values": [
+        "sol-attn",
+        1.3,
+        0.2,
+        1,
+        "",
+        12288,
+        256,
+        "exact_kv_and_rows",
+        false
+      ],
+      "widgets_values_named": {
+        "selection": "sol-attn",
+        "selection.tau": 1.3,
+        "start_percent": 0.2,
+        "end_percent": 1,
+        "dense_blocks": "",
+        "min_tokens": 12288,
+        "extra_tokens": 256,
+        "sink_conditioning": "exact_kv_and_rows",
+        "verbose": false
+      },
+      "color": "#8ca130",
+      "bgcolor": "#2e3a1a"
+    },
+    {
+      "id": 609,
+      "type": "SaveImage",
+      "pos": [
+        3850,
+        1300
+      ],
+      "size": [
+        580,
+        260
+      ],
+      "flags": {},
+      "order": 29,
+      "mode": 2,
+      "inputs": [
+        {
+          "name": "images",
+          "type": "IMAGE",
+          "link": 58
+        }
+      ],
+      "outputs": [
+        {
+          "name": "images",
+          "type": "IMAGE",
+          "links": null
+        }
+      ],
+      "title": "⑥-4 时间线缩略图存档（director.timeline）",
+      "properties": {
+        "Node name for S&R": "SaveImage",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "input_ue_unconnectable": {},
+          "version": "7.8"
+        }
+      },
+      "widgets_values": [
+        "h3_timeline"
+      ],
+      "widgets_values_named": {
+        "filename_prefix": "h3_timeline"
+      },
+      "color": "#a1309b",
+      "bgcolor": "#38172f"
+    },
+    {
+      "id": 701,
+      "type": "ShowText|pysssss",
+      "pos": [
+        3850,
+        400
+      ],
+      "size": [
+        580,
+        240
+      ],
+      "flags": {},
+      "order": 30,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "text",
+          "type": "STRING",
+          "link": 61
+        }
+      ],
+      "outputs": [
+        {
+          "name": "STRING",
+          "shape": 6,
+          "type": "STRING",
+          "links": null
+        }
+      ],
+      "title": "⑥-2 进度摘要（director.progress）",
+      "properties": {
+        "Node name for S&R": "ShowText|pysssss",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        }
+      },
+      "widgets_values": [
+        "已渲染 4 / 4 段，会话：v18_en_v10"
+      ],
+      "widgets_values_named": {
+        "text_0": "已渲染 4 / 4 段，会话：v18_en_v10"
+      },
+      "color": "#a1309b",
+      "bgcolor": "#38172f"
+    },
+    {
+      "id": 361,
+      "type": "PrimitiveStringMultiline",
+      "pos": [
+        110.76752644999993,
+        127.53074476000002
+      ],
+      "size": [
+        700,
+        560
+      ],
+      "flags": {},
+      "order": 6,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "STRING",
+          "type": "STRING",
+          "slot_index": 0,
+          "links": [
+            63
+          ]
+        }
+      ],
+      "title": "①-A PACK 分镜提示词（唯一剧本输入 · 整份粘这里）",
+      "properties": {
+        "Node name for S&R": "PrimitiveStringMultiline",
+        "ue_properties": {
+          "widget_ue_connectable": {
+            "value": true
+          },
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        }
+      },
+      "widgets_values": [
+        "==========================================================\nMiniMax H3 SHOT PROMPT PACK / H3 分镜提示词包\nProject / 项目         : 曹贼的性价比\nMode / 模式            : Ref2VA (full reference)\nTotal duration / 总时长 : 00:40\nSegments / 段数        : 4\nAspect / 画幅          : 16:9 / 2K / 24fps\nMusic / 配乐           : Per MUSIC block\nVersion / 版本         : v1\nDate / 日期            : 2026-09-14\n==========================================================\n\n==========================================================\n[1] 中文版 / CHINESE VERSION\n==========================================================\n\n\n########## S01 / 11s / 中文 ##########\nsubject_definitions:\n<Subject 1> 是 <Picture 1> 中的人（王总，S1）：外观、服装、身形与面容全程以 <Picture 1> 为唯一依据，不做任何变化。\n<Subject 2> 是 <Picture 2> 中的人（张三，S2；职业为律师；S1 在台词中直呼其名）：外观、服装、身形与面容全程以 <Picture 2> 为唯一依据，不做任何变化。\n<Subject 3> 是 <Picture 4> 中的人（成年男性，与 <Subject 2> 一同在床榻上、被 <Subject 1> 撞见）：外观以 <Picture 4> 为唯一依据；不给说话人编号，全程不说话、无台词。\n<Picture 1> 是 <Subject 1> 的外观参考图，全片逐帧一致。\n<Picture 2> 是 <Subject 2> 的外观参考图，全片逐帧一致。\n<Picture 3> 是卧房场景参考图，全片场景、陈设、色温与光向严格等同此图，不新增任何陈设。\n<Picture 4> 是 <Subject 3> 的外观参考图，全片逐帧一致。\nsummary:\n[reference generation] 古代卧房夜戏开场：<Subject 1> 深夜赶到门外，一脚踹开房门，撞见 <Subject 2> 正与 <Subject 3> 在床榻上亲热，一把将 <Subject 2> 从床上拽起质问；<Subject 2> 不慌不忙，一边把衣裳一件件穿回身上，末了以一句反诘收口，<Subject 1> 当场愣住。本段为全片首段，无前段可回放，生成时长 11 秒。\nretention_analysis:\n<Subject 1> (appears in [Shot 1], [Shot 2]): fully_preserved - 外观、服装与身形在踹门、拽人与愣神的全过程中与 <Picture 1> 一致，无变化。\n<Subject 2> (appears in [Shot 1]): fully_preserved - 外观、服装与身形在赤足落地、穿衣整装与说话的全过程中与 <Picture 2> 一致，无变化。\n<Subject 3> (appears in [Shot 1]): fully_preserved - 外观与 <Picture 4> 一致，无变化；全程不说话、无台词。\n<Picture 1>: fully_preserved - 作为 <Subject 1> 的外观参考被完整保留。\n<Picture 2>: fully_preserved - 作为 <Subject 2> 的外观参考被完整保留。\n<Picture 3> ([Shot 1] first frame): fully_preserved - 卧房场景、烛光色温与光向被完整保留，无跳变、无新增陈设。\n<Picture 4>: fully_preserved - 作为 <Subject 3> 的外观参考被完整保留。\ndetailed_description:\n画面内任何位置都不出现文字、字幕、题字、时间码、水印或任何图形叠加层。古装戏曲喜剧质感，35mm 镜头，自然景深，暖色烛光，色温与光向严格沿用 <Picture 3>；180 度轴线始终保持在轴线西侧，门框作上下场门、床榻作戏台。取景纪律：全片禁止怼脸取景，禁止面部特写、大特写、极端特写，以及越过胸线向上单独截取面部的镜头；<Subject 2> 是唯一开放身体取景的角色，区间限定为中景 MS（膝上或腰上取景）与近景 MCU（画面下缘止于胸部以上，含肩颈与衣襟领口），并以纵向摇镜（tilt up）连接腿部至腰部至胸部；<Subject 1>、<Subject 3> 与场景一律克制取景。取景只作部位与景别规划，不描述衣饰样式、身形细节与五官。节奏对位：<Subject 1> 的世界用急急风、乱锤、四击头，急、响、乱、快；<Subject 2> 的世界用小锣、三弦、月琴，轻、准、冷、慢；镜头切到 <Subject 2> 时锣鼓立刻收小、节拍立刻放慢。\n\n[Shot 1] [单镜内连续重新构图，时长 9 秒] At 00:00.000，镜头自门外以 ELS 望向卧房深处，暖色烛光里床榻上有两道交叠人影正宽衣亲吻，环境与 <Picture 3> 完全一致。开场只有卧房环境音：烛火噼啪、远处更鼓、床榻方向压抑的嬉笑与衣衫窸窣；板鼓在画面外先行，嗒、嗒、嗒，由缓渐快，像一颗心在门外逼近。At 00:00.300，镜头随鼓点缓推，画面先掠过床沿一道垂落的腿部线条——<Subject 2> 的一条腿搭在床沿外，未及掩起，取景为中景 MS（自膝上至头顶，不推近、不裁脸），烛光勾出腿线轮廓；随即纵向摇镜（tilt up）抬向床榻上方，她正跨坐在 <Subject 3> 身上，衣襟半敞、领口微松，俯身与他相拥亲吻。At 00:00.600，门被一脚猛踹，门扇砰然弹开撞墙，急急风骤起，<Subject 1> 踩着锣鼓步点大步冲入、直扑床前，肩膀紧绷、双手握拳；床榻上两人闻声僵住、齐齐转头。<Subject 1> 一把攥住 <Subject 2> 的手臂，将她整个人从床榻上拽起来，她赤足落地，手里还捏着刚褪下的衣裳，衣襟半敞未掩；<Subject 3> 惊坐而起，抓被挡身缩向床角阴影，只留侧影。At 00:01.000，她赤足站定的瞬间大锣一记重击，亮相顿挫半拍，画面凝住：<Subject 1> 攥臂、<Subject 2> 赤足立于脚踏边、衣料半褪；此定格为中景 MS（自膝上至头顶），她的腿部线条、赤足与未整的衣襟领口一并入画，不推近、不裁脸，凌乱与镇定同时被看见。At 00:01.000-00:01.200，反打 <Subject 2> 近景 MCU（画面下缘止于胸部以上）：她落地站稳后并不看 <Subject 1>，先低头看自己被攥住的手腕，再抬眼，视线从他的手顺到他脸上，没有挣扎、没有惊叫，只有冷静的审视，像在评估一件送上门来的案子；<Subject 1> 的手在她注视下不自在地松了松。\n\nAt 00:01.200，(S1) <d>[Chinese] 张三，我就问问……总惦记别人老婆，法律上得啥责？</d> 口型与台词精确同步：每个音节口型清楚，不维持张口笑；发声时身体安静，只允许头、肩与一只手轻微辅助；完整手势、走位与大幅动作只放在台词结束、嘴巴闭合之后的静音间隙；写作顺序固定为 台词、嘴巴闭合、静音间隙里的动作、收在非说话姿态。台词与大动作不重叠，段尾不留下未完成的发声。 <Subject 1> 以中低音区说话，焦虑音色带轻微气声，语速快于正常，在大锣余音里急切开口；问问两字处声音开裂。他想再攥住 <Subject 2> 的手臂，被她轻轻一挣脱开，他扑了个空，手悬在半空，只能追着她的背影问。台词 18 字，时长 4.5 秒，自 00:01.200 起说。台词期间锣鼓收小为稀疏板鼓点压底，<Subject 2> 背对他把刚褪下的衣裳一件件穿回身上，他问他的、她穿她的，谁也不看谁。镜头在两人间缓慢对切：<Subject 1> 近景 MCU（焦急追问）与 <Subject 2> 侧身中景 MS（自大腿上缘至头顶）交替，她抬腿理衣、俯身展平，衣料每收拢一寸镜头便退让一寸，始终礼貌。At 00:03.500，插入 <Subject 2> 侧身近景 MCU（止于胸部以上）：她穿衣的手在听到那五个字时顿住一瞬，不是被冒犯的停顿，而像账房先生听见一笔新生意，指尖在衣料上轻轻一捻，随即若无其事继续穿，眼神掠过一丝计算的微光；板鼓在此停一拍，小锣极轻一响，再续上。<Subject 3> 全程不说话、无台词。\n\nAt 00:05.700，台词落定，于 00:05.700 说完，进入纵向摇镜展示序列（tilt up，节奏刻意放慢）：镜头从她赤足起，沿小腿与腿侧线条缓缓上摇，她正弯腰把最后一件衣裳从脚边拾起、直身系好；摇镜经过腰际时稍作停留，继续上行至衣襟领口，她低头将衣襟掩齐，领口随动作将掩未掩；最终停在 <Subject 2> 近景 MCU（止于胸部以上），她理好衣襟后抬眸，终于正眼看向 <Subject 1>。整段摇镜配小锣轻点三下，冷而克制，她的凌乱在镜头上缓缓收拢为齐整，静止与 <Subject 1> 的焦虑成对比。所有横移与摇镜保持在 180 度轴线西侧。At 00:07.200，切 <Subject 2> 近景 MCU（止于胸部以上，穿戴已齐整）：她歪头，眼神冷得像在看一件商品，目光在他脸上慢条斯理走了一遍，像给货品估价；板鼓停、京胡不响，只余小锣一声余音。此拍持续 0.4 秒，无台词。\n\nAt 00:07.600，(S2) <d>[Chinese] 汝与曹贼何异？</d> 口型与台词精确同步：每个音节口型清楚，不维持张口笑；发声时身体安静，只允许头、肩与一只手轻微辅助；完整手势、走位与大幅动作只放在台词结束、嘴巴闭合之后的静音间隙；写作顺序固定为 台词、嘴巴闭合、静音间隙里的动作、收在非说话姿态。台词与大动作不重叠，段尾不留下未完成的发声。 这句台词前全乐队骤静，只剩一根京胡，尖锐、不协和的上行滑音，像刀刃出鞘，垫在她每个音节之下；她的声音是次男高音，清脆精确、临床式冷漠，每个音节精准放置，最后一个字下颌几乎不可察地收紧。台词 6 字，时长 1.4 秒，于 00:09.000 说完。\n\n[Shot 2] At 00:09.000，切 <Subject 1> 近景 MCU（止于胸部以上）：他愣住了，眉毛挑起，嘴唇微张，悬在半空想再抓她的手僵住、缓缓放下。字落一瞬，锣鼓不给他喘息，乱锤炸开，铙钹与大锣交错、混乱无章，像他被这六个字打乱阵脚；随后乱锤渐慢、塌成困惑，卧房环境音短暂回归，烛火噼啪、隐约更鼓。表情由震惊退为困惑，眼神渐渐眯起，他在思考。此镜持续至 00:11.000，无台词，画面停在他困惑而渐渐眯起的眼睛上。\noverall_soundscape:\n卧房环境音为地基，始终存在并主动给配乐层让出空间：烛火轻微噼啪、夜虫低鸣、窗外微风、远处更鼓梆声偶响。本段另有脚踹门板的闷响与门扇弹开撞墙的回声，床榻方向压抑的嬉笑与衣衫窸窣，急促脚步踩在鼓点上的声响，以及 <Subject 2> 赤足落地时脚踏板的轻响与衣料滑落的窸窣。她的细小动静是乱中取静的第二主角：赤足移动、衣料摩挲、指尖相触、垂眸时几乎听不见的气音。<Subject 3> 只有气声与抓被的布料声，全程不说话。人声处在声场最前端，锣鼓与弦乐全部收在台词之下、不抢字；自然对话音量，无戏剧性投射。\nnon_diegetic_music:\n一段低音量、持续的京剧打击乐与弦乐音乐床。仅在开头回放的 1.6 秒里延续，00:01.600 之前不起新音乐、不做 BGM 推进、不加任何拟音；每句台词前 1 秒压低到明显弱于人声，并在台词全程静音（用户明确要求台词下有音乐除外）；在每个镜头结束前 1.6 秒收掉，镜头最后 1.6 秒无音乐、无 BGM、无拟音。\n\n########## S02 / 11s+1.6=12.6 / 中文 ##########\nsubject_definitions:\n<Subject 1> 是 <Picture 1> 中的人（王总，S1）：外观、服装、身形与面容全程以 <Picture 1> 为唯一依据，不做任何变化。\n<Subject 2> 是 <Picture 2> 中的人（张三，S2；职业为律师；S1 在台词中直呼其名）：外观、服装、身形与面容全程以 <Picture 2> 为唯一依据，不做任何变化。\n<Subject 3> 是 <Picture 4> 中的人（成年男性，与 <Subject 2> 一同在床榻上、被 <Subject 1> 撞见）：外观以 <Picture 4> 为唯一依据；不给说话人编号，全程不说话、无台词。\n<Picture 1> 是 <Subject 1> 的外观参考图，全片逐帧一致。\n<Picture 2> 是 <Subject 2> 的外观参考图，全片逐帧一致。\n<Picture 3> 是卧房场景参考图，全片场景、陈设、色温与光向严格等同此图，不新增任何陈设。\n<Picture 4> 是 <Subject 3> 的外观参考图，全片逐帧一致。\nsummary:\n[video continuation + reference generation] 本段从上一段结尾 <Subject 1> 的愣神接续：<Subject 1> 仍冻结在被那六个字击中的震惊里，镜头随即缓慢横移绕开他，把已穿戴齐整的 <Subject 2> 送进画面中心，权力完成反转；她双手交叠如盖章，抛出成本分析，<Subject 1> 在板鼓滚奏里被一点点点着，最终以打破第四面墙的狂笑完成顿悟。本段新增 11 秒，段首回放 1.6 秒，生成时长 12.6 秒。\nretention_analysis:\n<Subject 1> (appears in [Shot 1], [Shot 4], [Shot 5]): fully_preserved - 外观、服装与身形在愣神、被点着与狂笑的全过程中与 <Picture 1> 一致，无变化。\n<Subject 2> (appears in [Shot 2], [Shot 3], [Shot 6]): fully_preserved - 外观、服装与身形在反转入画、交叠双手、说台词与侧头收口的全过程中与 <Picture 2> 一致，无变化。\n<Subject 3> (appears in [Shot 2]): fully_preserved - 外观与 <Picture 4> 一致，无变化；全程不说话、无台词。\n<Picture 1>: fully_preserved - 作为 <Subject 1> 的外观参考被完整保留。\n<Picture 2>: fully_preserved - 作为 <Subject 2> 的外观参考被完整保留。\n<Picture 3> ([Shot 1] first frame): fully_preserved - 卧房场景、烛光色温与光向被完整保留，无跳变、无新增陈设。\n<Picture 4>: fully_preserved - 作为 <Subject 3> 的外观参考被完整保留。\ndetailed_description:\n画面内任何位置都不出现文字、字幕、题字、时间码、水印或任何图形叠加层。古装戏曲喜剧质感，35mm 镜头，自然景深，暖色烛光，色温与光向严格沿用 <Picture 3>；180 度轴线始终保持在轴线西侧，门框作上下场门、床榻作戏台。取景纪律：全片禁止怼脸取景，禁止面部特写、大特写、极端特写，以及越过胸线向上单独截取面部的镜头；<Subject 2> 是唯一开放身体取景的角色，区间限定为中景 MS（膝上或腰上取景）与近景 MCU（画面下缘止于胸部以上，含肩颈与衣襟领口），并以纵向摇镜（tilt up）连接腿部至腰部至胸部；<Subject 1>、<Subject 3> 与场景一律克制取景。取景只作部位与景别规划，不描述衣饰样式、身形细节与五官。节奏对位：<Subject 1> 的世界用急急风、乱锤、四击头，急、响、乱、快；<Subject 2> 的世界用小锣、三弦、月琴，轻、准、冷、慢；镜头切到 <Subject 2> 时锣鼓立刻收小、节拍立刻放慢。\n\n[Shot 1] [单镜，时长 1.625 秒] 本段以精确回放上一段结尾 1.6 秒开场，并把该动作直接延续下去，接缝不可见。主体保持回放带入的身体姿态、头部角度、视线方向、手臂位置与面部表情并由此继续，没有任何重置或重新开始；在 1.6 秒标记点之前，不开始任何新动作、新台词或新切镜。 <Subject 1> 仍停在近景 MCU（画面下缘止于胸部以上）的愣神里：眉毛挑起、嘴唇微张、眼神由震惊转为困惑、渐渐眯起，胸部随一次浅呼吸起伏。乱锤已彻底慢下来，只剩板鼓单点，嗒、嗒，像他脑子里逐格转动的算盘；卧房环境音垫底，烛火噼啪。此镜持续至 00:01.625，无台词。\n\n[Shot 2] At 00:01.625，镜头执行缓慢横移（truck right），从 <Subject 1> 身上绕开、越过他的肩膀，把 <Subject 2> 稳稳放进画面中心，<Subject 1> 退到画框边缘虚焦；她此刻已穿戴齐整，立于床前数步外，此拍给她一个正面中景 MS（自腰上至头顶，衣装齐整、姿态挺拔），她的从容成为构图重心。在她身后床榻边缘，<Subject 3> 抱被缩坐一旁，看看 <Subject 1> 又看看 <Subject 2>，不知所措，侧影虚焦，沦为无人理会的喜剧注脚，全程不说话、无台词。音乐在此交接：京胡退场，三弦拨弦进入，民间小调式的精明旋律跟着她的从容。At 00:02.200，她看着 <Subject 1> 被戳中的样子，没有得色，只有早知如此的平淡，像猎人看见猎物踩中自己铺的夹子；她垂眸，小锣极轻一响，落在低眼的动点上。此镜持续至 00:02.600，无台词。\n\n[Shot 3] At 00:02.600，切 <Subject 2> 近景 MCU（画面下缘止于胸部以上，穿戴齐整）：她缓缓将双手交叠于身前，小锣在指尖相触时一响，像盖章；随即抬眸扫 <Subject 1> 一眼，目光把他从头到脚量了一遍，像核对客户的偿付能力，冷意让位于临床式专注。At 00:02.600，(S2) <d>[Chinese] 这叫资源优化配置！赔点钱十几万，比代孕划算多了！</d> 口型与台词精确同步：每个音节口型清楚，不维持张口笑；发声时身体安静，只允许头、肩与一只手轻微辅助；完整手势、走位与大幅动作只放在台词结束、嘴巴闭合之后的静音间隙；写作顺序固定为 台词、嘴巴闭合、静音间隙里的动作、收在非说话姿态。台词与大动作不重叠，段尾不留下未完成的发声。 她的声音保持次男高音的临床精准，配三弦与板鼓的数板小快板，伶俐节奏与台词同步跳动。台词 20 字，时长 4.8 秒，自 00:02.600 起说。台词期间镜头以她为中心做极缓慢的弧形运动（arc），她的近景 MCU 始终占据画面重心，<Subject 1> 的侧影只作画框边缘存在。At 00:06.600，划算二字出口的瞬间三弦与板鼓同时骤停，让这个词悬在空中半拍；就在这半拍里她垂下眼，指尖在交叠的手背上轻轻叩了一下，像账房拨完最后一颗算珠，随即抬眸，眼神精准抓住 <Subject 1> 的脸，她在等他消化这句话。At 00:07.400，最后一个字落定，于 00:07.400 说完，她的嘴巴闭合，猎人式的注视继续延续。\n\n[Shot 4] At 00:07.600，切 <Subject 1> 近景 MCU（止于胸部以上）：他眼睛突然睁大、瞳孔收缩、嘴角不受控制地上扬；板鼓在他眼底重新启动，滚奏嘀哩嘀哩由慢到快、不断蓄力，这是顿悟的前兆。持续至 00:09.000，无台词。\n\n[Shot 5] At 00:09.000，板鼓滚奏蓄满，镜头在 <Subject 1> 近景 MCU 上定格，他开始笑，笑意从嘴角蔓延到整张脸；就在他抬头直视镜头、打破第四面墙的瞬间，锣鼓打出四击头亮相，仓、才、仓、才、仓，他整个人像被锣声钉在画面里，定格半拍。持续至 00:10.900，无台词。\n\n[Shot 6] At 00:10.900，四击头余音里反切 <Subject 2> 收口反应（近景 MCU，止于胸部以上）：她看着 <Subject 1> 疯魔般笑起来的样子，微微侧头，像老师看见最笨的学生终于开窍，又像掌柜看见客人自己加价，满意几乎不可见，但小锣在她侧头时一响，替她把话说完。此镜持续至 00:12.600，无台词，画面停在她的侧头与那一下小锣余音上。\noverall_soundscape:\n卧房环境音继续垫底：烛火噼啪、夜虫低鸣、窗外微风、远处更鼓。权力反转处完成声场交接，京胡退场、三弦拨弦进入，民间小调式的精明旋律跟着 <Subject 2> 的从容；她的台词由三弦与板鼓的数板小快板托着，在那半拍悬空里骤停。悬空之后板鼓滚奏由慢到快不断蓄力，直至四击头把 <Subject 1> 钉在画面里，余音里只剩小锣一声收口。<Subject 3> 只有抱被的布料声与慌乱的气声，全程不说话。人声始终处在最前，锣鼓与弦乐收在台词之下、不抢字。\nnon_diegetic_music:\n一段低音量、持续的京剧打击乐与弦乐音乐床。仅在开头回放的 1.6 秒里延续，00:01.600 之前不起新音乐、不做 BGM 推进、不加任何拟音；每句台词前 1 秒压低到明显弱于人声，并在台词全程静音（用户明确要求台词下有音乐除外）；在每个镜头结束前 1.6 秒收掉，镜头最后 1.6 秒无音乐、无 BGM、无拟音。\n\n########## S03 / 11s+1.6=12.6 / 中文 ##########\nsubject_definitions:\n<Subject 1> 是 <Picture 1> 中的人（王总，S1）：外观、服装、身形与面容全程以 <Picture 1> 为唯一依据，不做任何变化。\n<Subject 2> 是 <Picture 2> 中的人（张三，S2；职业为律师；S1 在台词中直呼其名）：外观、服装、身形与面容全程以 <Picture 2> 为唯一依据，不做任何变化。\n<Subject 3> 是 <Picture 4> 中的人（成年男性，与 <Subject 2> 一同在床榻上、被 <Subject 1> 撞见）：外观以 <Picture 4> 为唯一依据；不给说话人编号，全程不说话、无台词。\n<Picture 1> 是 <Subject 1> 的外观参考图，全片逐帧一致。\n<Picture 2> 是 <Subject 2> 的外观参考图，全片逐帧一致。\n<Picture 3> 是卧房场景参考图，全片场景、陈设、色温与光向严格等同此图，不新增任何陈设。\n<Picture 4> 是 <Subject 3> 的外观参考图，全片逐帧一致。\nsummary:\n[video continuation + reference generation] 本段从上一段结尾 <Subject 2> 的侧头收口接续：<Subject 1> 在四击头余音里被京胡点燃，肩膀落下、胸膛打开，一场狂喜的顿悟式爆发，他把这笔账当着镜头算给所有人听；<Subject 2> 三次反打只垂眼核账，嘴角一次比一次明确。末尾以弧形运动把画面交给 <Subject 2>，她微微点头，像确认客户已经成交。本段新增 11 秒，段首回放 1.6 秒，生成时长 12.6 秒。\nretention_analysis:\n<Subject 1> (appears in [Shot 2], [Shot 3], [Shot 5], [Shot 7]): fully_preserved - 外观、服装与身形在缓推、狂喜与破墙看镜头的全过程中与 <Picture 1> 一致，无变化。\n<Subject 2> (appears in [Shot 1], [Shot 4], [Shot 6], [Shot 8], [Shot 9]): fully_preserved - 外观、服装与身形在三次反打与最后的正面中景里与 <Picture 2> 一致，无变化。\n<Subject 3> (appears in [Shot 9]): fully_preserved - 外观与 <Picture 4> 一致，无变化；全程不说话、无台词。\n<Picture 1>: fully_preserved - 作为 <Subject 1> 的外观参考被完整保留。\n<Picture 2>: fully_preserved - 作为 <Subject 2> 的外观参考被完整保留。\n<Picture 3> ([Shot 1] first frame): fully_preserved - 卧房场景、烛光色温与光向被完整保留，无跳变、无新增陈设。\n<Picture 4>: fully_preserved - 作为 <Subject 3> 的外观参考被完整保留。\ndetailed_description:\n画面内任何位置都不出现文字、字幕、题字、时间码、水印或任何图形叠加层。古装戏曲喜剧质感，35mm 镜头，自然景深，暖色烛光，色温与光向严格沿用 <Picture 3>；180 度轴线始终保持在轴线西侧，门框作上下场门、床榻作戏台。取景纪律：全片禁止怼脸取景，禁止面部特写、大特写、极端特写，以及越过胸线向上单独截取面部的镜头；<Subject 2> 是唯一开放身体取景的角色，区间限定为中景 MS（膝上或腰上取景）与近景 MCU（画面下缘止于胸部以上，含肩颈与衣襟领口），并以纵向摇镜（tilt up）连接腿部至腰部至胸部；<Subject 1>、<Subject 3> 与场景一律克制取景。取景只作部位与景别规划，不描述衣饰样式、身形细节与五官。节奏对位：<Subject 1> 的世界用急急风、乱锤、四击头，急、响、乱、快；<Subject 2> 的世界用小锣、三弦、月琴，轻、准、冷、慢；镜头切到 <Subject 2> 时锣鼓立刻收小、节拍立刻放慢。\n\n[Shot 1] [单镜，时长 1.625 秒] 本段以精确回放上一段结尾 1.6 秒开场，并把该动作直接延续下去，接缝不可见。主体保持回放带入的身体姿态、头部角度、视线方向、手臂位置与面部表情并由此继续，没有任何重置或重新开始；在 1.6 秒标记点之前，不开始任何新动作、新台词或新切镜。 <Subject 2> 仍停在近景 MCU（画面下缘止于胸部以上）的侧头收口里：头微微偏着，目光落在 <Subject 1> 身上，嘴角几乎不可察地收紧，小锣的余音还在散。此镜持续至 00:01.625，无台词。\n\n[Shot 2] At 00:01.625，切 <Subject 1> 近景 MCU（止于胸部以上，不越胸推近）：四击头余音未尽，京胡陡然杀入，喜气洋洋、带滑音的民间快弓旋律，正是发现天大便宜的戏曲化表达；暖调烛光自侧方来，保留自然阴影结构，光色沿用 <Picture 3>。他开始动：肩膀落下、胸膛打开，一抹缓慢觉醒的笑容爬上脸，眼睛因算计而眯起、又因狂喜而睁大。镜头执行缓慢坚定的缓推（slow push in），从中景缓推至近景 MCU，持续 1.3 秒，最紧处画面下缘止于胸部以上，全程不推入面部特写或局部特写。此镜持续至 00:03.100，无台词。\n\n[Shot 3] At 00:03.100，(S1) <d>[Chinese] 太棒了！不用娶，没彩礼，还能白得一个孩子？兄弟们，以前结婚真的是为了发昏吗？</d> 口型与台词精确同步：每个音节口型清楚，不维持张口笑；发声时身体安静，只允许头、肩与一只手轻微辅助；完整手势、走位与大幅动作只放在台词结束、嘴巴闭合之后的静音间隙；写作顺序固定为 台词、嘴巴闭合、静音间隙里的动作、收在非说话姿态。台词与大动作不重叠，段尾不留下未完成的发声。 <Subject 1> 的声音在中低音区，情绪由焦虑耳语推到狂喜顿悟。配乐与他同频：太棒了出口，大锣砸在棒字上；不用娶、没彩礼由锣鼓以小快板逐字点数，像拨算盘。台词 28 字，时长 7 秒，自 00:03.100 起说；以下三次 <Subject 2> 反打以插入镜方式出现，不打断他的台词声轨，跨镜用 <scenetrans> 保持声音连续。At 00:03.400，大锣那一击落下。\n\n[Shot 4] At 00:05.000，<scenetrans> 反打一，切 <Subject 2> 近景 MCU（止于胸部以上），他的台词声轨连续不断：她没有看 <Subject 1>，垂着眼，双手交叠于身前，指尖在听到那三个字时极轻地捻了一下，像账房先生听见客户说这单不要定金；嘴角没有弧度，但她的呼吸停了一拍。小锣一声极轻，垫在指尖捻动的瞬间。At 00:06.800 切回，无台词。\n\n[Shot 5] At 00:06.800，回到 <Subject 1> 近景 MCU，台词继续：还能白得一个孩子，京胡滑音上挑，喜不自胜。At 00:08.200 切回，无新台词起始。\n\n[Shot 6] At 00:08.200，<scenetrans> 反打二，切 <Subject 2> 近景 MCU，他的台词声轨连续不断：她终于抬起眼，视线平缓地落在 <Subject 1> 身上，眼神像在翻一本看不见的账，不用娶、没彩礼、白得一个孩子，每句都是一行进项，她逐行核过，然后目光从他脸上移开半寸，落在画框边缘某个虚空处，那里站着她下一个客户的位置。此拍无锣，三弦在远处拨一根低音，像账页翻过一页。At 00:07.600 切回，无台词。\n\n[Shot 7] At 00:10.000，回到 <Subject 1> 近景 MCU，台词进入最后一段：At 00:10.600，在兄弟们三个字处他打破第四面墙向镜头看，小锣冲观众一响，像台上角儿讨彩；随后以前结婚真的是为了发昏吗一句，声音因压抑笑声而开裂，京胡夸张上滑收尾，锣鼓半收悬住，笑容进一步扩大。At 00:10.100，最后一个字落定，于 00:10.100 说完，他的嘴巴闭合，笑意停在脸上。\n\n\n[Shot 9] At 00:11.000，镜头执行缓慢弧形运动（arc curving around），从 <Subject 1> 侧面弧线移动到 <Subject 2> 正面：她进入画面中心时给一个正面中景 MS（自腰上至头顶，衣装齐整、从容笃定），这是她穿戴齐整后的气质展示，不再有裸露，靠站姿与气度立住。音乐随弧线交接：京胡退下、三弦重新接棒，节奏放缓为从容民间小调。她听见这番话后，嘴角弧度收拢为正式的、职业性的微笑，微微点头，小锣轻点一下，像确认客户已经成交。背景深处 <Subject 3> 已默默起身，贴着墙根溜向门边，无台词，镜头焦点锁在 <Subject 2> 身上，他只是虚化的影。此镜持续至 00:12.600，无台词。\noverall_soundscape:\n卧房环境音继续垫底：烛火噼啪、夜虫低鸣、窗外微风、远处更鼓。<Subject 1> 这一段由京胡喜气洋洋的滑音快弓主奏，配小锣与板鼓的轻快变奏：大锣砸在棒字上，板鼓点数像拨算盘，京胡上挑托住那句问话，小锣在破墙处朝观众一响，京胡在最后一句夸张上滑收尾、锣鼓半收悬住。三次 <Subject 2> 反打是声音上的留白：只有指尖捻动的一声轻响、远处三弦拨的一根低音、小锣两声极轻的点。弧形运动处京胡退、三弦回，节奏放缓为从容小调。<Subject 3> 起身贴墙根溜走时只有衣料与脚步的细响，全程不说话。人声始终最前，锣鼓与弦乐收在台词之下。\nnon_diegetic_music:\n一段低音量、持续的京剧打击乐与弦乐音乐床。仅在开头回放的 1.6 秒里延续，00:01.600 之前不起新音乐、不做 BGM 推进、不加任何拟音；每句台词前 1 秒压低到明显弱于人声，并在台词全程静音（用户明确要求台词下有音乐除外）；在每个镜头结束前 1.6 秒收掉，镜头最后 1.6 秒无音乐、无 BGM、无拟音。\n\n########## S04 / 7s+1.6=8.6 / 中文 ##########\nsubject_definitions:\n<Subject 1> 是 <Picture 1> 中的人（王总，S1）：外观、服装、身形与面容全程以 <Picture 1> 为唯一依据，不做任何变化。\n<Subject 2> 是 <Picture 2> 中的人（张三，S2；职业为律师；S1 在台词中直呼其名）：外观、服装、身形与面容全程以 <Picture 2> 为唯一依据，不做任何变化。\n<Subject 3> 是 <Picture 4> 中的人（成年男性，与 <Subject 2> 一同在床榻上、被 <Subject 1> 撞见）：外观以 <Picture 4> 为唯一依据；不给说话人编号，全程不说话、无台词。\n<Picture 1> 是 <Subject 1> 的外观参考图，全片逐帧一致。\n<Picture 2> 是 <Subject 2> 的外观参考图，全片逐帧一致。\n<Picture 3> 是卧房场景参考图，全片场景、陈设、色温与光向严格等同此图，不新增任何陈设。\n<Picture 4> 是 <Subject 3> 的外观参考图，全片逐帧一致。\nsummary:\n[video continuation + reference generation] 全片最静的一段，镜头第一次完全只属于她：本段从上一段结尾的正面中景接续，三弦独奏换成月琴，画面里只剩穿戴齐整的 <Subject 2>，她与环境融为一体。她做出一个平静的手势，把视线从镜头前移开半秒再落回来，把这桩生意推销给整个市场；末尾锣鼓一件件退场，两秒留白里只剩卧房环境音与两声更鼓，微笑保持，淡出黑场。本段新增 7 秒，段首回放 1.6 秒，生成时长 8.6 秒。\nretention_analysis:\n<Subject 2> (appears in [Shot 1], [Shot 2], [Shot 3], [Shot 4]): fully_preserved - 外观、服装与身形在正面中景、弧推近景与最后定格里与 <Picture 2> 一致，无变化。\n<Subject 3> (appears in [Shot 2]): fully_preserved - 外观与 <Picture 4> 一致，无变化；全程不说话、无台词。\n<Picture 1>: fully_preserved - 作为 <Subject 1> 的外观参考被完整保留。\n<Picture 2>: fully_preserved - 作为 <Subject 2> 的外观参考被完整保留。\n<Picture 3> ([Shot 1] first frame): fully_preserved - 卧房场景、烛光色温与光向被完整保留，无跳变、无新增陈设。\n<Picture 4>: fully_preserved - 作为 <Subject 3> 的外观参考被完整保留。\ndetailed_description:\n画面内任何位置都不出现文字、字幕、题字、时间码、水印或任何图形叠加层。古装戏曲喜剧质感，35mm 镜头，自然景深，暖色烛光，色温与光向严格沿用 <Picture 3>；180 度轴线始终保持在轴线西侧，门框作上下场门、床榻作戏台。取景纪律：全片禁止怼脸取景，禁止面部特写、大特写、极端特写，以及越过胸线向上单独截取面部的镜头；<Subject 2> 是唯一开放身体取景的角色，区间限定为中景 MS（膝上或腰上取景）与近景 MCU（画面下缘止于胸部以上，含肩颈与衣襟领口），并以纵向摇镜（tilt up）连接腿部至腰部至胸部；<Subject 1>、<Subject 3> 与场景一律克制取景。取景只作部位与景别规划，不描述衣饰样式、身形细节与五官。节奏对位：<Subject 1> 的世界用急急风、乱锤、四击头，急、响、乱、快；<Subject 2> 的世界用小锣、三弦、月琴，轻、准、冷、慢；镜头切到 <Subject 2> 时锣鼓立刻收小、节拍立刻放慢。\n\n[Shot 1] [单镜，时长 1.625 秒] 本段以精确回放上一段结尾 1.6 秒开场，并把该动作直接延续下去，接缝不可见。主体保持回放带入的身体姿态、头部角度、视线方向、手臂位置与面部表情并由此继续，没有任何重置或重新开始；在 1.6 秒标记点之前，不开始任何新动作、新台词或新切镜。 弧形运动仍在收尾，<Subject 2> 停在正面中景 MS（自腰上至头顶，衣装齐整）：她的站姿不动，职业性的微笑已经成形，最后那一下微微点头刚刚完成。此镜持续至 00:01.625，无台词。\n\n[Shot 2] At 00:01.625，弧形运动彻底停下，画面里只有她：正面中景 MS（自腰上至头顶，衣装齐整），没有 <Subject 1> 的画框边缘，没有 <Subject 3> 的虚影。三弦独奏换成月琴，清亮、笃定、带一丝戏谑的民间小调，这是全片唯一一段属于她的完整独奏。她与环境融为一体，环境严格等同 <Picture 3>，她就是环境本身；35mm 较广视角捕捉这个真相，光色沿用参考图。At 00:02.000，<Subject 3> 此时已溜到门口，最后回头看一眼这荒唐场面，一闪身消失在门外，始终未得一个正脸，无台词。此镜持续至 00:03.000。\n\n[Shot 3] At 00:03.000，她抬起一只手，做出一个平静的手势，专业、安抚、洞悉一切；月琴在指尖抬起的瞬间轻点一音，京胡远在高处挂一根长音，像戏台上从容的尾声。随后她的视线从镜头前移开半秒，扫过画面外那个刚被说服的客户，再落回镜头，像落回整个市场。此镜持续至 00:03.600，无台词。\n\n[Shot 4] At 00:03.600，(S2) <d>[Chinese] 记得找我也行，我是专业的。</d> 口型与台词精确同步：每个音节口型清楚，不维持张口笑；发声时身体安静，只允许头、肩与一只手轻微辅助；完整手势、走位与大幅动作只放在台词结束、嘴巴闭合之后的静音间隙；写作顺序固定为 台词、嘴巴闭合、静音间隙里的动作、收在非说话姿态。台词与大动作不重叠，段尾不留下未完成的发声。 她的声音是次男高音，临床精准、不动声色的自信，语速稳定。台词 9 字，时长 2.25 秒，自 00:03.600 起说，于 00:05.850 说完。台词期间镜头开始缓慢弧形推进（arc push in），从正面中景推向近景 MCU（画面下缘止于胸部以上）。At 00:05.850，最后一个字落定，她的嘴巴闭合。\n\n[Shot 5] At 00:05.850，弧推完成，镜头在 <Subject 2> 近景 MCU 上定格：月琴收束，锣鼓一件件退场；她双唇闭合为职业微笑，不是上一段那种阴笑，而是更冷、更算计的东西，是把整个市场都算进账里的人才有的笑。At 00:06.600，小锣最后一声拖出长尾音，像戏唱完了、角儿还不肯卸妆。At 00:07.200，尾音散尽，乐器全部收，卧房环境音完全回归：烛火噼啪、夜虫低鸣、远处更鼓梆、梆两声，像替这场戏落了幕；微笑保持，画面缓缓淡出黑场。此镜持续至 00:08.600，无台词。\noverall_soundscape:\n卧房环境音继续垫底并逐步接管：烛火噼啪、夜虫低鸣、窗外微风。本段是 <Subject 2> 唯一一段完整独奏，月琴清亮、笃定、带一丝戏谑的民间小调，京胡在高处挂一根长音；她的台词落定后月琴收束，锣鼓一件件退场，小锣最后一声拖出长尾音。尾音散尽，乐器全部收，只剩卧房环境音回归，烛火噼啪、夜虫低鸣、远处更鼓梆、梆两声，像替这场戏落了幕。<Subject 3> 溜出门外时只有衣料与脚步的细响，随后消失，全程不说话。\nnon_diegetic_music:\n一段低音量、持续的京剧打击乐与弦乐音乐床。仅在开头回放的 1.6 秒里延续，00:01.600 之前不起新音乐、不做 BGM 推进、不加任何拟音；每句台词前 1 秒压低到明显弱于人声，并在台词全程静音（用户明确要求台词下有音乐除外）；在每个镜头结束前 1.6 秒收掉，镜头最后 1.6 秒无音乐、无 BGM、无拟音。\n\n==========================================================\n[2] 英文版 / ENGLISH VERSION\n==========================================================\n\n\n########## S01 / 11s / EN ##########\nsubject_definitions:\n<Subject 1> is the person in <Picture 1> (Wang, S1); appearance, wardrobe, build and face are taken solely from <Picture 1> for the whole film and never change.\n<Subject 2> is the person in <Picture 2> (Zhang San, S2; a lawyer; S1 addresses her by name in dialogue); appearance, wardrobe, build and face are taken solely from <Picture 2> for the whole film and never change.\n<Subject 3> is the person in <Picture 4> (an adult male, the man she was on the bed with when <Subject 1> walked in); appearance taken solely from <Picture 4>; no speaker number, never speaks, no dialogue in any segment.\n<Picture 1> is the appearance reference for <Subject 1>, held frame by frame.\n<Picture 2> is the appearance reference for <Subject 2>, held frame by frame.\n<Picture 3> is the bedroom set reference; the room, its props, its colour temperature and its light direction stay identical to this image, with nothing added.\n<Picture 4> is the appearance reference for <Subject 3>, held frame by frame.\nsummary:\n[reference generation] The opening of a single-set period bedroom night scene: <Subject 1> arrives at the door in the deep of night, kicks it open and finds <Subject 2> with <Subject 3> on the bed; he drags <Subject 2> up off the bed and demands an answer. <Subject 2> stays unhurried, puts her clothes back on piece by piece while he talks, and closes on one counter-question that stops <Subject 1> cold. This is the first segment of the film, with no preceding take to replay; generated duration is 11 seconds.\nretention_analysis:\n<Subject 1> (appears in [Shot 1], [Shot 2]): fully_preserved - appearance, wardrobe and build stay identical to <Picture 1> through kicking the door, the grab and the stunned reaction.\n<Subject 2> (appears in [Shot 1]): fully_preserved - appearance, wardrobe and build stay identical to <Picture 2> through landing barefoot, dressing and speaking.\n<Subject 3> (appears in [Shot 1]): fully_preserved - appearance stays identical to <Picture 4>; never speaks, no dialogue.\n<Picture 1>: fully_preserved - retained as the appearance reference for <Subject 1>.\n<Picture 2>: fully_preserved - retained as the appearance reference for <Subject 2>.\n<Picture 3> ([Shot 1] first frame): fully_preserved - the bedroom set, its candlelight colour and its light direction are retained, with no jump and no added props.\n<Picture 4>: fully_preserved - retained as the appearance reference for <Subject 3>.\ndetailed_description:\nNo on-screen text, subtitles, captions, timecodes, or any graphics overlays anywhere in the frame. Period-costume operatic comedy, 35mm lens, natural depth of field, warm candlelight, colour temperature and light direction carried strictly from <Picture 3>. The 180-degree axis is held on its western side throughout, the doorframe reads as the stage entrance and the bed as the stage. Framing discipline: no face-forward coverage anywhere in the film, no facial close-up, no extreme close-up, and no frame that crops above the chest to isolate the face; <Subject 2> is the only character granted body framing, limited to medium shot MS (from the knee or the waist up) and medium close-up MCU (lower frame edge resting at or above the chest, taking in shoulders, neck and collar), linked by a vertical tilt up from leg to waist to chest; <Subject 1>, <Subject 3> and the set are always framed with restraint. Framing names body zones and shot sizes only, never garment styling, body detail or facial features. Rhythmic counterpoint: <Subject 1> is scored with the fast-entry, the chaotic-hammer and the four-strike patterns, urgent, loud, chaotic and fast; <Subject 2> is scored with the small gong, the sanxian and the yueqin, light, precise, cold and slow; the moment the cut lands on <Subject 2> the percussion drops and the tempo slows.\n\n[Shot 1] [Single continuous shot with in-shot reframing, 9 seconds] At 00:00.000, the camera looks from the doorway in an extreme long shot into the depth of the bedroom; two intertwined figures are on the bed in warm candlelight, and the room matches <Picture 3> exactly. Only room tone at the top: candle flames crackling, a distant watchman's clapper, muffled laughter and the rustle of cloth from the bed. Off frame the clapper drum starts first, tick, tick, tick, slow then faster, like a heartbeat closing on the door. At 00:00.300, the camera pushes in with the drum; the frame first grazes a leg line falling over the bed edge, one of <Subject 2> legs still hanging outside the quilt, framed medium shot MS from the knee up, no push to the face, candlelight tracing the line of the leg. A vertical tilt up then lifts to the bed above, where she straddles <Subject 3>, collar loose, leaning down to kiss him. At 00:00.600, the door is kicked hard, the panel slams open against the wall, the fast-entry pattern breaks out, and <Subject 1> strides in on the drumbeat straight to the bed, shoulders tight, fists clenched. Both figures on the bed freeze and turn. <Subject 1> seizes <Subject 2> by the arm and hauls her bodily off the bed; she lands barefoot, still holding the garment she had just taken off, her collar open. <Subject 3> bolts upright, snatches the quilt up to cover himself and shrinks into the shadow at the bed corner, only a silhouette. At 00:01.000, the instant her bare feet settle, the large gong strikes once and the pose holds for half a beat: <Subject 1> gripping her arm, <Subject 2> standing barefoot on the footstool, cloth half undone. This freeze is a medium shot MS from the knee up, leg line, bare feet and open collar all in frame, no push in, no face crop, disarray and composure visible at once. At 00:01.000-00:01.200, reverse to <Subject 2> in medium close-up MCU, lower frame edge resting at the chest: steady on her feet, she does not look at <Subject 1> but down at the wrist he is holding, then lifts her eyes along his arm to his face. No struggle, no cry, only a cold appraisal, as if assessing a case that has walked in the door. Under her look his hand loosens, uncomfortable.\n\nAt 00:01.200, (S1) <d>[Chinese] 张三，我就问问……总惦记别人老婆，法律上得啥责？</d> Lip sync is exact to the line: every syllable is clearly shaped, with no held open-mouth smile. While a line sounds, the body stays quiet; only the head, the shoulders or one hand may assist slightly. Full gestures, crossing the room and any large movement belong only in the silent gap after the line has ended and the mouth has closed. Write in the fixed order: the line, the mouth closing, the movement during silence, settling on a non-speaking pose. A spoken line never overlaps a large movement, and no segment ends on unfinished phonation. <Subject 1> speaks in the low-mid register, anxious timbre with a breathy edge, faster than normal speech, starting urgently into the gong's decay; his voice cracks on the repeated word. He tries to seize her arm again, she slips free with one small movement, he grabs at empty air and his hand hangs there while he asks after her retreating back. The line is 18 characters, 4.5 seconds, beginning at 00:01.200. Through the line the percussion drops to sparse clapper-drum ticks underneath, and <Subject 2>, with her back to him, puts the clothes she just removed back on one piece at a time; he asks and she dresses, neither looking at the other. The camera cuts slowly between them, <Subject 1> in medium close-up MCU pressing the question and <Subject 2> in side-on medium shot MS from mid-thigh up as she lifts a leg to arrange the garment and bends to smooth it; for every inch the cloth closes the camera gives an inch back, always polite. At 00:03.500, insert <Subject 2> side-on in medium close-up MCU, lower edge at the chest: her hands stop for an instant at the five characters she hears, not offended, but like a bookkeeper hearing new business walk in; a fingertip pinches once at the cloth and she carries on as if nothing happened, a glint of calculation crossing her eyes. The clapper drum drops a beat here, the small gong sounds once, very soft, and the pulse resumes. Through all of it <Subject 3> never speaks, no dialogue.\n\nAt 00:05.700, the line ends, ending at 00:05.700, and the vertical tilt-up display sequence begins, deliberately slow: from her bare feet the camera tilts up along calf and outer leg while she bends to pick the last garment from the floor and straightens to tie it; it lingers a moment at the waist as the cloth closes, climbs on to the collar, which she lowers her chin to straighten, half covered then covered; it settles on <Subject 2> in medium close-up MCU, lower edge at the chest, as she finishes the collar and raises her eyes, finally looking straight at <Subject 1>. Three soft taps of the small gong score the whole tilt, cold and restrained; her disarray gathers itself into order on camera, and her stillness plays against his agitation. Every pan and tilt stays on the western side of the 180-degree axis. At 00:07.200, cut to <Subject 2> in medium close-up MCU, lower edge at the chest, now fully dressed: she cocks her head, her eyes cold as if appraising an object, and walks her gaze slowly across his face, pricing goods. The clapper drum stops, the jinghu stays silent, one small gong note rings on. The beat lasts 0.4 second, no dialogue.\n\nAt 00:07.600, (S2) <d>[Chinese] 汝与曹贼何异？</d> Lip sync is exact to the line: every syllable is clearly shaped, with no held open-mouth smile. While a line sounds, the body stays quiet; only the head, the shoulders or one hand may assist slightly. Full gestures, crossing the room and any large movement belong only in the silent gap after the line has ended and the mouth has closed. Write in the fixed order: the line, the mouth closing, the movement during silence, settling on a non-speaking pose. A spoken line never overlaps a large movement, and no segment ends on unfinished phonation. Before this line the whole band cuts to silence and one jinghu is left alone, a sharp, dissonant upward slide like a blade leaving its sheath, sitting under every syllable. Her voice is a low tenor, bright, precise, clinically detached, each syllable placed exactly; on the last character her jaw tightens almost imperceptibly. The line is 6 characters, 1.4 seconds, ending at 00:09.000.\n\n[Shot 2] At 00:09.000, cut to <Subject 1> in medium close-up MCU, lower frame edge at the chest: he freezes, brows lift, lips part slightly, and the hand hanging in the air that meant to grab her again stiffens and slowly lowers. The moment the words land the band gives him no room, the chaotic-hammer pattern explodes, cymbals and large gong crossing in disorder, as if the six characters have knocked him off his feet; then it slows and collapses into confusion, room tone returning briefly, candle crackle and a faint watchman's clapper. Shock gives way to confusion, his eyes narrow, he is thinking. The shot runs to 00:11.000, no dialogue, and the frame rests on his puzzled, slowly narrowing eyes.\noverall_soundscape:\nRoom tone is the foundation and always present, actively making space for the music layer: candle flames cracking softly, night insects, a draught at the window, an occasional distant watchman's clapper. This segment also carries the muffled thud of a boot on the door panel and the echo of the panel slamming into the wall, muffled laughter and the rustle of cloth from the bed, hurried footsteps landing on the drumbeat, and the small knock of the footstool plus the slide of cloth as <Subject 2> lands barefoot. Her small sounds are the second lead of the soundstage, the calm inside the noise: bare feet shifting, cloth brushing, fingertips touching, an almost inaudible breath as her eyes drop. <Subject 3> has only breath and the sound of the quilt grabbed up, and never speaks. The voice sits at the front of the mix, with percussion and strings held under the line and never covering a word; conversational level, no theatrical projection.\nnon_diegetic_music:\nA single low, sustained Peking-opera percussion and strings bed at low level. It continues only through the replayed 1.6-second opening; no new music cue, no BGM swell and no sound effect starts before 00:01.600. It ducks to clearly below the voice one second before every spoken line and stays silent for the entire duration of every line unless the user explicitly asks for music under dialogue. It stops 1.6 seconds before the end of each shot; the closing 1.6 seconds of every shot carry no music, no BGM and no sound effects.\n\n########## S02 / 11s+1.6=12.6 / EN ##########\nsubject_definitions:\n<Subject 1> is the person in <Picture 1> (Wang, S1); appearance, wardrobe, build and face are taken solely from <Picture 1> for the whole film and never change.\n<Subject 2> is the person in <Picture 2> (Zhang San, S2; a lawyer; S1 addresses her by name in dialogue); appearance, wardrobe, build and face are taken solely from <Picture 2> for the whole film and never change.\n<Subject 3> is the person in <Picture 4> (an adult male, the man she was on the bed with when <Subject 1> walked in); appearance taken solely from <Picture 4>; no speaker number, never speaks, no dialogue in any segment.\n<Picture 1> is the appearance reference for <Subject 1>, held frame by frame.\n<Picture 2> is the appearance reference for <Subject 2>, held frame by frame.\n<Picture 3> is the bedroom set reference; the room, its props, its colour temperature and its light direction stay identical to this image, with nothing added.\n<Picture 4> is the appearance reference for <Subject 3>, held frame by frame.\nsummary:\n[video continuation + reference generation] This segment continues from <Subject 1> frozen stare at the end of the previous take: he is still stopped cold by those six characters when the camera trucks slowly around him and places the fully dressed <Subject 2> at the centre of the frame, completing the reversal of power. She folds her hands like a seal being stamped, delivers a cost analysis, and <Subject 1> is lit bit by bit under a rolling clapper drum until he breaks into laughter that goes straight through the fourth wall. New duration 11 seconds, replayed opening 1.6 seconds, generated duration 12.6 seconds.\nretention_analysis:\n<Subject 1> (appears in [Shot 1], [Shot 4], [Shot 5]): fully_preserved - appearance, wardrobe and build stay identical to <Picture 1> through the daze, the dawning and the laughter.\n<Subject 2> (appears in [Shot 2], [Shot 3], [Shot 6]): fully_preserved - appearance, wardrobe and build stay identical to <Picture 2> through the reversal, folding her hands, the line and the closing turn of her head.\n<Subject 3> (appears in [Shot 2]): fully_preserved - appearance stays identical to <Picture 4>; never speaks, no dialogue.\n<Picture 1>: fully_preserved - retained as the appearance reference for <Subject 1>.\n<Picture 2>: fully_preserved - retained as the appearance reference for <Subject 2>.\n<Picture 3> ([Shot 1] first frame): fully_preserved - the bedroom set, its candlelight colour and its light direction are retained, with no jump and no added props.\n<Picture 4>: fully_preserved - retained as the appearance reference for <Subject 3>.\ndetailed_description:\nNo on-screen text, subtitles, captions, timecodes, or any graphics overlays anywhere in the frame. Period-costume operatic comedy, 35mm lens, natural depth of field, warm candlelight, colour temperature and light direction carried strictly from <Picture 3>. The 180-degree axis is held on its western side throughout, the doorframe reads as the stage entrance and the bed as the stage. Framing discipline: no face-forward coverage anywhere in the film, no facial close-up, no extreme close-up, and no frame that crops above the chest to isolate the face; <Subject 2> is the only character granted body framing, limited to medium shot MS (from the knee or the waist up) and medium close-up MCU (lower frame edge resting at or above the chest, taking in shoulders, neck and collar), linked by a vertical tilt up from leg to waist to chest; <Subject 1>, <Subject 3> and the set are always framed with restraint. Framing names body zones and shot sizes only, never garment styling, body detail or facial features. Rhythmic counterpoint: <Subject 1> is scored with the fast-entry, the chaotic-hammer and the four-strike patterns, urgent, loud, chaotic and fast; <Subject 2> is scored with the small gong, the sanxian and the yueqin, light, precise, cold and slow; the moment the cut lands on <Subject 2> the percussion drops and the tempo slows.\n\n[Shot 1] [Single shot, 1.625 seconds] The segment opens on an exact replay of the closing 1.6 seconds of the preceding take and carries that motion straight through, so the join is invisible. The subject holds the exact body pose, head angle, gaze direction, arm position and facial expression carried in by the replayed opening and continues out of it without any reset or restart; no new action, no new spoken word and no new cut begins before the 1.6-second mark. <Subject 1> is still held in the daze of his medium close-up MCU, lower frame edge at the chest: brows lifted, lips slightly part, shock giving way to confusion, eyes narrowing, his chest rising on one shallow breath. The chaotic-hammer pattern has fully slowed to single clapper-drum ticks, tick, tick, like an abacus turning one bead at a time inside his head; room tone underneath, candle flames cracking. The shot runs to 00:01.625, no dialogue.\n\n[Shot 2] At 00:01.625, the camera trucks slowly right, leaving <Subject 1> and crossing his shoulder to settle <Subject 2> firmly at the centre of frame while <Subject 1> falls back to the frame edge and out of focus. She is fully dressed now, standing a few paces from the bed, and the move lands on a frontal medium shot MS from the waist up, composed and upright, her ease becoming the weight of the composition. Behind her at the edge of the bed, <Subject 3> sits hugging the quilt, looking from <Subject 1> to <Subject 2> and back, at a loss, a defocused silhouette reduced to a comic footnote nobody answers; never speaks, no dialogue. The music changes hands here: the jinghu leaves and the sanxian enters, a shrewd folk-sounding tune following her composure. At 00:02.200, she watches <Subject 1> struck and shows no triumph, only the flatness of someone who knew all along, like a hunter watching game step into a trap it set for itself; her eyes drop and the small gong sounds once, very soft, on the beat of the lowering. The shot runs to 00:02.600, no dialogue.\n\n[Shot 3] At 00:02.600, cut to <Subject 2> in medium close-up MCU, lower frame edge at the chest, fully dressed: she folds both hands slowly in front of her and the small gong strikes as the fingertips meet, like a seal being stamped; then she lifts her eyes and runs her gaze over <Subject 1> once, head to foot, as if checking a client's ability to pay, coldness giving way to clinical concentration. At 00:02.600, (S2) <d>[Chinese] 这叫资源优化配置！赔点钱十几万，比代孕划算多了！</d> Lip sync is exact to the line: every syllable is clearly shaped, with no held open-mouth smile. While a line sounds, the body stays quiet; only the head, the shoulders or one hand may assist slightly. Full gestures, crossing the room and any large movement belong only in the silent gap after the line has ended and the mouth has closed. Write in the fixed order: the line, the mouth closing, the movement during silence, settling on a non-speaking pose. A spoken line never overlaps a large movement, and no segment ends on unfinished phonation. Her voice keeps its low-tenor clinical precision over the sanxian and the clapper drum playing the counting-beat pattern, the nimble rhythm jumping in step with the line. The line is 20 characters, 4.8 seconds, beginning at 00:02.600. Through the line the camera arcs very slowly around her, her medium close-up MCU holding the weight of the frame while <Subject 1> exists only as a profile at the frame edge. At 00:06.600, the instant the word for good value lands, sanxian and clapper drum stop dead together and leave the word hanging for half a beat; in that half beat her eyes drop and one fingertip taps the back of her folded hand, like a bookkeeper settling the last bead, then she lifts her gaze and catches <Subject 1> face squarely, waiting for him to digest it. At 00:07.400, the last character lands, ending at 00:07.400, her mouth closes, and the hunter's look carries on.\n\n[Shot 4] At 00:07.600, cut to <Subject 1> in medium close-up MCU, lower frame edge at the chest: his eyes widen suddenly, pupils contract, the corners of his mouth lift on their own. The clapper drum restarts behind his eyes, a roll going from slow to fast and gathering pressure, the first sign of the dawning. Runs to 00:09.000, no dialogue.\n\n[Shot 5] At 00:09.000, the roll fills and the camera holds on <Subject 1> in medium close-up MCU as he begins to laugh, the smile spreading from the corners of his mouth across his whole face. The instant he lifts his head and looks straight into the lens, breaking the fourth wall, the percussion hits the four-strike pattern, five accented strokes, and he is nailed into the frame by the sound, holding for half a beat. Runs to 00:10.900, no dialogue.\n\n[Shot 6] At 00:10.900, in the decay of the four-strike pattern, cut back to <Subject 2> closing the beat, medium close-up MCU, lower frame edge at the chest: she watches <Subject 1> laughing like a man possessed and tilts her head slightly, like a teacher watching the slowest pupil finally understand, or a shopkeeper watching a customer raise his own price. The satisfaction is almost invisible, but the small gong sounds once on the tilt of her head and says it for her. The shot runs to 00:12.600, no dialogue, and the frame rests on the turn of her head and that one small gong decaying.\noverall_soundscape:\nRoom tone keeps its floor: candle flames cracking, night insects, a draught at the window, a distant watchman's clapper. At the reversal the soundstage changes hands, the jinghu leaving and the sanxian entering with a shrewd folk-sounding tune that follows <Subject 2> composure; her line is carried by the sanxian and the clapper drum in the counting-beat pattern, stopping dead on that half beat of air. After the air, the clapper drum roll gathers from slow to fast until the four-strike pattern nails <Subject 1> into the frame, leaving one small gong note in the decay to close it. <Subject 3> has only the sound of the quilt and a flustered breath, and never speaks. The voice stays at the front with percussion and strings held under the line.\nnon_diegetic_music:\nA single low, sustained Peking-opera percussion and strings bed at low level. It continues only through the replayed 1.6-second opening; no new music cue, no BGM swell and no sound effect starts before 00:01.600. It ducks to clearly below the voice one second before every spoken line and stays silent for the entire duration of every line unless the user explicitly asks for music under dialogue. It stops 1.6 seconds before the end of each shot; the closing 1.6 seconds of every shot carry no music, no BGM and no sound effects.\n\n########## S03 / 11s+1.6=12.6 / EN ##########\nsubject_definitions:\n<Subject 1> is the person in <Picture 1> (Wang, S1); appearance, wardrobe, build and face are taken solely from <Picture 1> for the whole film and never change.\n<Subject 2> is the person in <Picture 2> (Zhang San, S2; a lawyer; S1 addresses her by name in dialogue); appearance, wardrobe, build and face are taken solely from <Picture 2> for the whole film and never change.\n<Subject 3> is the person in <Picture 4> (an adult male, the man she was on the bed with when <Subject 1> walked in); appearance taken solely from <Picture 4>; no speaker number, never speaks, no dialogue in any segment.\n<Picture 1> is the appearance reference for <Subject 1>, held frame by frame.\n<Picture 2> is the appearance reference for <Subject 2>, held frame by frame.\n<Picture 3> is the bedroom set reference; the room, its props, its colour temperature and its light direction stay identical to this image, with nothing added.\n<Picture 4> is the appearance reference for <Subject 3>, held frame by frame.\nsummary:\n[video continuation + reference generation] This segment continues from <Subject 2> closing turn of the head at the end of the previous take: in the decay of the four-strike pattern <Subject 1> is lit by the jinghu, his shoulders drop, his chest opens, and a euphoric dawning breaks out as he works the sum out loud to the lens for everyone. <Subject 2> answers in three cutaways, eyes down, running the accounts, her mouth curving a little more each time. An arc move hands the frame back to <Subject 2> at the end, and she nods once, as if confirming a client has signed. New duration 11 seconds, replayed opening 1.6 seconds, generated duration 12.6 seconds.\nretention_analysis:\n<Subject 1> (appears in [Shot 2], [Shot 3], [Shot 5], [Shot 7]): fully_preserved - appearance, wardrobe and build stay identical to <Picture 1> through the push in, the euphoria and the look into the lens.\n<Subject 2> (appears in [Shot 1], [Shot 4], [Shot 6], [Shot 8], [Shot 9]): fully_preserved - appearance, wardrobe and build stay identical to <Picture 2> through the three cutaways and the closing frontal medium shot.\n<Subject 3> (appears in [Shot 9]): fully_preserved - appearance stays identical to <Picture 4>; never speaks, no dialogue.\n<Picture 1>: fully_preserved - retained as the appearance reference for <Subject 1>.\n<Picture 2>: fully_preserved - retained as the appearance reference for <Subject 2>.\n<Picture 3> ([Shot 1] first frame): fully_preserved - the bedroom set, its candlelight colour and its light direction are retained, with no jump and no added props.\n<Picture 4>: fully_preserved - retained as the appearance reference for <Subject 3>.\ndetailed_description:\nNo on-screen text, subtitles, captions, timecodes, or any graphics overlays anywhere in the frame. Period-costume operatic comedy, 35mm lens, natural depth of field, warm candlelight, colour temperature and light direction carried strictly from <Picture 3>. The 180-degree axis is held on its western side throughout, the doorframe reads as the stage entrance and the bed as the stage. Framing discipline: no face-forward coverage anywhere in the film, no facial close-up, no extreme close-up, and no frame that crops above the chest to isolate the face; <Subject 2> is the only character granted body framing, limited to medium shot MS (from the knee or the waist up) and medium close-up MCU (lower frame edge resting at or above the chest, taking in shoulders, neck and collar), linked by a vertical tilt up from leg to waist to chest; <Subject 1>, <Subject 3> and the set are always framed with restraint. Framing names body zones and shot sizes only, never garment styling, body detail or facial features. Rhythmic counterpoint: <Subject 1> is scored with the fast-entry, the chaotic-hammer and the four-strike patterns, urgent, loud, chaotic and fast; <Subject 2> is scored with the small gong, the sanxian and the yueqin, light, precise, cold and slow; the moment the cut lands on <Subject 2> the percussion drops and the tempo slows.\n\n[Shot 1] [Single shot, 1.625 seconds] The segment opens on an exact replay of the closing 1.6 seconds of the preceding take and carries that motion straight through, so the join is invisible. The subject holds the exact body pose, head angle, gaze direction, arm position and facial expression carried in by the replayed opening and continues out of it without any reset or restart; no new action, no new spoken word and no new cut begins before the 1.6-second mark. <Subject 2> is still held in the closing turn of her head, medium close-up MCU, lower frame edge at the chest: head tilted a little, her gaze resting on <Subject 1>, the corners of her mouth tightening almost imperceptibly, the small gong still decaying. The shot runs to 00:01.625, no dialogue.\n\n[Shot 2] At 00:01.625, cut to <Subject 1> in medium close-up MCU, lower frame edge at the chest, with no push above the chest: the four-strike pattern has not finished decaying when the jinghu cuts in hard, a bright folk tune with portamento, the operatic sound of a man discovering the bargain of a lifetime. Warm candlelight comes from the side, natural shadow structure kept, colour carried from <Picture 3>. He starts to move: shoulders drop, chest opens, a slow waking smile climbs his face, eyes narrowing with calculation and widening with delight. The camera makes one slow, firm push in from medium shot to medium close-up MCU over 1.3 seconds, its tightest framing resting at or above the chest, never pushing into a facial close-up or a detail close-up. The shot runs to 00:03.100, no dialogue.\n\n[Shot 3] At 00:03.100, (S1) <d>[Chinese] 太棒了！不用娶，没彩礼，还能白得一个孩子？兄弟们，以前结婚真的是为了发昏吗？</d> Lip sync is exact to the line: every syllable is clearly shaped, with no held open-mouth smile. While a line sounds, the body stays quiet; only the head, the shoulders or one hand may assist slightly. Full gestures, crossing the room and any large movement belong only in the silent gap after the line has ended and the mouth has closed. Write in the fixed order: the line, the mouth closing, the movement during silence, settling on a non-speaking pose. A spoken line never overlaps a large movement, and no segment ends on unfinished phonation. <Subject 1> stays in the low-mid register, carried from an anxious murmur to euphoric dawning. The score moves with him: on the first two words the large gong lands on the second character; the following phrases are counted out character by character on the small fast pattern, like beads on an abacus. The line is 28 characters, 7 seconds, beginning at 00:03.100. The three cutaways to <Subject 2> below are inserted without interrupting his vocal track, the sound carried across each cut with <scenetrans>. At 00:03.400, that gong stroke lands.\n\n[Shot 4] At 00:05.000, <scenetrans> first cutaway: cut to <Subject 2> in medium close-up MCU, lower edge at the chest, his vocal track running continuously. She is not looking at <Subject 1>; her eyes are down, hands folded in front of her, and one fingertip pinches almost imperceptibly at three characters she hears, like a bookkeeper told this one needs no deposit. Her mouth keeps no curve, but her breath stops for a beat. One very soft small gong note sits under the pinch. Cut back at 00:06.800, no dialogue.\n\n[Shot 5] At 00:06.800, back to <Subject 1> in medium close-up MCU as the line continues: the next phrase rides an upward jinghu slide, delighted. Cut away at 00:08.200 with no new line starting.\n\n[Shot 6] At 00:08.200, <scenetrans> second cutaway: cut to <Subject 2> in medium close-up MCU, his vocal track running continuously. She finally lifts her eyes and rests them level on <Subject 1>, reading as if through an invisible ledger; no wedding, no bride price, a child thrown in, each phrase a line of income she checks off, and then her gaze slides half an inch off his face to an empty spot at the frame edge, the place where her next client will stand. No gong here; the sanxian plucks one low note in the distance, like a ledger page turning. Cut back at 00:10.000, no dialogue.\n\n[Shot 7] At 00:10.000, back to <Subject 1> in medium close-up MCU for the last stretch of the line. At 00:10.050, on the word for brothers, he breaks the fourth wall and looks into the lens, and the small gong cracks once toward the audience, an actor soliciting applause. Then the final question comes out with his voice cracking under suppressed laughter, the jinghu sliding up extravagantly to close, the percussion half-stopped and left hanging, his smile widening further. At 00:10.100, the last character lands, ending at 00:10.100, his mouth closes, and the smile stays on his face.\n\n\n[Shot 9] At 00:11.000, the camera makes a slow arc curving around from <Subject 1> side to face <Subject 2>; as she enters the centre of frame it settles on a frontal medium shot MS from the waist up, fully dressed, composed and certain. This is the presentation of her bearing once she is dressed again, no exposure, carried entirely by posture and presence. The music hands over along the arc: the jinghu drops out, the sanxian takes it again, the tempo slowing to an unhurried folk tune. Having heard all of it, she gathers the curve of her mouth into a formal, professional smile and nods slightly, one soft small gong tap, as if confirming a client has signed. Deep in the background <Subject 3> has quietly got to his feet and is edging along the wall toward the door; no dialogue, the focus stays locked on <Subject 2> and he is only a blurred shape. The shot runs to 00:12.600, no dialogue.\noverall_soundscape:\nRoom tone keeps its floor: candle flames cracking, night insects, a draught at the window, a distant watchman's clapper. This stretch belongs to <Subject 1>, led by the jinghu in a bright sliding fast bow with light variations on the small gong and clapper drum: the large gong landing on one character, the drum counting out phrases like an abacus, the jinghu sliding up under a question, the small gong cracking once toward the audience at the fourth wall, and the jinghu closing on an extravagant upward slide with the percussion half-stopped and hanging. The three cutaways to <Subject 2> are silence by comparison: one faint sound of a fingertip, one low sanxian note in the distance, two very soft small gong taps. Along the arc the jinghu leaves and the sanxian returns, the tempo slowing to an unhurried folk tune. <Subject 3> makes only cloth and footstep sounds as he edges along the wall, and never speaks. The voice stays at the front with percussion and strings held under the line.\nnon_diegetic_music:\nA single low, sustained Peking-opera percussion and strings bed at low level. It continues only through the replayed 1.6-second opening; no new music cue, no BGM swell and no sound effect starts before 00:01.600. It ducks to clearly below the voice one second before every spoken line and stays silent for the entire duration of every line unless the user explicitly asks for music under dialogue. It stops 1.6 seconds before the end of each shot; the closing 1.6 seconds of every shot carry no music, no BGM and no sound effects.\n\n########## S04 / 7s+1.6=8.6 / EN ##########\nsubject_definitions:\n<Subject 1> is the person in <Picture 1> (Wang, S1); appearance, wardrobe, build and face are taken solely from <Picture 1> for the whole film and never change.\n<Subject 2> is the person in <Picture 2> (Zhang San, S2; a lawyer; S1 addresses her by name in dialogue); appearance, wardrobe, build and face are taken solely from <Picture 2> for the whole film and never change.\n<Subject 3> is the person in <Picture 4> (an adult male, the man she was on the bed with when <Subject 1> walked in); appearance taken solely from <Picture 4>; no speaker number, never speaks, no dialogue in any segment.\n<Picture 1> is the appearance reference for <Subject 1>, held frame by frame.\n<Picture 2> is the appearance reference for <Subject 2>, held frame by frame.\n<Picture 3> is the bedroom set reference; the room, its props, its colour temperature and its light direction stay identical to this image, with nothing added.\n<Picture 4> is the appearance reference for <Subject 3>, held frame by frame.\nsummary:\n[video continuation + reference generation] The quietest stretch of the film, and the first time the frame belongs entirely to her: this segment continues from the frontal medium shot that closed the previous take, the sanxian solo giving way to the yueqin, with nothing in frame but the fully dressed <Subject 2>, at one with the room. She makes one calm gesture, lets her gaze leave the lens for half a second and brings it back, selling the service to the whole market; at the end the instruments leave one by one and two seconds of air hold nothing but room tone and two strokes of the watchman's clapper, the smile still on her face, fading to black. New duration 7 seconds, replayed opening 1.6 seconds, generated duration 8.6 seconds.\nretention_analysis:\n<Subject 2> (appears in [Shot 1], [Shot 2], [Shot 3], [Shot 4]): fully_preserved - appearance, wardrobe and build stay identical to <Picture 2> through the frontal medium shot, the arcing push in and the final hold.\n<Subject 3> (appears in [Shot 2]): fully_preserved - appearance stays identical to <Picture 4>; never speaks, no dialogue.\n<Picture 1>: fully_preserved - retained as the appearance reference for <Subject 1>.\n<Picture 2>: fully_preserved - retained as the appearance reference for <Subject 2>.\n<Picture 3> ([Shot 1] first frame): fully_preserved - the bedroom set, its candlelight colour and its light direction are retained, with no jump and no added props.\n<Picture 4>: fully_preserved - retained as the appearance reference for <Subject 3>.\ndetailed_description:\nNo on-screen text, subtitles, captions, timecodes, or any graphics overlays anywhere in the frame. Period-costume operatic comedy, 35mm lens, natural depth of field, warm candlelight, colour temperature and light direction carried strictly from <Picture 3>. The 180-degree axis is held on its western side throughout, the doorframe reads as the stage entrance and the bed as the stage. Framing discipline: no face-forward coverage anywhere in the film, no facial close-up, no extreme close-up, and no frame that crops above the chest to isolate the face; <Subject 2> is the only character granted body framing, limited to medium shot MS (from the knee or the waist up) and medium close-up MCU (lower frame edge resting at or above the chest, taking in shoulders, neck and collar), linked by a vertical tilt up from leg to waist to chest; <Subject 1>, <Subject 3> and the set are always framed with restraint. Framing names body zones and shot sizes only, never garment styling, body detail or facial features. Rhythmic counterpoint: <Subject 1> is scored with the fast-entry, the chaotic-hammer and the four-strike patterns, urgent, loud, chaotic and fast; <Subject 2> is scored with the small gong, the sanxian and the yueqin, light, precise, cold and slow; the moment the cut lands on <Subject 2> the percussion drops and the tempo slows.\n\n[Shot 1] [Single shot, 1.625 seconds] The segment opens on an exact replay of the closing 1.6 seconds of the preceding take and carries that motion straight through, so the join is invisible. The subject holds the exact body pose, head angle, gaze direction, arm position and facial expression carried in by the replayed opening and continues out of it without any reset or restart; no new action, no new spoken word and no new cut begins before the 1.6-second mark. The arc is still settling and <Subject 2> rests in a frontal medium shot MS from the waist up, fully dressed: her stance does not move, the professional smile has already formed, and the small nod has just finished. The shot runs to 00:01.625, no dialogue.\n\n[Shot 2] At 00:01.625, the arc stops completely and she is alone in frame: frontal medium shot MS from the waist up, fully dressed, with no <Subject 1> at the frame edge and no blurred <Subject 3>. The sanxian solo gives way to the yueqin, bright, certain, with a trace of mockery, a folk tune that is the only full solo that belongs to her in the whole film. She is at one with the room; the room stays exactly equal to <Picture 3>, she is the room, and a slightly wide 35mm view catches that fact, colour carried from the reference. At 00:02.000, <Subject 3> has reached the doorway, looks back once at the whole absurd scene and slips out of the door, never given a frontal look at any point, no dialogue. The shot runs to 00:03.000.\n\n[Shot 3] At 00:03.000, she raises one hand in a calm gesture, professional, reassuring, knowing everything; the yueqin taps a single note as the fingertips lift and the jinghu hangs one long note high above, the unhurried coda of an opera stage. Her gaze then leaves the lens for half a second, sweeping across the client just persuaded somewhere off frame, and comes back to the lens as if coming back to the whole market. The shot runs to 00:03.600, no dialogue.\n\n[Shot 4] At 00:03.600, (S2) <d>[Chinese] 记得找我也行，我是专业的。</d> Lip sync is exact to the line: every syllable is clearly shaped, with no held open-mouth smile. While a line sounds, the body stays quiet; only the head, the shoulders or one hand may assist slightly. Full gestures, crossing the room and any large movement belong only in the silent gap after the line has ended and the mouth has closed. Write in the fixed order: the line, the mouth closing, the movement during silence, settling on a non-speaking pose. A spoken line never overlaps a large movement, and no segment ends on unfinished phonation. Her voice is a low tenor, clinically precise, quietly confident, the tempo steady. The line is 9 characters, 2.25 seconds, beginning at 00:03.600 and ending at 00:05.850. Through the line the camera begins a slow arcing push in, moving from the frontal medium shot to a medium close-up MCU with the lower frame edge resting at or above the chest. At 00:05.850, the last character lands and her mouth closes.\n\n[Shot 5] At 00:05.850, the arcing push completes and the camera holds on <Subject 2> in medium close-up MCU: the yueqin closes, the instruments leave one by one. Her lips settle into a professional smile, not the sly smile of the earlier segment but something colder and more calculating, the smile of someone who has put the entire market into the ledger. At 00:06.600, the small gong gives one last note and draws it out, like an opera finished with the lead still refusing to remove her make-up. At 00:07.200, the decay is gone, every instrument has left, and room tone returns in full: candle flames cracking, night insects, two strokes of the distant watchman's clapper, as if dropping the curtain on this scene. The smile stays and the frame fades slowly to black. The shot runs to 00:08.600, no dialogue.\noverall_soundscape:\nRoom tone keeps its floor and gradually takes the frame over: candle flames cracking, night insects, a draught at the window. This is the only full solo that belongs to <Subject 2>, the yueqin in a bright, certain folk tune with a trace of mockery, the jinghu hanging one long note above it. Once her line lands the yueqin closes and the instruments leave one by one, the small gong giving one last drawn-out note. When the decay is gone every instrument has left and room tone returns alone: candle flames, night insects, two strokes of the distant watchman's clapper, as if dropping the curtain on the scene. <Subject 3> makes only cloth and footstep sounds as he slips out of the door, then nothing; never speaks.\nnon_diegetic_music:\nA single low, sustained Peking-opera percussion and strings bed at low level. It continues only through the replayed 1.6-second opening; no new music cue, no BGM swell and no sound effect starts before 00:01.600. It ducks to clearly below the voice one second before every spoken line and stays silent for the entire duration of every line unless the user explicitly asks for music under dialogue. It stops 1.6 seconds before the end of each shot; the closing 1.6 seconds of every shot carry no music, no BGM and no sound effects.\n\n==========================================================\nEND OF PACK / 文件结束\n=========================================================="
+      ],
+      "widgets_values_named": {
+        "value": "==========================================================\nMiniMax H3 SHOT PROMPT PACK / H3 分镜提示词包\nProject / 项目         : 曹贼的性价比\nMode / 模式            : Ref2VA (full reference)\nTotal duration / 总时长 : 00:40\nSegments / 段数        : 4\nAspect / 画幅          : 16:9 / 2K / 24fps\nMusic / 配乐           : Per MUSIC block\nVersion / 版本         : v1\nDate / 日期            : 2026-09-14\n==========================================================\n\n==========================================================\n[1] 中文版 / CHINESE VERSION\n==========================================================\n\n\n########## S01 / 11s / 中文 ##########\nsubject_definitions:\n<Subject 1> 是 <Picture 1> 中的人（王总，S1）：外观、服装、身形与面容全程以 <Picture 1> 为唯一依据，不做任何变化。\n<Subject 2> 是 <Picture 2> 中的人（张三，S2；职业为律师；S1 在台词中直呼其名）：外观、服装、身形与面容全程以 <Picture 2> 为唯一依据，不做任何变化。\n<Subject 3> 是 <Picture 4> 中的人（成年男性，与 <Subject 2> 一同在床榻上、被 <Subject 1> 撞见）：外观以 <Picture 4> 为唯一依据；不给说话人编号，全程不说话、无台词。\n<Picture 1> 是 <Subject 1> 的外观参考图，全片逐帧一致。\n<Picture 2> 是 <Subject 2> 的外观参考图，全片逐帧一致。\n<Picture 3> 是卧房场景参考图，全片场景、陈设、色温与光向严格等同此图，不新增任何陈设。\n<Picture 4> 是 <Subject 3> 的外观参考图，全片逐帧一致。\nsummary:\n[reference generation] 古代卧房夜戏开场：<Subject 1> 深夜赶到门外，一脚踹开房门，撞见 <Subject 2> 正与 <Subject 3> 在床榻上亲热，一把将 <Subject 2> 从床上拽起质问；<Subject 2> 不慌不忙，一边把衣裳一件件穿回身上，末了以一句反诘收口，<Subject 1> 当场愣住。本段为全片首段，无前段可回放，生成时长 11 秒。\nretention_analysis:\n<Subject 1> (appears in [Shot 1], [Shot 2]): fully_preserved - 外观、服装与身形在踹门、拽人与愣神的全过程中与 <Picture 1> 一致，无变化。\n<Subject 2> (appears in [Shot 1]): fully_preserved - 外观、服装与身形在赤足落地、穿衣整装与说话的全过程中与 <Picture 2> 一致，无变化。\n<Subject 3> (appears in [Shot 1]): fully_preserved - 外观与 <Picture 4> 一致，无变化；全程不说话、无台词。\n<Picture 1>: fully_preserved - 作为 <Subject 1> 的外观参考被完整保留。\n<Picture 2>: fully_preserved - 作为 <Subject 2> 的外观参考被完整保留。\n<Picture 3> ([Shot 1] first frame): fully_preserved - 卧房场景、烛光色温与光向被完整保留，无跳变、无新增陈设。\n<Picture 4>: fully_preserved - 作为 <Subject 3> 的外观参考被完整保留。\ndetailed_description:\n画面内任何位置都不出现文字、字幕、题字、时间码、水印或任何图形叠加层。古装戏曲喜剧质感，35mm 镜头，自然景深，暖色烛光，色温与光向严格沿用 <Picture 3>；180 度轴线始终保持在轴线西侧，门框作上下场门、床榻作戏台。取景纪律：全片禁止怼脸取景，禁止面部特写、大特写、极端特写，以及越过胸线向上单独截取面部的镜头；<Subject 2> 是唯一开放身体取景的角色，区间限定为中景 MS（膝上或腰上取景）与近景 MCU（画面下缘止于胸部以上，含肩颈与衣襟领口），并以纵向摇镜（tilt up）连接腿部至腰部至胸部；<Subject 1>、<Subject 3> 与场景一律克制取景。取景只作部位与景别规划，不描述衣饰样式、身形细节与五官。节奏对位：<Subject 1> 的世界用急急风、乱锤、四击头，急、响、乱、快；<Subject 2> 的世界用小锣、三弦、月琴，轻、准、冷、慢；镜头切到 <Subject 2> 时锣鼓立刻收小、节拍立刻放慢。\n\n[Shot 1] [单镜内连续重新构图，时长 9 秒] At 00:00.000，镜头自门外以 ELS 望向卧房深处，暖色烛光里床榻上有两道交叠人影正宽衣亲吻，环境与 <Picture 3> 完全一致。开场只有卧房环境音：烛火噼啪、远处更鼓、床榻方向压抑的嬉笑与衣衫窸窣；板鼓在画面外先行，嗒、嗒、嗒，由缓渐快，像一颗心在门外逼近。At 00:00.300，镜头随鼓点缓推，画面先掠过床沿一道垂落的腿部线条——<Subject 2> 的一条腿搭在床沿外，未及掩起，取景为中景 MS（自膝上至头顶，不推近、不裁脸），烛光勾出腿线轮廓；随即纵向摇镜（tilt up）抬向床榻上方，她正跨坐在 <Subject 3> 身上，衣襟半敞、领口微松，俯身与他相拥亲吻。At 00:00.600，门被一脚猛踹，门扇砰然弹开撞墙，急急风骤起，<Subject 1> 踩着锣鼓步点大步冲入、直扑床前，肩膀紧绷、双手握拳；床榻上两人闻声僵住、齐齐转头。<Subject 1> 一把攥住 <Subject 2> 的手臂，将她整个人从床榻上拽起来，她赤足落地，手里还捏着刚褪下的衣裳，衣襟半敞未掩；<Subject 3> 惊坐而起，抓被挡身缩向床角阴影，只留侧影。At 00:01.000，她赤足站定的瞬间大锣一记重击，亮相顿挫半拍，画面凝住：<Subject 1> 攥臂、<Subject 2> 赤足立于脚踏边、衣料半褪；此定格为中景 MS（自膝上至头顶），她的腿部线条、赤足与未整的衣襟领口一并入画，不推近、不裁脸，凌乱与镇定同时被看见。At 00:01.000-00:01.200，反打 <Subject 2> 近景 MCU（画面下缘止于胸部以上）：她落地站稳后并不看 <Subject 1>，先低头看自己被攥住的手腕，再抬眼，视线从他的手顺到他脸上，没有挣扎、没有惊叫，只有冷静的审视，像在评估一件送上门来的案子；<Subject 1> 的手在她注视下不自在地松了松。\n\nAt 00:01.200，(S1) <d>[Chinese] 张三，我就问问……总惦记别人老婆，法律上得啥责？</d> 口型与台词精确同步：每个音节口型清楚，不维持张口笑；发声时身体安静，只允许头、肩与一只手轻微辅助；完整手势、走位与大幅动作只放在台词结束、嘴巴闭合之后的静音间隙；写作顺序固定为 台词、嘴巴闭合、静音间隙里的动作、收在非说话姿态。台词与大动作不重叠，段尾不留下未完成的发声。 <Subject 1> 以中低音区说话，焦虑音色带轻微气声，语速快于正常，在大锣余音里急切开口；问问两字处声音开裂。他想再攥住 <Subject 2> 的手臂，被她轻轻一挣脱开，他扑了个空，手悬在半空，只能追着她的背影问。台词 18 字，时长 4.5 秒，自 00:01.200 起说。台词期间锣鼓收小为稀疏板鼓点压底，<Subject 2> 背对他把刚褪下的衣裳一件件穿回身上，他问他的、她穿她的，谁也不看谁。镜头在两人间缓慢对切：<Subject 1> 近景 MCU（焦急追问）与 <Subject 2> 侧身中景 MS（自大腿上缘至头顶）交替，她抬腿理衣、俯身展平，衣料每收拢一寸镜头便退让一寸，始终礼貌。At 00:03.500，插入 <Subject 2> 侧身近景 MCU（止于胸部以上）：她穿衣的手在听到那五个字时顿住一瞬，不是被冒犯的停顿，而像账房先生听见一笔新生意，指尖在衣料上轻轻一捻，随即若无其事继续穿，眼神掠过一丝计算的微光；板鼓在此停一拍，小锣极轻一响，再续上。<Subject 3> 全程不说话、无台词。\n\nAt 00:05.700，台词落定，于 00:05.700 说完，进入纵向摇镜展示序列（tilt up，节奏刻意放慢）：镜头从她赤足起，沿小腿与腿侧线条缓缓上摇，她正弯腰把最后一件衣裳从脚边拾起、直身系好；摇镜经过腰际时稍作停留，继续上行至衣襟领口，她低头将衣襟掩齐，领口随动作将掩未掩；最终停在 <Subject 2> 近景 MCU（止于胸部以上），她理好衣襟后抬眸，终于正眼看向 <Subject 1>。整段摇镜配小锣轻点三下，冷而克制，她的凌乱在镜头上缓缓收拢为齐整，静止与 <Subject 1> 的焦虑成对比。所有横移与摇镜保持在 180 度轴线西侧。At 00:07.200，切 <Subject 2> 近景 MCU（止于胸部以上，穿戴已齐整）：她歪头，眼神冷得像在看一件商品，目光在他脸上慢条斯理走了一遍，像给货品估价；板鼓停、京胡不响，只余小锣一声余音。此拍持续 0.4 秒，无台词。\n\nAt 00:07.600，(S2) <d>[Chinese] 汝与曹贼何异？</d> 口型与台词精确同步：每个音节口型清楚，不维持张口笑；发声时身体安静，只允许头、肩与一只手轻微辅助；完整手势、走位与大幅动作只放在台词结束、嘴巴闭合之后的静音间隙；写作顺序固定为 台词、嘴巴闭合、静音间隙里的动作、收在非说话姿态。台词与大动作不重叠，段尾不留下未完成的发声。 这句台词前全乐队骤静，只剩一根京胡，尖锐、不协和的上行滑音，像刀刃出鞘，垫在她每个音节之下；她的声音是次男高音，清脆精确、临床式冷漠，每个音节精准放置，最后一个字下颌几乎不可察地收紧。台词 6 字，时长 1.4 秒，于 00:09.000 说完。\n\n[Shot 2] At 00:09.000，切 <Subject 1> 近景 MCU（止于胸部以上）：他愣住了，眉毛挑起，嘴唇微张，悬在半空想再抓她的手僵住、缓缓放下。字落一瞬，锣鼓不给他喘息，乱锤炸开，铙钹与大锣交错、混乱无章，像他被这六个字打乱阵脚；随后乱锤渐慢、塌成困惑，卧房环境音短暂回归，烛火噼啪、隐约更鼓。表情由震惊退为困惑，眼神渐渐眯起，他在思考。此镜持续至 00:11.000，无台词，画面停在他困惑而渐渐眯起的眼睛上。\noverall_soundscape:\n卧房环境音为地基，始终存在并主动给配乐层让出空间：烛火轻微噼啪、夜虫低鸣、窗外微风、远处更鼓梆声偶响。本段另有脚踹门板的闷响与门扇弹开撞墙的回声，床榻方向压抑的嬉笑与衣衫窸窣，急促脚步踩在鼓点上的声响，以及 <Subject 2> 赤足落地时脚踏板的轻响与衣料滑落的窸窣。她的细小动静是乱中取静的第二主角：赤足移动、衣料摩挲、指尖相触、垂眸时几乎听不见的气音。<Subject 3> 只有气声与抓被的布料声，全程不说话。人声处在声场最前端，锣鼓与弦乐全部收在台词之下、不抢字；自然对话音量，无戏剧性投射。\nnon_diegetic_music:\n一段低音量、持续的京剧打击乐与弦乐音乐床。仅在开头回放的 1.6 秒里延续，00:01.600 之前不起新音乐、不做 BGM 推进、不加任何拟音；每句台词前 1 秒压低到明显弱于人声，并在台词全程静音（用户明确要求台词下有音乐除外）；在每个镜头结束前 1.6 秒收掉，镜头最后 1.6 秒无音乐、无 BGM、无拟音。\n\n########## S02 / 11s+1.6=12.6 / 中文 ##########\nsubject_definitions:\n<Subject 1> 是 <Picture 1> 中的人（王总，S1）：外观、服装、身形与面容全程以 <Picture 1> 为唯一依据，不做任何变化。\n<Subject 2> 是 <Picture 2> 中的人（张三，S2；职业为律师；S1 在台词中直呼其名）：外观、服装、身形与面容全程以 <Picture 2> 为唯一依据，不做任何变化。\n<Subject 3> 是 <Picture 4> 中的人（成年男性，与 <Subject 2> 一同在床榻上、被 <Subject 1> 撞见）：外观以 <Picture 4> 为唯一依据；不给说话人编号，全程不说话、无台词。\n<Picture 1> 是 <Subject 1> 的外观参考图，全片逐帧一致。\n<Picture 2> 是 <Subject 2> 的外观参考图，全片逐帧一致。\n<Picture 3> 是卧房场景参考图，全片场景、陈设、色温与光向严格等同此图，不新增任何陈设。\n<Picture 4> 是 <Subject 3> 的外观参考图，全片逐帧一致。\nsummary:\n[video continuation + reference generation] 本段从上一段结尾 <Subject 1> 的愣神接续：<Subject 1> 仍冻结在被那六个字击中的震惊里，镜头随即缓慢横移绕开他，把已穿戴齐整的 <Subject 2> 送进画面中心，权力完成反转；她双手交叠如盖章，抛出成本分析，<Subject 1> 在板鼓滚奏里被一点点点着，最终以打破第四面墙的狂笑完成顿悟。本段新增 11 秒，段首回放 1.6 秒，生成时长 12.6 秒。\nretention_analysis:\n<Subject 1> (appears in [Shot 1], [Shot 4], [Shot 5]): fully_preserved - 外观、服装与身形在愣神、被点着与狂笑的全过程中与 <Picture 1> 一致，无变化。\n<Subject 2> (appears in [Shot 2], [Shot 3], [Shot 6]): fully_preserved - 外观、服装与身形在反转入画、交叠双手、说台词与侧头收口的全过程中与 <Picture 2> 一致，无变化。\n<Subject 3> (appears in [Shot 2]): fully_preserved - 外观与 <Picture 4> 一致，无变化；全程不说话、无台词。\n<Picture 1>: fully_preserved - 作为 <Subject 1> 的外观参考被完整保留。\n<Picture 2>: fully_preserved - 作为 <Subject 2> 的外观参考被完整保留。\n<Picture 3> ([Shot 1] first frame): fully_preserved - 卧房场景、烛光色温与光向被完整保留，无跳变、无新增陈设。\n<Picture 4>: fully_preserved - 作为 <Subject 3> 的外观参考被完整保留。\ndetailed_description:\n画面内任何位置都不出现文字、字幕、题字、时间码、水印或任何图形叠加层。古装戏曲喜剧质感，35mm 镜头，自然景深，暖色烛光，色温与光向严格沿用 <Picture 3>；180 度轴线始终保持在轴线西侧，门框作上下场门、床榻作戏台。取景纪律：全片禁止怼脸取景，禁止面部特写、大特写、极端特写，以及越过胸线向上单独截取面部的镜头；<Subject 2> 是唯一开放身体取景的角色，区间限定为中景 MS（膝上或腰上取景）与近景 MCU（画面下缘止于胸部以上，含肩颈与衣襟领口），并以纵向摇镜（tilt up）连接腿部至腰部至胸部；<Subject 1>、<Subject 3> 与场景一律克制取景。取景只作部位与景别规划，不描述衣饰样式、身形细节与五官。节奏对位：<Subject 1> 的世界用急急风、乱锤、四击头，急、响、乱、快；<Subject 2> 的世界用小锣、三弦、月琴，轻、准、冷、慢；镜头切到 <Subject 2> 时锣鼓立刻收小、节拍立刻放慢。\n\n[Shot 1] [单镜，时长 1.625 秒] 本段以精确回放上一段结尾 1.6 秒开场，并把该动作直接延续下去，接缝不可见。主体保持回放带入的身体姿态、头部角度、视线方向、手臂位置与面部表情并由此继续，没有任何重置或重新开始；在 1.6 秒标记点之前，不开始任何新动作、新台词或新切镜。 <Subject 1> 仍停在近景 MCU（画面下缘止于胸部以上）的愣神里：眉毛挑起、嘴唇微张、眼神由震惊转为困惑、渐渐眯起，胸部随一次浅呼吸起伏。乱锤已彻底慢下来，只剩板鼓单点，嗒、嗒，像他脑子里逐格转动的算盘；卧房环境音垫底，烛火噼啪。此镜持续至 00:01.625，无台词。\n\n[Shot 2] At 00:01.625，镜头执行缓慢横移（truck right），从 <Subject 1> 身上绕开、越过他的肩膀，把 <Subject 2> 稳稳放进画面中心，<Subject 1> 退到画框边缘虚焦；她此刻已穿戴齐整，立于床前数步外，此拍给她一个正面中景 MS（自腰上至头顶，衣装齐整、姿态挺拔），她的从容成为构图重心。在她身后床榻边缘，<Subject 3> 抱被缩坐一旁，看看 <Subject 1> 又看看 <Subject 2>，不知所措，侧影虚焦，沦为无人理会的喜剧注脚，全程不说话、无台词。音乐在此交接：京胡退场，三弦拨弦进入，民间小调式的精明旋律跟着她的从容。At 00:02.200，她看着 <Subject 1> 被戳中的样子，没有得色，只有早知如此的平淡，像猎人看见猎物踩中自己铺的夹子；她垂眸，小锣极轻一响，落在低眼的动点上。此镜持续至 00:02.600，无台词。\n\n[Shot 3] At 00:02.600，切 <Subject 2> 近景 MCU（画面下缘止于胸部以上，穿戴齐整）：她缓缓将双手交叠于身前，小锣在指尖相触时一响，像盖章；随即抬眸扫 <Subject 1> 一眼，目光把他从头到脚量了一遍，像核对客户的偿付能力，冷意让位于临床式专注。At 00:02.600，(S2) <d>[Chinese] 这叫资源优化配置！赔点钱十几万，比代孕划算多了！</d> 口型与台词精确同步：每个音节口型清楚，不维持张口笑；发声时身体安静，只允许头、肩与一只手轻微辅助；完整手势、走位与大幅动作只放在台词结束、嘴巴闭合之后的静音间隙；写作顺序固定为 台词、嘴巴闭合、静音间隙里的动作、收在非说话姿态。台词与大动作不重叠，段尾不留下未完成的发声。 她的声音保持次男高音的临床精准，配三弦与板鼓的数板小快板，伶俐节奏与台词同步跳动。台词 20 字，时长 4.8 秒，自 00:02.600 起说。台词期间镜头以她为中心做极缓慢的弧形运动（arc），她的近景 MCU 始终占据画面重心，<Subject 1> 的侧影只作画框边缘存在。At 00:06.600，划算二字出口的瞬间三弦与板鼓同时骤停，让这个词悬在空中半拍；就在这半拍里她垂下眼，指尖在交叠的手背上轻轻叩了一下，像账房拨完最后一颗算珠，随即抬眸，眼神精准抓住 <Subject 1> 的脸，她在等他消化这句话。At 00:07.400，最后一个字落定，于 00:07.400 说完，她的嘴巴闭合，猎人式的注视继续延续。\n\n[Shot 4] At 00:07.600，切 <Subject 1> 近景 MCU（止于胸部以上）：他眼睛突然睁大、瞳孔收缩、嘴角不受控制地上扬；板鼓在他眼底重新启动，滚奏嘀哩嘀哩由慢到快、不断蓄力，这是顿悟的前兆。持续至 00:09.000，无台词。\n\n[Shot 5] At 00:09.000，板鼓滚奏蓄满，镜头在 <Subject 1> 近景 MCU 上定格，他开始笑，笑意从嘴角蔓延到整张脸；就在他抬头直视镜头、打破第四面墙的瞬间，锣鼓打出四击头亮相，仓、才、仓、才、仓，他整个人像被锣声钉在画面里，定格半拍。持续至 00:10.900，无台词。\n\n[Shot 6] At 00:10.900，四击头余音里反切 <Subject 2> 收口反应（近景 MCU，止于胸部以上）：她看着 <Subject 1> 疯魔般笑起来的样子，微微侧头，像老师看见最笨的学生终于开窍，又像掌柜看见客人自己加价，满意几乎不可见，但小锣在她侧头时一响，替她把话说完。此镜持续至 00:12.600，无台词，画面停在她的侧头与那一下小锣余音上。\noverall_soundscape:\n卧房环境音继续垫底：烛火噼啪、夜虫低鸣、窗外微风、远处更鼓。权力反转处完成声场交接，京胡退场、三弦拨弦进入，民间小调式的精明旋律跟着 <Subject 2> 的从容；她的台词由三弦与板鼓的数板小快板托着，在那半拍悬空里骤停。悬空之后板鼓滚奏由慢到快不断蓄力，直至四击头把 <Subject 1> 钉在画面里，余音里只剩小锣一声收口。<Subject 3> 只有抱被的布料声与慌乱的气声，全程不说话。人声始终处在最前，锣鼓与弦乐收在台词之下、不抢字。\nnon_diegetic_music:\n一段低音量、持续的京剧打击乐与弦乐音乐床。仅在开头回放的 1.6 秒里延续，00:01.600 之前不起新音乐、不做 BGM 推进、不加任何拟音；每句台词前 1 秒压低到明显弱于人声，并在台词全程静音（用户明确要求台词下有音乐除外）；在每个镜头结束前 1.6 秒收掉，镜头最后 1.6 秒无音乐、无 BGM、无拟音。\n\n########## S03 / 11s+1.6=12.6 / 中文 ##########\nsubject_definitions:\n<Subject 1> 是 <Picture 1> 中的人（王总，S1）：外观、服装、身形与面容全程以 <Picture 1> 为唯一依据，不做任何变化。\n<Subject 2> 是 <Picture 2> 中的人（张三，S2；职业为律师；S1 在台词中直呼其名）：外观、服装、身形与面容全程以 <Picture 2> 为唯一依据，不做任何变化。\n<Subject 3> 是 <Picture 4> 中的人（成年男性，与 <Subject 2> 一同在床榻上、被 <Subject 1> 撞见）：外观以 <Picture 4> 为唯一依据；不给说话人编号，全程不说话、无台词。\n<Picture 1> 是 <Subject 1> 的外观参考图，全片逐帧一致。\n<Picture 2> 是 <Subject 2> 的外观参考图，全片逐帧一致。\n<Picture 3> 是卧房场景参考图，全片场景、陈设、色温与光向严格等同此图，不新增任何陈设。\n<Picture 4> 是 <Subject 3> 的外观参考图，全片逐帧一致。\nsummary:\n[video continuation + reference generation] 本段从上一段结尾 <Subject 2> 的侧头收口接续：<Subject 1> 在四击头余音里被京胡点燃，肩膀落下、胸膛打开，一场狂喜的顿悟式爆发，他把这笔账当着镜头算给所有人听；<Subject 2> 三次反打只垂眼核账，嘴角一次比一次明确。末尾以弧形运动把画面交给 <Subject 2>，她微微点头，像确认客户已经成交。本段新增 11 秒，段首回放 1.6 秒，生成时长 12.6 秒。\nretention_analysis:\n<Subject 1> (appears in [Shot 2], [Shot 3], [Shot 5], [Shot 7]): fully_preserved - 外观、服装与身形在缓推、狂喜与破墙看镜头的全过程中与 <Picture 1> 一致，无变化。\n<Subject 2> (appears in [Shot 1], [Shot 4], [Shot 6], [Shot 8], [Shot 9]): fully_preserved - 外观、服装与身形在三次反打与最后的正面中景里与 <Picture 2> 一致，无变化。\n<Subject 3> (appears in [Shot 9]): fully_preserved - 外观与 <Picture 4> 一致，无变化；全程不说话、无台词。\n<Picture 1>: fully_preserved - 作为 <Subject 1> 的外观参考被完整保留。\n<Picture 2>: fully_preserved - 作为 <Subject 2> 的外观参考被完整保留。\n<Picture 3> ([Shot 1] first frame): fully_preserved - 卧房场景、烛光色温与光向被完整保留，无跳变、无新增陈设。\n<Picture 4>: fully_preserved - 作为 <Subject 3> 的外观参考被完整保留。\ndetailed_description:\n画面内任何位置都不出现文字、字幕、题字、时间码、水印或任何图形叠加层。古装戏曲喜剧质感，35mm 镜头，自然景深，暖色烛光，色温与光向严格沿用 <Picture 3>；180 度轴线始终保持在轴线西侧，门框作上下场门、床榻作戏台。取景纪律：全片禁止怼脸取景，禁止面部特写、大特写、极端特写，以及越过胸线向上单独截取面部的镜头；<Subject 2> 是唯一开放身体取景的角色，区间限定为中景 MS（膝上或腰上取景）与近景 MCU（画面下缘止于胸部以上，含肩颈与衣襟领口），并以纵向摇镜（tilt up）连接腿部至腰部至胸部；<Subject 1>、<Subject 3> 与场景一律克制取景。取景只作部位与景别规划，不描述衣饰样式、身形细节与五官。节奏对位：<Subject 1> 的世界用急急风、乱锤、四击头，急、响、乱、快；<Subject 2> 的世界用小锣、三弦、月琴，轻、准、冷、慢；镜头切到 <Subject 2> 时锣鼓立刻收小、节拍立刻放慢。\n\n[Shot 1] [单镜，时长 1.625 秒] 本段以精确回放上一段结尾 1.6 秒开场，并把该动作直接延续下去，接缝不可见。主体保持回放带入的身体姿态、头部角度、视线方向、手臂位置与面部表情并由此继续，没有任何重置或重新开始；在 1.6 秒标记点之前，不开始任何新动作、新台词或新切镜。 <Subject 2> 仍停在近景 MCU（画面下缘止于胸部以上）的侧头收口里：头微微偏着，目光落在 <Subject 1> 身上，嘴角几乎不可察地收紧，小锣的余音还在散。此镜持续至 00:01.625，无台词。\n\n[Shot 2] At 00:01.625，切 <Subject 1> 近景 MCU（止于胸部以上，不越胸推近）：四击头余音未尽，京胡陡然杀入，喜气洋洋、带滑音的民间快弓旋律，正是发现天大便宜的戏曲化表达；暖调烛光自侧方来，保留自然阴影结构，光色沿用 <Picture 3>。他开始动：肩膀落下、胸膛打开，一抹缓慢觉醒的笑容爬上脸，眼睛因算计而眯起、又因狂喜而睁大。镜头执行缓慢坚定的缓推（slow push in），从中景缓推至近景 MCU，持续 1.3 秒，最紧处画面下缘止于胸部以上，全程不推入面部特写或局部特写。此镜持续至 00:03.100，无台词。\n\n[Shot 3] At 00:03.100，(S1) <d>[Chinese] 太棒了！不用娶，没彩礼，还能白得一个孩子？兄弟们，以前结婚真的是为了发昏吗？</d> 口型与台词精确同步：每个音节口型清楚，不维持张口笑；发声时身体安静，只允许头、肩与一只手轻微辅助；完整手势、走位与大幅动作只放在台词结束、嘴巴闭合之后的静音间隙；写作顺序固定为 台词、嘴巴闭合、静音间隙里的动作、收在非说话姿态。台词与大动作不重叠，段尾不留下未完成的发声。 <Subject 1> 的声音在中低音区，情绪由焦虑耳语推到狂喜顿悟。配乐与他同频：太棒了出口，大锣砸在棒字上；不用娶、没彩礼由锣鼓以小快板逐字点数，像拨算盘。台词 28 字，时长 7 秒，自 00:03.100 起说；以下三次 <Subject 2> 反打以插入镜方式出现，不打断他的台词声轨，跨镜用 <scenetrans> 保持声音连续。At 00:03.400，大锣那一击落下。\n\n[Shot 4] At 00:05.000，<scenetrans> 反打一，切 <Subject 2> 近景 MCU（止于胸部以上），他的台词声轨连续不断：她没有看 <Subject 1>，垂着眼，双手交叠于身前，指尖在听到那三个字时极轻地捻了一下，像账房先生听见客户说这单不要定金；嘴角没有弧度，但她的呼吸停了一拍。小锣一声极轻，垫在指尖捻动的瞬间。At 00:06.800 切回，无台词。\n\n[Shot 5] At 00:06.800，回到 <Subject 1> 近景 MCU，台词继续：还能白得一个孩子，京胡滑音上挑，喜不自胜。At 00:08.200 切回，无新台词起始。\n\n[Shot 6] At 00:08.200，<scenetrans> 反打二，切 <Subject 2> 近景 MCU，他的台词声轨连续不断：她终于抬起眼，视线平缓地落在 <Subject 1> 身上，眼神像在翻一本看不见的账，不用娶、没彩礼、白得一个孩子，每句都是一行进项，她逐行核过，然后目光从他脸上移开半寸，落在画框边缘某个虚空处，那里站着她下一个客户的位置。此拍无锣，三弦在远处拨一根低音，像账页翻过一页。At 00:07.600 切回，无台词。\n\n[Shot 7] At 00:10.000，回到 <Subject 1> 近景 MCU，台词进入最后一段：At 00:10.600，在兄弟们三个字处他打破第四面墙向镜头看，小锣冲观众一响，像台上角儿讨彩；随后以前结婚真的是为了发昏吗一句，声音因压抑笑声而开裂，京胡夸张上滑收尾，锣鼓半收悬住，笑容进一步扩大。At 00:10.100，最后一个字落定，于 00:10.100 说完，他的嘴巴闭合，笑意停在脸上。\n\n\n[Shot 9] At 00:11.000，镜头执行缓慢弧形运动（arc curving around），从 <Subject 1> 侧面弧线移动到 <Subject 2> 正面：她进入画面中心时给一个正面中景 MS（自腰上至头顶，衣装齐整、从容笃定），这是她穿戴齐整后的气质展示，不再有裸露，靠站姿与气度立住。音乐随弧线交接：京胡退下、三弦重新接棒，节奏放缓为从容民间小调。她听见这番话后，嘴角弧度收拢为正式的、职业性的微笑，微微点头，小锣轻点一下，像确认客户已经成交。背景深处 <Subject 3> 已默默起身，贴着墙根溜向门边，无台词，镜头焦点锁在 <Subject 2> 身上，他只是虚化的影。此镜持续至 00:12.600，无台词。\noverall_soundscape:\n卧房环境音继续垫底：烛火噼啪、夜虫低鸣、窗外微风、远处更鼓。<Subject 1> 这一段由京胡喜气洋洋的滑音快弓主奏，配小锣与板鼓的轻快变奏：大锣砸在棒字上，板鼓点数像拨算盘，京胡上挑托住那句问话，小锣在破墙处朝观众一响，京胡在最后一句夸张上滑收尾、锣鼓半收悬住。三次 <Subject 2> 反打是声音上的留白：只有指尖捻动的一声轻响、远处三弦拨的一根低音、小锣两声极轻的点。弧形运动处京胡退、三弦回，节奏放缓为从容小调。<Subject 3> 起身贴墙根溜走时只有衣料与脚步的细响，全程不说话。人声始终最前，锣鼓与弦乐收在台词之下。\nnon_diegetic_music:\n一段低音量、持续的京剧打击乐与弦乐音乐床。仅在开头回放的 1.6 秒里延续，00:01.600 之前不起新音乐、不做 BGM 推进、不加任何拟音；每句台词前 1 秒压低到明显弱于人声，并在台词全程静音（用户明确要求台词下有音乐除外）；在每个镜头结束前 1.6 秒收掉，镜头最后 1.6 秒无音乐、无 BGM、无拟音。\n\n########## S04 / 7s+1.6=8.6 / 中文 ##########\nsubject_definitions:\n<Subject 1> 是 <Picture 1> 中的人（王总，S1）：外观、服装、身形与面容全程以 <Picture 1> 为唯一依据，不做任何变化。\n<Subject 2> 是 <Picture 2> 中的人（张三，S2；职业为律师；S1 在台词中直呼其名）：外观、服装、身形与面容全程以 <Picture 2> 为唯一依据，不做任何变化。\n<Subject 3> 是 <Picture 4> 中的人（成年男性，与 <Subject 2> 一同在床榻上、被 <Subject 1> 撞见）：外观以 <Picture 4> 为唯一依据；不给说话人编号，全程不说话、无台词。\n<Picture 1> 是 <Subject 1> 的外观参考图，全片逐帧一致。\n<Picture 2> 是 <Subject 2> 的外观参考图，全片逐帧一致。\n<Picture 3> 是卧房场景参考图，全片场景、陈设、色温与光向严格等同此图，不新增任何陈设。\n<Picture 4> 是 <Subject 3> 的外观参考图，全片逐帧一致。\nsummary:\n[video continuation + reference generation] 全片最静的一段，镜头第一次完全只属于她：本段从上一段结尾的正面中景接续，三弦独奏换成月琴，画面里只剩穿戴齐整的 <Subject 2>，她与环境融为一体。她做出一个平静的手势，把视线从镜头前移开半秒再落回来，把这桩生意推销给整个市场；末尾锣鼓一件件退场，两秒留白里只剩卧房环境音与两声更鼓，微笑保持，淡出黑场。本段新增 7 秒，段首回放 1.6 秒，生成时长 8.6 秒。\nretention_analysis:\n<Subject 2> (appears in [Shot 1], [Shot 2], [Shot 3], [Shot 4]): fully_preserved - 外观、服装与身形在正面中景、弧推近景与最后定格里与 <Picture 2> 一致，无变化。\n<Subject 3> (appears in [Shot 2]): fully_preserved - 外观与 <Picture 4> 一致，无变化；全程不说话、无台词。\n<Picture 1>: fully_preserved - 作为 <Subject 1> 的外观参考被完整保留。\n<Picture 2>: fully_preserved - 作为 <Subject 2> 的外观参考被完整保留。\n<Picture 3> ([Shot 1] first frame): fully_preserved - 卧房场景、烛光色温与光向被完整保留，无跳变、无新增陈设。\n<Picture 4>: fully_preserved - 作为 <Subject 3> 的外观参考被完整保留。\ndetailed_description:\n画面内任何位置都不出现文字、字幕、题字、时间码、水印或任何图形叠加层。古装戏曲喜剧质感，35mm 镜头，自然景深，暖色烛光，色温与光向严格沿用 <Picture 3>；180 度轴线始终保持在轴线西侧，门框作上下场门、床榻作戏台。取景纪律：全片禁止怼脸取景，禁止面部特写、大特写、极端特写，以及越过胸线向上单独截取面部的镜头；<Subject 2> 是唯一开放身体取景的角色，区间限定为中景 MS（膝上或腰上取景）与近景 MCU（画面下缘止于胸部以上，含肩颈与衣襟领口），并以纵向摇镜（tilt up）连接腿部至腰部至胸部；<Subject 1>、<Subject 3> 与场景一律克制取景。取景只作部位与景别规划，不描述衣饰样式、身形细节与五官。节奏对位：<Subject 1> 的世界用急急风、乱锤、四击头，急、响、乱、快；<Subject 2> 的世界用小锣、三弦、月琴，轻、准、冷、慢；镜头切到 <Subject 2> 时锣鼓立刻收小、节拍立刻放慢。\n\n[Shot 1] [单镜，时长 1.625 秒] 本段以精确回放上一段结尾 1.6 秒开场，并把该动作直接延续下去，接缝不可见。主体保持回放带入的身体姿态、头部角度、视线方向、手臂位置与面部表情并由此继续，没有任何重置或重新开始；在 1.6 秒标记点之前，不开始任何新动作、新台词或新切镜。 弧形运动仍在收尾，<Subject 2> 停在正面中景 MS（自腰上至头顶，衣装齐整）：她的站姿不动，职业性的微笑已经成形，最后那一下微微点头刚刚完成。此镜持续至 00:01.625，无台词。\n\n[Shot 2] At 00:01.625，弧形运动彻底停下，画面里只有她：正面中景 MS（自腰上至头顶，衣装齐整），没有 <Subject 1> 的画框边缘，没有 <Subject 3> 的虚影。三弦独奏换成月琴，清亮、笃定、带一丝戏谑的民间小调，这是全片唯一一段属于她的完整独奏。她与环境融为一体，环境严格等同 <Picture 3>，她就是环境本身；35mm 较广视角捕捉这个真相，光色沿用参考图。At 00:02.000，<Subject 3> 此时已溜到门口，最后回头看一眼这荒唐场面，一闪身消失在门外，始终未得一个正脸，无台词。此镜持续至 00:03.000。\n\n[Shot 3] At 00:03.000，她抬起一只手，做出一个平静的手势，专业、安抚、洞悉一切；月琴在指尖抬起的瞬间轻点一音，京胡远在高处挂一根长音，像戏台上从容的尾声。随后她的视线从镜头前移开半秒，扫过画面外那个刚被说服的客户，再落回镜头，像落回整个市场。此镜持续至 00:03.600，无台词。\n\n[Shot 4] At 00:03.600，(S2) <d>[Chinese] 记得找我也行，我是专业的。</d> 口型与台词精确同步：每个音节口型清楚，不维持张口笑；发声时身体安静，只允许头、肩与一只手轻微辅助；完整手势、走位与大幅动作只放在台词结束、嘴巴闭合之后的静音间隙；写作顺序固定为 台词、嘴巴闭合、静音间隙里的动作、收在非说话姿态。台词与大动作不重叠，段尾不留下未完成的发声。 她的声音是次男高音，临床精准、不动声色的自信，语速稳定。台词 9 字，时长 2.25 秒，自 00:03.600 起说，于 00:05.850 说完。台词期间镜头开始缓慢弧形推进（arc push in），从正面中景推向近景 MCU（画面下缘止于胸部以上）。At 00:05.850，最后一个字落定，她的嘴巴闭合。\n\n[Shot 5] At 00:05.850，弧推完成，镜头在 <Subject 2> 近景 MCU 上定格：月琴收束，锣鼓一件件退场；她双唇闭合为职业微笑，不是上一段那种阴笑，而是更冷、更算计的东西，是把整个市场都算进账里的人才有的笑。At 00:06.600，小锣最后一声拖出长尾音，像戏唱完了、角儿还不肯卸妆。At 00:07.200，尾音散尽，乐器全部收，卧房环境音完全回归：烛火噼啪、夜虫低鸣、远处更鼓梆、梆两声，像替这场戏落了幕；微笑保持，画面缓缓淡出黑场。此镜持续至 00:08.600，无台词。\noverall_soundscape:\n卧房环境音继续垫底并逐步接管：烛火噼啪、夜虫低鸣、窗外微风。本段是 <Subject 2> 唯一一段完整独奏，月琴清亮、笃定、带一丝戏谑的民间小调，京胡在高处挂一根长音；她的台词落定后月琴收束，锣鼓一件件退场，小锣最后一声拖出长尾音。尾音散尽，乐器全部收，只剩卧房环境音回归，烛火噼啪、夜虫低鸣、远处更鼓梆、梆两声，像替这场戏落了幕。<Subject 3> 溜出门外时只有衣料与脚步的细响，随后消失，全程不说话。\nnon_diegetic_music:\n一段低音量、持续的京剧打击乐与弦乐音乐床。仅在开头回放的 1.6 秒里延续，00:01.600 之前不起新音乐、不做 BGM 推进、不加任何拟音；每句台词前 1 秒压低到明显弱于人声，并在台词全程静音（用户明确要求台词下有音乐除外）；在每个镜头结束前 1.6 秒收掉，镜头最后 1.6 秒无音乐、无 BGM、无拟音。\n\n==========================================================\n[2] 英文版 / ENGLISH VERSION\n==========================================================\n\n\n########## S01 / 11s / EN ##########\nsubject_definitions:\n<Subject 1> is the person in <Picture 1> (Wang, S1); appearance, wardrobe, build and face are taken solely from <Picture 1> for the whole film and never change.\n<Subject 2> is the person in <Picture 2> (Zhang San, S2; a lawyer; S1 addresses her by name in dialogue); appearance, wardrobe, build and face are taken solely from <Picture 2> for the whole film and never change.\n<Subject 3> is the person in <Picture 4> (an adult male, the man she was on the bed with when <Subject 1> walked in); appearance taken solely from <Picture 4>; no speaker number, never speaks, no dialogue in any segment.\n<Picture 1> is the appearance reference for <Subject 1>, held frame by frame.\n<Picture 2> is the appearance reference for <Subject 2>, held frame by frame.\n<Picture 3> is the bedroom set reference; the room, its props, its colour temperature and its light direction stay identical to this image, with nothing added.\n<Picture 4> is the appearance reference for <Subject 3>, held frame by frame.\nsummary:\n[reference generation] The opening of a single-set period bedroom night scene: <Subject 1> arrives at the door in the deep of night, kicks it open and finds <Subject 2> with <Subject 3> on the bed; he drags <Subject 2> up off the bed and demands an answer. <Subject 2> stays unhurried, puts her clothes back on piece by piece while he talks, and closes on one counter-question that stops <Subject 1> cold. This is the first segment of the film, with no preceding take to replay; generated duration is 11 seconds.\nretention_analysis:\n<Subject 1> (appears in [Shot 1], [Shot 2]): fully_preserved - appearance, wardrobe and build stay identical to <Picture 1> through kicking the door, the grab and the stunned reaction.\n<Subject 2> (appears in [Shot 1]): fully_preserved - appearance, wardrobe and build stay identical to <Picture 2> through landing barefoot, dressing and speaking.\n<Subject 3> (appears in [Shot 1]): fully_preserved - appearance stays identical to <Picture 4>; never speaks, no dialogue.\n<Picture 1>: fully_preserved - retained as the appearance reference for <Subject 1>.\n<Picture 2>: fully_preserved - retained as the appearance reference for <Subject 2>.\n<Picture 3> ([Shot 1] first frame): fully_preserved - the bedroom set, its candlelight colour and its light direction are retained, with no jump and no added props.\n<Picture 4>: fully_preserved - retained as the appearance reference for <Subject 3>.\ndetailed_description:\nNo on-screen text, subtitles, captions, timecodes, or any graphics overlays anywhere in the frame. Period-costume operatic comedy, 35mm lens, natural depth of field, warm candlelight, colour temperature and light direction carried strictly from <Picture 3>. The 180-degree axis is held on its western side throughout, the doorframe reads as the stage entrance and the bed as the stage. Framing discipline: no face-forward coverage anywhere in the film, no facial close-up, no extreme close-up, and no frame that crops above the chest to isolate the face; <Subject 2> is the only character granted body framing, limited to medium shot MS (from the knee or the waist up) and medium close-up MCU (lower frame edge resting at or above the chest, taking in shoulders, neck and collar), linked by a vertical tilt up from leg to waist to chest; <Subject 1>, <Subject 3> and the set are always framed with restraint. Framing names body zones and shot sizes only, never garment styling, body detail or facial features. Rhythmic counterpoint: <Subject 1> is scored with the fast-entry, the chaotic-hammer and the four-strike patterns, urgent, loud, chaotic and fast; <Subject 2> is scored with the small gong, the sanxian and the yueqin, light, precise, cold and slow; the moment the cut lands on <Subject 2> the percussion drops and the tempo slows.\n\n[Shot 1] [Single continuous shot with in-shot reframing, 9 seconds] At 00:00.000, the camera looks from the doorway in an extreme long shot into the depth of the bedroom; two intertwined figures are on the bed in warm candlelight, and the room matches <Picture 3> exactly. Only room tone at the top: candle flames crackling, a distant watchman's clapper, muffled laughter and the rustle of cloth from the bed. Off frame the clapper drum starts first, tick, tick, tick, slow then faster, like a heartbeat closing on the door. At 00:00.300, the camera pushes in with the drum; the frame first grazes a leg line falling over the bed edge, one of <Subject 2> legs still hanging outside the quilt, framed medium shot MS from the knee up, no push to the face, candlelight tracing the line of the leg. A vertical tilt up then lifts to the bed above, where she straddles <Subject 3>, collar loose, leaning down to kiss him. At 00:00.600, the door is kicked hard, the panel slams open against the wall, the fast-entry pattern breaks out, and <Subject 1> strides in on the drumbeat straight to the bed, shoulders tight, fists clenched. Both figures on the bed freeze and turn. <Subject 1> seizes <Subject 2> by the arm and hauls her bodily off the bed; she lands barefoot, still holding the garment she had just taken off, her collar open. <Subject 3> bolts upright, snatches the quilt up to cover himself and shrinks into the shadow at the bed corner, only a silhouette. At 00:01.000, the instant her bare feet settle, the large gong strikes once and the pose holds for half a beat: <Subject 1> gripping her arm, <Subject 2> standing barefoot on the footstool, cloth half undone. This freeze is a medium shot MS from the knee up, leg line, bare feet and open collar all in frame, no push in, no face crop, disarray and composure visible at once. At 00:01.000-00:01.200, reverse to <Subject 2> in medium close-up MCU, lower frame edge resting at the chest: steady on her feet, she does not look at <Subject 1> but down at the wrist he is holding, then lifts her eyes along his arm to his face. No struggle, no cry, only a cold appraisal, as if assessing a case that has walked in the door. Under her look his hand loosens, uncomfortable.\n\nAt 00:01.200, (S1) <d>[Chinese] 张三，我就问问……总惦记别人老婆，法律上得啥责？</d> Lip sync is exact to the line: every syllable is clearly shaped, with no held open-mouth smile. While a line sounds, the body stays quiet; only the head, the shoulders or one hand may assist slightly. Full gestures, crossing the room and any large movement belong only in the silent gap after the line has ended and the mouth has closed. Write in the fixed order: the line, the mouth closing, the movement during silence, settling on a non-speaking pose. A spoken line never overlaps a large movement, and no segment ends on unfinished phonation. <Subject 1> speaks in the low-mid register, anxious timbre with a breathy edge, faster than normal speech, starting urgently into the gong's decay; his voice cracks on the repeated word. He tries to seize her arm again, she slips free with one small movement, he grabs at empty air and his hand hangs there while he asks after her retreating back. The line is 18 characters, 4.5 seconds, beginning at 00:01.200. Through the line the percussion drops to sparse clapper-drum ticks underneath, and <Subject 2>, with her back to him, puts the clothes she just removed back on one piece at a time; he asks and she dresses, neither looking at the other. The camera cuts slowly between them, <Subject 1> in medium close-up MCU pressing the question and <Subject 2> in side-on medium shot MS from mid-thigh up as she lifts a leg to arrange the garment and bends to smooth it; for every inch the cloth closes the camera gives an inch back, always polite. At 00:03.500, insert <Subject 2> side-on in medium close-up MCU, lower edge at the chest: her hands stop for an instant at the five characters she hears, not offended, but like a bookkeeper hearing new business walk in; a fingertip pinches once at the cloth and she carries on as if nothing happened, a glint of calculation crossing her eyes. The clapper drum drops a beat here, the small gong sounds once, very soft, and the pulse resumes. Through all of it <Subject 3> never speaks, no dialogue.\n\nAt 00:05.700, the line ends, ending at 00:05.700, and the vertical tilt-up display sequence begins, deliberately slow: from her bare feet the camera tilts up along calf and outer leg while she bends to pick the last garment from the floor and straightens to tie it; it lingers a moment at the waist as the cloth closes, climbs on to the collar, which she lowers her chin to straighten, half covered then covered; it settles on <Subject 2> in medium close-up MCU, lower edge at the chest, as she finishes the collar and raises her eyes, finally looking straight at <Subject 1>. Three soft taps of the small gong score the whole tilt, cold and restrained; her disarray gathers itself into order on camera, and her stillness plays against his agitation. Every pan and tilt stays on the western side of the 180-degree axis. At 00:07.200, cut to <Subject 2> in medium close-up MCU, lower edge at the chest, now fully dressed: she cocks her head, her eyes cold as if appraising an object, and walks her gaze slowly across his face, pricing goods. The clapper drum stops, the jinghu stays silent, one small gong note rings on. The beat lasts 0.4 second, no dialogue.\n\nAt 00:07.600, (S2) <d>[Chinese] 汝与曹贼何异？</d> Lip sync is exact to the line: every syllable is clearly shaped, with no held open-mouth smile. While a line sounds, the body stays quiet; only the head, the shoulders or one hand may assist slightly. Full gestures, crossing the room and any large movement belong only in the silent gap after the line has ended and the mouth has closed. Write in the fixed order: the line, the mouth closing, the movement during silence, settling on a non-speaking pose. A spoken line never overlaps a large movement, and no segment ends on unfinished phonation. Before this line the whole band cuts to silence and one jinghu is left alone, a sharp, dissonant upward slide like a blade leaving its sheath, sitting under every syllable. Her voice is a low tenor, bright, precise, clinically detached, each syllable placed exactly; on the last character her jaw tightens almost imperceptibly. The line is 6 characters, 1.4 seconds, ending at 00:09.000.\n\n[Shot 2] At 00:09.000, cut to <Subject 1> in medium close-up MCU, lower frame edge at the chest: he freezes, brows lift, lips part slightly, and the hand hanging in the air that meant to grab her again stiffens and slowly lowers. The moment the words land the band gives him no room, the chaotic-hammer pattern explodes, cymbals and large gong crossing in disorder, as if the six characters have knocked him off his feet; then it slows and collapses into confusion, room tone returning briefly, candle crackle and a faint watchman's clapper. Shock gives way to confusion, his eyes narrow, he is thinking. The shot runs to 00:11.000, no dialogue, and the frame rests on his puzzled, slowly narrowing eyes.\noverall_soundscape:\nRoom tone is the foundation and always present, actively making space for the music layer: candle flames cracking softly, night insects, a draught at the window, an occasional distant watchman's clapper. This segment also carries the muffled thud of a boot on the door panel and the echo of the panel slamming into the wall, muffled laughter and the rustle of cloth from the bed, hurried footsteps landing on the drumbeat, and the small knock of the footstool plus the slide of cloth as <Subject 2> lands barefoot. Her small sounds are the second lead of the soundstage, the calm inside the noise: bare feet shifting, cloth brushing, fingertips touching, an almost inaudible breath as her eyes drop. <Subject 3> has only breath and the sound of the quilt grabbed up, and never speaks. The voice sits at the front of the mix, with percussion and strings held under the line and never covering a word; conversational level, no theatrical projection.\nnon_diegetic_music:\nA single low, sustained Peking-opera percussion and strings bed at low level. It continues only through the replayed 1.6-second opening; no new music cue, no BGM swell and no sound effect starts before 00:01.600. It ducks to clearly below the voice one second before every spoken line and stays silent for the entire duration of every line unless the user explicitly asks for music under dialogue. It stops 1.6 seconds before the end of each shot; the closing 1.6 seconds of every shot carry no music, no BGM and no sound effects.\n\n########## S02 / 11s+1.6=12.6 / EN ##########\nsubject_definitions:\n<Subject 1> is the person in <Picture 1> (Wang, S1); appearance, wardrobe, build and face are taken solely from <Picture 1> for the whole film and never change.\n<Subject 2> is the person in <Picture 2> (Zhang San, S2; a lawyer; S1 addresses her by name in dialogue); appearance, wardrobe, build and face are taken solely from <Picture 2> for the whole film and never change.\n<Subject 3> is the person in <Picture 4> (an adult male, the man she was on the bed with when <Subject 1> walked in); appearance taken solely from <Picture 4>; no speaker number, never speaks, no dialogue in any segment.\n<Picture 1> is the appearance reference for <Subject 1>, held frame by frame.\n<Picture 2> is the appearance reference for <Subject 2>, held frame by frame.\n<Picture 3> is the bedroom set reference; the room, its props, its colour temperature and its light direction stay identical to this image, with nothing added.\n<Picture 4> is the appearance reference for <Subject 3>, held frame by frame.\nsummary:\n[video continuation + reference generation] This segment continues from <Subject 1> frozen stare at the end of the previous take: he is still stopped cold by those six characters when the camera trucks slowly around him and places the fully dressed <Subject 2> at the centre of the frame, completing the reversal of power. She folds her hands like a seal being stamped, delivers a cost analysis, and <Subject 1> is lit bit by bit under a rolling clapper drum until he breaks into laughter that goes straight through the fourth wall. New duration 11 seconds, replayed opening 1.6 seconds, generated duration 12.6 seconds.\nretention_analysis:\n<Subject 1> (appears in [Shot 1], [Shot 4], [Shot 5]): fully_preserved - appearance, wardrobe and build stay identical to <Picture 1> through the daze, the dawning and the laughter.\n<Subject 2> (appears in [Shot 2], [Shot 3], [Shot 6]): fully_preserved - appearance, wardrobe and build stay identical to <Picture 2> through the reversal, folding her hands, the line and the closing turn of her head.\n<Subject 3> (appears in [Shot 2]): fully_preserved - appearance stays identical to <Picture 4>; never speaks, no dialogue.\n<Picture 1>: fully_preserved - retained as the appearance reference for <Subject 1>.\n<Picture 2>: fully_preserved - retained as the appearance reference for <Subject 2>.\n<Picture 3> ([Shot 1] first frame): fully_preserved - the bedroom set, its candlelight colour and its light direction are retained, with no jump and no added props.\n<Picture 4>: fully_preserved - retained as the appearance reference for <Subject 3>.\ndetailed_description:\nNo on-screen text, subtitles, captions, timecodes, or any graphics overlays anywhere in the frame. Period-costume operatic comedy, 35mm lens, natural depth of field, warm candlelight, colour temperature and light direction carried strictly from <Picture 3>. The 180-degree axis is held on its western side throughout, the doorframe reads as the stage entrance and the bed as the stage. Framing discipline: no face-forward coverage anywhere in the film, no facial close-up, no extreme close-up, and no frame that crops above the chest to isolate the face; <Subject 2> is the only character granted body framing, limited to medium shot MS (from the knee or the waist up) and medium close-up MCU (lower frame edge resting at or above the chest, taking in shoulders, neck and collar), linked by a vertical tilt up from leg to waist to chest; <Subject 1>, <Subject 3> and the set are always framed with restraint. Framing names body zones and shot sizes only, never garment styling, body detail or facial features. Rhythmic counterpoint: <Subject 1> is scored with the fast-entry, the chaotic-hammer and the four-strike patterns, urgent, loud, chaotic and fast; <Subject 2> is scored with the small gong, the sanxian and the yueqin, light, precise, cold and slow; the moment the cut lands on <Subject 2> the percussion drops and the tempo slows.\n\n[Shot 1] [Single shot, 1.625 seconds] The segment opens on an exact replay of the closing 1.6 seconds of the preceding take and carries that motion straight through, so the join is invisible. The subject holds the exact body pose, head angle, gaze direction, arm position and facial expression carried in by the replayed opening and continues out of it without any reset or restart; no new action, no new spoken word and no new cut begins before the 1.6-second mark. <Subject 1> is still held in the daze of his medium close-up MCU, lower frame edge at the chest: brows lifted, lips slightly part, shock giving way to confusion, eyes narrowing, his chest rising on one shallow breath. The chaotic-hammer pattern has fully slowed to single clapper-drum ticks, tick, tick, like an abacus turning one bead at a time inside his head; room tone underneath, candle flames cracking. The shot runs to 00:01.625, no dialogue.\n\n[Shot 2] At 00:01.625, the camera trucks slowly right, leaving <Subject 1> and crossing his shoulder to settle <Subject 2> firmly at the centre of frame while <Subject 1> falls back to the frame edge and out of focus. She is fully dressed now, standing a few paces from the bed, and the move lands on a frontal medium shot MS from the waist up, composed and upright, her ease becoming the weight of the composition. Behind her at the edge of the bed, <Subject 3> sits hugging the quilt, looking from <Subject 1> to <Subject 2> and back, at a loss, a defocused silhouette reduced to a comic footnote nobody answers; never speaks, no dialogue. The music changes hands here: the jinghu leaves and the sanxian enters, a shrewd folk-sounding tune following her composure. At 00:02.200, she watches <Subject 1> struck and shows no triumph, only the flatness of someone who knew all along, like a hunter watching game step into a trap it set for itself; her eyes drop and the small gong sounds once, very soft, on the beat of the lowering. The shot runs to 00:02.600, no dialogue.\n\n[Shot 3] At 00:02.600, cut to <Subject 2> in medium close-up MCU, lower frame edge at the chest, fully dressed: she folds both hands slowly in front of her and the small gong strikes as the fingertips meet, like a seal being stamped; then she lifts her eyes and runs her gaze over <Subject 1> once, head to foot, as if checking a client's ability to pay, coldness giving way to clinical concentration. At 00:02.600, (S2) <d>[Chinese] 这叫资源优化配置！赔点钱十几万，比代孕划算多了！</d> Lip sync is exact to the line: every syllable is clearly shaped, with no held open-mouth smile. While a line sounds, the body stays quiet; only the head, the shoulders or one hand may assist slightly. Full gestures, crossing the room and any large movement belong only in the silent gap after the line has ended and the mouth has closed. Write in the fixed order: the line, the mouth closing, the movement during silence, settling on a non-speaking pose. A spoken line never overlaps a large movement, and no segment ends on unfinished phonation. Her voice keeps its low-tenor clinical precision over the sanxian and the clapper drum playing the counting-beat pattern, the nimble rhythm jumping in step with the line. The line is 20 characters, 4.8 seconds, beginning at 00:02.600. Through the line the camera arcs very slowly around her, her medium close-up MCU holding the weight of the frame while <Subject 1> exists only as a profile at the frame edge. At 00:06.600, the instant the word for good value lands, sanxian and clapper drum stop dead together and leave the word hanging for half a beat; in that half beat her eyes drop and one fingertip taps the back of her folded hand, like a bookkeeper settling the last bead, then she lifts her gaze and catches <Subject 1> face squarely, waiting for him to digest it. At 00:07.400, the last character lands, ending at 00:07.400, her mouth closes, and the hunter's look carries on.\n\n[Shot 4] At 00:07.600, cut to <Subject 1> in medium close-up MCU, lower frame edge at the chest: his eyes widen suddenly, pupils contract, the corners of his mouth lift on their own. The clapper drum restarts behind his eyes, a roll going from slow to fast and gathering pressure, the first sign of the dawning. Runs to 00:09.000, no dialogue.\n\n[Shot 5] At 00:09.000, the roll fills and the camera holds on <Subject 1> in medium close-up MCU as he begins to laugh, the smile spreading from the corners of his mouth across his whole face. The instant he lifts his head and looks straight into the lens, breaking the fourth wall, the percussion hits the four-strike pattern, five accented strokes, and he is nailed into the frame by the sound, holding for half a beat. Runs to 00:10.900, no dialogue.\n\n[Shot 6] At 00:10.900, in the decay of the four-strike pattern, cut back to <Subject 2> closing the beat, medium close-up MCU, lower frame edge at the chest: she watches <Subject 1> laughing like a man possessed and tilts her head slightly, like a teacher watching the slowest pupil finally understand, or a shopkeeper watching a customer raise his own price. The satisfaction is almost invisible, but the small gong sounds once on the tilt of her head and says it for her. The shot runs to 00:12.600, no dialogue, and the frame rests on the turn of her head and that one small gong decaying.\noverall_soundscape:\nRoom tone keeps its floor: candle flames cracking, night insects, a draught at the window, a distant watchman's clapper. At the reversal the soundstage changes hands, the jinghu leaving and the sanxian entering with a shrewd folk-sounding tune that follows <Subject 2> composure; her line is carried by the sanxian and the clapper drum in the counting-beat pattern, stopping dead on that half beat of air. After the air, the clapper drum roll gathers from slow to fast until the four-strike pattern nails <Subject 1> into the frame, leaving one small gong note in the decay to close it. <Subject 3> has only the sound of the quilt and a flustered breath, and never speaks. The voice stays at the front with percussion and strings held under the line.\nnon_diegetic_music:\nA single low, sustained Peking-opera percussion and strings bed at low level. It continues only through the replayed 1.6-second opening; no new music cue, no BGM swell and no sound effect starts before 00:01.600. It ducks to clearly below the voice one second before every spoken line and stays silent for the entire duration of every line unless the user explicitly asks for music under dialogue. It stops 1.6 seconds before the end of each shot; the closing 1.6 seconds of every shot carry no music, no BGM and no sound effects.\n\n########## S03 / 11s+1.6=12.6 / EN ##########\nsubject_definitions:\n<Subject 1> is the person in <Picture 1> (Wang, S1); appearance, wardrobe, build and face are taken solely from <Picture 1> for the whole film and never change.\n<Subject 2> is the person in <Picture 2> (Zhang San, S2; a lawyer; S1 addresses her by name in dialogue); appearance, wardrobe, build and face are taken solely from <Picture 2> for the whole film and never change.\n<Subject 3> is the person in <Picture 4> (an adult male, the man she was on the bed with when <Subject 1> walked in); appearance taken solely from <Picture 4>; no speaker number, never speaks, no dialogue in any segment.\n<Picture 1> is the appearance reference for <Subject 1>, held frame by frame.\n<Picture 2> is the appearance reference for <Subject 2>, held frame by frame.\n<Picture 3> is the bedroom set reference; the room, its props, its colour temperature and its light direction stay identical to this image, with nothing added.\n<Picture 4> is the appearance reference for <Subject 3>, held frame by frame.\nsummary:\n[video continuation + reference generation] This segment continues from <Subject 2> closing turn of the head at the end of the previous take: in the decay of the four-strike pattern <Subject 1> is lit by the jinghu, his shoulders drop, his chest opens, and a euphoric dawning breaks out as he works the sum out loud to the lens for everyone. <Subject 2> answers in three cutaways, eyes down, running the accounts, her mouth curving a little more each time. An arc move hands the frame back to <Subject 2> at the end, and she nods once, as if confirming a client has signed. New duration 11 seconds, replayed opening 1.6 seconds, generated duration 12.6 seconds.\nretention_analysis:\n<Subject 1> (appears in [Shot 2], [Shot 3], [Shot 5], [Shot 7]): fully_preserved - appearance, wardrobe and build stay identical to <Picture 1> through the push in, the euphoria and the look into the lens.\n<Subject 2> (appears in [Shot 1], [Shot 4], [Shot 6], [Shot 8], [Shot 9]): fully_preserved - appearance, wardrobe and build stay identical to <Picture 2> through the three cutaways and the closing frontal medium shot.\n<Subject 3> (appears in [Shot 9]): fully_preserved - appearance stays identical to <Picture 4>; never speaks, no dialogue.\n<Picture 1>: fully_preserved - retained as the appearance reference for <Subject 1>.\n<Picture 2>: fully_preserved - retained as the appearance reference for <Subject 2>.\n<Picture 3> ([Shot 1] first frame): fully_preserved - the bedroom set, its candlelight colour and its light direction are retained, with no jump and no added props.\n<Picture 4>: fully_preserved - retained as the appearance reference for <Subject 3>.\ndetailed_description:\nNo on-screen text, subtitles, captions, timecodes, or any graphics overlays anywhere in the frame. Period-costume operatic comedy, 35mm lens, natural depth of field, warm candlelight, colour temperature and light direction carried strictly from <Picture 3>. The 180-degree axis is held on its western side throughout, the doorframe reads as the stage entrance and the bed as the stage. Framing discipline: no face-forward coverage anywhere in the film, no facial close-up, no extreme close-up, and no frame that crops above the chest to isolate the face; <Subject 2> is the only character granted body framing, limited to medium shot MS (from the knee or the waist up) and medium close-up MCU (lower frame edge resting at or above the chest, taking in shoulders, neck and collar), linked by a vertical tilt up from leg to waist to chest; <Subject 1>, <Subject 3> and the set are always framed with restraint. Framing names body zones and shot sizes only, never garment styling, body detail or facial features. Rhythmic counterpoint: <Subject 1> is scored with the fast-entry, the chaotic-hammer and the four-strike patterns, urgent, loud, chaotic and fast; <Subject 2> is scored with the small gong, the sanxian and the yueqin, light, precise, cold and slow; the moment the cut lands on <Subject 2> the percussion drops and the tempo slows.\n\n[Shot 1] [Single shot, 1.625 seconds] The segment opens on an exact replay of the closing 1.6 seconds of the preceding take and carries that motion straight through, so the join is invisible. The subject holds the exact body pose, head angle, gaze direction, arm position and facial expression carried in by the replayed opening and continues out of it without any reset or restart; no new action, no new spoken word and no new cut begins before the 1.6-second mark. <Subject 2> is still held in the closing turn of her head, medium close-up MCU, lower frame edge at the chest: head tilted a little, her gaze resting on <Subject 1>, the corners of her mouth tightening almost imperceptibly, the small gong still decaying. The shot runs to 00:01.625, no dialogue.\n\n[Shot 2] At 00:01.625, cut to <Subject 1> in medium close-up MCU, lower frame edge at the chest, with no push above the chest: the four-strike pattern has not finished decaying when the jinghu cuts in hard, a bright folk tune with portamento, the operatic sound of a man discovering the bargain of a lifetime. Warm candlelight comes from the side, natural shadow structure kept, colour carried from <Picture 3>. He starts to move: shoulders drop, chest opens, a slow waking smile climbs his face, eyes narrowing with calculation and widening with delight. The camera makes one slow, firm push in from medium shot to medium close-up MCU over 1.3 seconds, its tightest framing resting at or above the chest, never pushing into a facial close-up or a detail close-up. The shot runs to 00:03.100, no dialogue.\n\n[Shot 3] At 00:03.100, (S1) <d>[Chinese] 太棒了！不用娶，没彩礼，还能白得一个孩子？兄弟们，以前结婚真的是为了发昏吗？</d> Lip sync is exact to the line: every syllable is clearly shaped, with no held open-mouth smile. While a line sounds, the body stays quiet; only the head, the shoulders or one hand may assist slightly. Full gestures, crossing the room and any large movement belong only in the silent gap after the line has ended and the mouth has closed. Write in the fixed order: the line, the mouth closing, the movement during silence, settling on a non-speaking pose. A spoken line never overlaps a large movement, and no segment ends on unfinished phonation. <Subject 1> stays in the low-mid register, carried from an anxious murmur to euphoric dawning. The score moves with him: on the first two words the large gong lands on the second character; the following phrases are counted out character by character on the small fast pattern, like beads on an abacus. The line is 28 characters, 7 seconds, beginning at 00:03.100. The three cutaways to <Subject 2> below are inserted without interrupting his vocal track, the sound carried across each cut with <scenetrans>. At 00:03.400, that gong stroke lands.\n\n[Shot 4] At 00:05.000, <scenetrans> first cutaway: cut to <Subject 2> in medium close-up MCU, lower edge at the chest, his vocal track running continuously. She is not looking at <Subject 1>; her eyes are down, hands folded in front of her, and one fingertip pinches almost imperceptibly at three characters she hears, like a bookkeeper told this one needs no deposit. Her mouth keeps no curve, but her breath stops for a beat. One very soft small gong note sits under the pinch. Cut back at 00:06.800, no dialogue.\n\n[Shot 5] At 00:06.800, back to <Subject 1> in medium close-up MCU as the line continues: the next phrase rides an upward jinghu slide, delighted. Cut away at 00:08.200 with no new line starting.\n\n[Shot 6] At 00:08.200, <scenetrans> second cutaway: cut to <Subject 2> in medium close-up MCU, his vocal track running continuously. She finally lifts her eyes and rests them level on <Subject 1>, reading as if through an invisible ledger; no wedding, no bride price, a child thrown in, each phrase a line of income she checks off, and then her gaze slides half an inch off his face to an empty spot at the frame edge, the place where her next client will stand. No gong here; the sanxian plucks one low note in the distance, like a ledger page turning. Cut back at 00:10.000, no dialogue.\n\n[Shot 7] At 00:10.000, back to <Subject 1> in medium close-up MCU for the last stretch of the line. At 00:10.050, on the word for brothers, he breaks the fourth wall and looks into the lens, and the small gong cracks once toward the audience, an actor soliciting applause. Then the final question comes out with his voice cracking under suppressed laughter, the jinghu sliding up extravagantly to close, the percussion half-stopped and left hanging, his smile widening further. At 00:10.100, the last character lands, ending at 00:10.100, his mouth closes, and the smile stays on his face.\n\n\n[Shot 9] At 00:11.000, the camera makes a slow arc curving around from <Subject 1> side to face <Subject 2>; as she enters the centre of frame it settles on a frontal medium shot MS from the waist up, fully dressed, composed and certain. This is the presentation of her bearing once she is dressed again, no exposure, carried entirely by posture and presence. The music hands over along the arc: the jinghu drops out, the sanxian takes it again, the tempo slowing to an unhurried folk tune. Having heard all of it, she gathers the curve of her mouth into a formal, professional smile and nods slightly, one soft small gong tap, as if confirming a client has signed. Deep in the background <Subject 3> has quietly got to his feet and is edging along the wall toward the door; no dialogue, the focus stays locked on <Subject 2> and he is only a blurred shape. The shot runs to 00:12.600, no dialogue.\noverall_soundscape:\nRoom tone keeps its floor: candle flames cracking, night insects, a draught at the window, a distant watchman's clapper. This stretch belongs to <Subject 1>, led by the jinghu in a bright sliding fast bow with light variations on the small gong and clapper drum: the large gong landing on one character, the drum counting out phrases like an abacus, the jinghu sliding up under a question, the small gong cracking once toward the audience at the fourth wall, and the jinghu closing on an extravagant upward slide with the percussion half-stopped and hanging. The three cutaways to <Subject 2> are silence by comparison: one faint sound of a fingertip, one low sanxian note in the distance, two very soft small gong taps. Along the arc the jinghu leaves and the sanxian returns, the tempo slowing to an unhurried folk tune. <Subject 3> makes only cloth and footstep sounds as he edges along the wall, and never speaks. The voice stays at the front with percussion and strings held under the line.\nnon_diegetic_music:\nA single low, sustained Peking-opera percussion and strings bed at low level. It continues only through the replayed 1.6-second opening; no new music cue, no BGM swell and no sound effect starts before 00:01.600. It ducks to clearly below the voice one second before every spoken line and stays silent for the entire duration of every line unless the user explicitly asks for music under dialogue. It stops 1.6 seconds before the end of each shot; the closing 1.6 seconds of every shot carry no music, no BGM and no sound effects.\n\n########## S04 / 7s+1.6=8.6 / EN ##########\nsubject_definitions:\n<Subject 1> is the person in <Picture 1> (Wang, S1); appearance, wardrobe, build and face are taken solely from <Picture 1> for the whole film and never change.\n<Subject 2> is the person in <Picture 2> (Zhang San, S2; a lawyer; S1 addresses her by name in dialogue); appearance, wardrobe, build and face are taken solely from <Picture 2> for the whole film and never change.\n<Subject 3> is the person in <Picture 4> (an adult male, the man she was on the bed with when <Subject 1> walked in); appearance taken solely from <Picture 4>; no speaker number, never speaks, no dialogue in any segment.\n<Picture 1> is the appearance reference for <Subject 1>, held frame by frame.\n<Picture 2> is the appearance reference for <Subject 2>, held frame by frame.\n<Picture 3> is the bedroom set reference; the room, its props, its colour temperature and its light direction stay identical to this image, with nothing added.\n<Picture 4> is the appearance reference for <Subject 3>, held frame by frame.\nsummary:\n[video continuation + reference generation] The quietest stretch of the film, and the first time the frame belongs entirely to her: this segment continues from the frontal medium shot that closed the previous take, the sanxian solo giving way to the yueqin, with nothing in frame but the fully dressed <Subject 2>, at one with the room. She makes one calm gesture, lets her gaze leave the lens for half a second and brings it back, selling the service to the whole market; at the end the instruments leave one by one and two seconds of air hold nothing but room tone and two strokes of the watchman's clapper, the smile still on her face, fading to black. New duration 7 seconds, replayed opening 1.6 seconds, generated duration 8.6 seconds.\nretention_analysis:\n<Subject 2> (appears in [Shot 1], [Shot 2], [Shot 3], [Shot 4]): fully_preserved - appearance, wardrobe and build stay identical to <Picture 2> through the frontal medium shot, the arcing push in and the final hold.\n<Subject 3> (appears in [Shot 2]): fully_preserved - appearance stays identical to <Picture 4>; never speaks, no dialogue.\n<Picture 1>: fully_preserved - retained as the appearance reference for <Subject 1>.\n<Picture 2>: fully_preserved - retained as the appearance reference for <Subject 2>.\n<Picture 3> ([Shot 1] first frame): fully_preserved - the bedroom set, its candlelight colour and its light direction are retained, with no jump and no added props.\n<Picture 4>: fully_preserved - retained as the appearance reference for <Subject 3>.\ndetailed_description:\nNo on-screen text, subtitles, captions, timecodes, or any graphics overlays anywhere in the frame. Period-costume operatic comedy, 35mm lens, natural depth of field, warm candlelight, colour temperature and light direction carried strictly from <Picture 3>. The 180-degree axis is held on its western side throughout, the doorframe reads as the stage entrance and the bed as the stage. Framing discipline: no face-forward coverage anywhere in the film, no facial close-up, no extreme close-up, and no frame that crops above the chest to isolate the face; <Subject 2> is the only character granted body framing, limited to medium shot MS (from the knee or the waist up) and medium close-up MCU (lower frame edge resting at or above the chest, taking in shoulders, neck and collar), linked by a vertical tilt up from leg to waist to chest; <Subject 1>, <Subject 3> and the set are always framed with restraint. Framing names body zones and shot sizes only, never garment styling, body detail or facial features. Rhythmic counterpoint: <Subject 1> is scored with the fast-entry, the chaotic-hammer and the four-strike patterns, urgent, loud, chaotic and fast; <Subject 2> is scored with the small gong, the sanxian and the yueqin, light, precise, cold and slow; the moment the cut lands on <Subject 2> the percussion drops and the tempo slows.\n\n[Shot 1] [Single shot, 1.625 seconds] The segment opens on an exact replay of the closing 1.6 seconds of the preceding take and carries that motion straight through, so the join is invisible. The subject holds the exact body pose, head angle, gaze direction, arm position and facial expression carried in by the replayed opening and continues out of it without any reset or restart; no new action, no new spoken word and no new cut begins before the 1.6-second mark. The arc is still settling and <Subject 2> rests in a frontal medium shot MS from the waist up, fully dressed: her stance does not move, the professional smile has already formed, and the small nod has just finished. The shot runs to 00:01.625, no dialogue.\n\n[Shot 2] At 00:01.625, the arc stops completely and she is alone in frame: frontal medium shot MS from the waist up, fully dressed, with no <Subject 1> at the frame edge and no blurred <Subject 3>. The sanxian solo gives way to the yueqin, bright, certain, with a trace of mockery, a folk tune that is the only full solo that belongs to her in the whole film. She is at one with the room; the room stays exactly equal to <Picture 3>, she is the room, and a slightly wide 35mm view catches that fact, colour carried from the reference. At 00:02.000, <Subject 3> has reached the doorway, looks back once at the whole absurd scene and slips out of the door, never given a frontal look at any point, no dialogue. The shot runs to 00:03.000.\n\n[Shot 3] At 00:03.000, she raises one hand in a calm gesture, professional, reassuring, knowing everything; the yueqin taps a single note as the fingertips lift and the jinghu hangs one long note high above, the unhurried coda of an opera stage. Her gaze then leaves the lens for half a second, sweeping across the client just persuaded somewhere off frame, and comes back to the lens as if coming back to the whole market. The shot runs to 00:03.600, no dialogue.\n\n[Shot 4] At 00:03.600, (S2) <d>[Chinese] 记得找我也行，我是专业的。</d> Lip sync is exact to the line: every syllable is clearly shaped, with no held open-mouth smile. While a line sounds, the body stays quiet; only the head, the shoulders or one hand may assist slightly. Full gestures, crossing the room and any large movement belong only in the silent gap after the line has ended and the mouth has closed. Write in the fixed order: the line, the mouth closing, the movement during silence, settling on a non-speaking pose. A spoken line never overlaps a large movement, and no segment ends on unfinished phonation. Her voice is a low tenor, clinically precise, quietly confident, the tempo steady. The line is 9 characters, 2.25 seconds, beginning at 00:03.600 and ending at 00:05.850. Through the line the camera begins a slow arcing push in, moving from the frontal medium shot to a medium close-up MCU with the lower frame edge resting at or above the chest. At 00:05.850, the last character lands and her mouth closes.\n\n[Shot 5] At 00:05.850, the arcing push completes and the camera holds on <Subject 2> in medium close-up MCU: the yueqin closes, the instruments leave one by one. Her lips settle into a professional smile, not the sly smile of the earlier segment but something colder and more calculating, the smile of someone who has put the entire market into the ledger. At 00:06.600, the small gong gives one last note and draws it out, like an opera finished with the lead still refusing to remove her make-up. At 00:07.200, the decay is gone, every instrument has left, and room tone returns in full: candle flames cracking, night insects, two strokes of the distant watchman's clapper, as if dropping the curtain on this scene. The smile stays and the frame fades slowly to black. The shot runs to 00:08.600, no dialogue.\noverall_soundscape:\nRoom tone keeps its floor and gradually takes the frame over: candle flames cracking, night insects, a draught at the window. This is the only full solo that belongs to <Subject 2>, the yueqin in a bright, certain folk tune with a trace of mockery, the jinghu hanging one long note above it. Once her line lands the yueqin closes and the instruments leave one by one, the small gong giving one last drawn-out note. When the decay is gone every instrument has left and room tone returns alone: candle flames, night insects, two strokes of the distant watchman's clapper, as if dropping the curtain on the scene. <Subject 3> makes only cloth and footstep sounds as he slips out of the door, then nothing; never speaks.\nnon_diegetic_music:\nA single low, sustained Peking-opera percussion and strings bed at low level. It continues only through the replayed 1.6-second opening; no new music cue, no BGM swell and no sound effect starts before 00:01.600. It ducks to clearly below the voice one second before every spoken line and stays silent for the entire duration of every line unless the user explicitly asks for music under dialogue. It stops 1.6 seconds before the end of each shot; the closing 1.6 seconds of every shot carry no music, no BGM and no sound effects.\n\n==========================================================\nEND OF PACK / 文件结束\n=========================================================="
+      },
+      "color": "#a1309b",
+      "bgcolor": "#38172f"
+    },
+    {
+      "id": 2,
+      "type": "UNETLoader",
+      "pos": [
+        2060,
+        100
+      ],
+      "size": [
+        440,
+        140
+      ],
+      "flags": {},
+      "order": 7,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "MODEL",
+          "type": "MODEL",
+          "links": [
+            21,
+            31
+          ]
+        }
+      ],
+      "title": "③-1 主模型 UNET",
+      "properties": {
+        "Node name for S&R": "UNETLoader",
+        "cnr_id": "comfy-core",
+        "ver": "0.34.0",
+        "models": [
+          {
+            "name": "minimax_h3_ref2va_pruned_int8_convrot.safetensors",
+            "url": "https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/diffusion_models/minimax_h3_ref2va_pruned_int8_convrot.safetensors",
+            "directory": "diffusion_models"
+          }
+        ],
+        "ue_properties": {
+          "widget_ue_connectable": {
+            "unet_name": true,
+            "weight_dtype": true
+          },
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        }
+      },
+      "widgets_values": [
+        "Minimax_H3\\Minimax-h3_Singularity_ref2va_Pruned_v1.3_int8.safetensors",
+        "default"
+      ],
+      "widgets_values_named": {
+        "unet_name": "Minimax_H3\\Minimax-h3_Singularity_ref2va_Pruned_v1.3_int8.safetensors",
+        "weight_dtype": "default"
+      },
+      "color": "#3f789e",
+      "bgcolor": "#1f3a4d"
+    },
+    {
+      "id": 351,
+      "type": "MinimaxH3SaveJson",
+      "pos": [
+        1869.4202693562588,
+        2334.1216849366256
+      ],
+      "size": [
+        1100,
+        200
+      ],
+      "flags": {},
+      "order": 27,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "shots_json",
+          "shape": 7,
+          "type": "STRING",
+          "link": 54
+        }
+      ],
+      "outputs": [
+        {
+          "name": "文件名",
+          "type": "STRING",
+          "links": []
+        },
+        {
+          "name": "保存路径",
+          "type": "STRING",
+          "links": []
+        },
+        {
+          "name": "分镜资产结果JSON",
+          "type": "STRING",
+          "links": []
+        }
+      ],
+      "title": "② 剧本存档 JSON（director 清洗后落盘）",
+      "properties": {
+        "Node name for S&R": "MinimaxH3SaveJson",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        }
+      },
+      "color": "#b58b2a",
+      "bgcolor": "#3d3116"
+    },
+    {
+      "id": 731,
+      "type": "LoadImage",
+      "pos": [
+        4.352450000000046,
+        1869.8457300000011
+      ],
+      "size": [
+        376.5,
+        400
+      ],
+      "flags": {},
+      "order": 8,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "IMAGE",
+          "type": "IMAGE",
+          "slot_index": 0,
+          "links": [
+            66
+          ]
+        },
+        {
+          "name": "MASK",
+          "type": "MASK",
+          "slot_index": 1,
+          "links": []
+        }
+      ],
+      "title": "参考图 1 → <Picture 1>（选图后 Ctrl+M 取消 mute）",
+      "properties": {
+        "Node name for S&R": "LoadImage",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        }
+      },
+      "widgets_values": [
+        "Qwen_4View_sheet_00008_.png",
+        "image"
+      ],
+      "widgets_values_named": {
+        "image": "Qwen_4View_sheet_00008_.png",
+        "upload": "image"
+      }
+    },
+    {
+      "id": 733,
+      "type": "LoadImage",
+      "pos": [
+        21.11776999999971,
+        2322.435000000003
+      ],
+      "size": [
+        382.40625,
+        400
+      ],
+      "flags": {},
+      "order": 9,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "IMAGE",
+          "type": "IMAGE",
+          "slot_index": 0,
+          "links": [
+            68
+          ]
+        },
+        {
+          "name": "MASK",
+          "type": "MASK",
+          "slot_index": 1,
+          "links": []
+        }
+      ],
+      "title": "参考图 3 → <Picture 3>（选图后 Ctrl+M 取消 mute）",
+      "properties": {
+        "Node name for S&R": "LoadImage",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        }
+      },
+      "widgets_values": [
+        "Krea2_turbo_00024_.png",
+        "image"
+      ],
+      "widgets_values_named": {
+        "image": "Krea2_turbo_00024_.png",
+        "upload": "image"
+      }
+    },
+    {
+      "id": 732,
+      "type": "LoadImage",
+      "pos": [
+        402.0154700000002,
+        1868.6460700000002
+      ],
+      "size": [
+        382.1875,
+        400
+      ],
+      "flags": {},
+      "order": 10,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "IMAGE",
+          "type": "IMAGE",
+          "slot_index": 0,
+          "links": [
+            67
+          ]
+        },
+        {
+          "name": "MASK",
+          "type": "MASK",
+          "slot_index": 1,
+          "links": []
+        }
+      ],
+      "title": "参考图 2 → <Picture 2>（选图后 Ctrl+M 取消 mute）",
+      "properties": {
+        "Node name for S&R": "LoadImage",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        }
+      },
+      "widgets_values": [
+        "Qwen_4View_sheet_00002_.png",
+        "image"
+      ],
+      "widgets_values_named": {
+        "image": "Qwen_4View_sheet_00002_.png",
+        "upload": "image"
+      }
+    },
+    {
+      "id": 734,
+      "type": "LoadImage",
+      "pos": [
+        422.5072609090912,
+        2334.498803636362
+      ],
+      "size": [
+        383.203125,
+        400
+      ],
+      "flags": {},
+      "order": 11,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "IMAGE",
+          "type": "IMAGE",
+          "slot_index": 0,
+          "links": [
+            69
+          ]
+        },
+        {
+          "name": "MASK",
+          "type": "MASK",
+          "slot_index": 1,
+          "links": []
+        }
+      ],
+      "title": "参考图 4 → <Picture 4>（选图后 Ctrl+M 取消 mute）",
+      "properties": {
+        "Node name for S&R": "LoadImage",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        }
+      },
+      "widgets_values": [
+        "krea2_identity_edit_00063_.png",
+        "image"
+      ],
+      "widgets_values_named": {
+        "image": "krea2_identity_edit_00063_.png",
+        "upload": "image"
+      }
+    },
+    {
+      "id": 721,
+      "type": "PreviewAny",
+      "pos": [
+        111.67315692999995,
+        1511.180132584999
+      ],
+      "size": [
+        700,
+        260
+      ],
+      "flags": {},
+      "order": 14,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "source",
+          "type": "*",
+          "link": 65
+        }
+      ],
+      "outputs": [
+        {
+          "name": "STRING",
+          "type": "STRING",
+          "links": []
+        }
+      ],
+      "title": "①-C 解析报告（不规范的地方都在这）",
+      "properties": {
+        "Node name for S&R": "PreviewAny",
+        "cnr_id": "comfy-core",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        }
+      },
+      "widgets_values": [],
+      "widgets_values_named": {},
+      "color": "#a1309b",
+      "bgcolor": "#38172f"
+    },
+    {
+      "id": 700,
+      "type": "H3Director",
+      "pos": [
+        945.986325880299,
+        106.45025360100003
+      ],
+      "size": [
+        993.34375,
+        1818
+      ],
+      "flags": {},
+      "order": 26,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "settings",
+          "shape": 7,
+          "type": "H3_SETTINGS",
+          "link": 53
+        },
+        {
+          "name": "shots_json",
+          "shape": 7,
+          "type": "STRING",
+          "link": 64
+        },
+        {
+          "name": "pack_info",
+          "shape": 7,
+          "type": "STRING",
+          "link": 70
+        },
+        {
+          "name": "video",
+          "shape": 7,
+          "type": "VIDEO",
+          "link": null
+        },
+        {
+          "name": "chain_state",
+          "shape": 7,
+          "type": "H3_CHAIN",
+          "link": null
+        },
+        {
+          "label": "ref_image_0",
+          "name": "ref_images.ref_image_0",
+          "shape": 7,
+          "type": "IMAGE",
+          "link": 66
+        },
+        {
+          "name": "ref_images.ref_image_1",
+          "shape": 7,
+          "type": "IMAGE",
+          "link": 67
+        },
+        {
+          "name": "ref_images.ref_image_2",
+          "shape": 7,
+          "type": "IMAGE",
+          "link": 68
+        },
+        {
+          "name": "ref_images.ref_image_3",
+          "shape": 7,
+          "type": "IMAGE",
+          "link": 69
+        },
+        {
+          "name": "ref_images.ref_image_4",
+          "shape": 7,
+          "type": "IMAGE",
+          "link": null
+        },
+        {
+          "name": "ref_images.ref_image_5",
+          "shape": 7,
+          "type": "IMAGE",
+          "link": null
+        },
+        {
+          "name": "ref_images.ref_image_6",
+          "shape": 7,
+          "type": "IMAGE",
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "分镜资产结果JSON（实际使用）",
+          "type": "STRING",
+          "links": [
+            54
+          ]
+        },
+        {
+          "name": "chain",
+          "type": "H3_CHAIN",
+          "links": []
+        },
+        {
+          "name": "成片",
+          "type": "VIDEO",
+          "links": [
+            56
+          ]
+        },
+        {
+          "name": "时间线",
+          "type": "IMAGE",
+          "links": [
+            58
+          ]
+        },
+        {
+          "name": "进度摘要",
+          "type": "STRING",
+          "links": [
+            61
+          ]
+        },
+        {
+          "name": "运行报告",
+          "type": "STRING",
+          "links": [
+            57
+          ]
+        },
+        {
+          "name": "PACK信息",
+          "type": "STRING",
+          "links": []
+        }
+      ],
+      "title": "② H3 Director（剧本 → 渲染 → 时间线 → 成片）",
+      "properties": {
+        "Node name for S&R": "H3Director",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        }
+      },
+      "widgets_values": [
+        "",
+        "",
+        "medium",
+        1,
+        15,
+        "保持画面内容与镜头运动连贯",
+        0,
+        1.625,
+        true,
+        true,
+        false,
+        14,
+        0,
+        true,
+        false,
+        "match",
+        "[{\"slot\":1,\"kind\":\"角色\",\"name\":\"王总（S1·男）\"},{\"slot\":2,\"kind\":\"角色\",\"name\":\"张三（S2·女律师）\"},{\"slot\":3,\"kind\":\"场景\",\"name\":\"古代卧房·夜\"},{\"slot\":4,\"kind\":\"场景\",\"name\":\"路人甲（古装男·krea2_identity_edit）\"},{\"slot\":5,\"kind\":\"\",\"name\":\"\"}]",
+        0,
+        ""
+      ],
+      "widgets_values_named": {
+        "global_prompt": "",
+        "prompt_lines": "",
+        "sensitivity": "medium",
+        "min_shot_seconds": 1,
+        "max_shot_seconds": 15,
+        "fallback_prompt": "保持画面内容与镜头运动连贯",
+        "max_shots": 0,
+        "handoff_seconds": 1.625,
+        "resume": true,
+        "duration_is_new_content": true,
+        "unload_models_after": false,
+        "crf": 14,
+        "stabilize": 0,
+        "build_timeline": true,
+        "export_segments": false,
+        "ref_image_size": "match",
+        "ref_classify": "[{\"slot\":1,\"kind\":\"角色\",\"name\":\"王总（S1·男）\"},{\"slot\":2,\"kind\":\"角色\",\"name\":\"张三（S2·女律师）\"},{\"slot\":3,\"kind\":\"场景\",\"name\":\"古代卧房·夜\"},{\"slot\":4,\"kind\":\"场景\",\"name\":\"路人甲（古装男·krea2_identity_edit）\"},{\"slot\":5,\"kind\":\"\",\"name\":\"\"}]",
+        "repair_segment": 0,
+        "run_segments": "",
+        "h3_director_panels": ""
+      },
+      "color": "#a1309b",
+      "bgcolor": "#38172f"
+    },
+    {
+      "id": 720,
+      "type": "H3PromptPackParser",
+      "pos": [
+        114.06913562419089,
+        742.2178118526084
+      ],
+      "size": [
+        683.296875,
+        613
+      ],
+      "flags": {},
+      "order": 12,
+      "mode": 0,
+      "showAdvanced": false,
+      "inputs": [
+        {
+          "name": "pack_text",
+          "shape": 7,
+          "type": "STRING",
+          "link": 63
+        },
+        {
+          "name": "shots_json",
+          "shape": 7,
+          "type": "STRING",
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "分镜JSON",
+          "type": "STRING",
+          "slot_index": 0,
+          "links": [
+            64
+          ]
+        },
+        {
+          "name": "解析报告",
+          "type": "STRING",
+          "slot_index": 1,
+          "links": [
+            65
+          ]
+        },
+        {
+          "name": "段数",
+          "type": "INT",
+          "slot_index": 2,
+          "links": []
+        },
+        {
+          "name": "PACK信息",
+          "type": "STRING",
+          "slot_index": 3,
+          "links": [
+            70
+          ]
+        }
+      ],
+      "title": "①-B PACK → 分镜JSON（自动转换）",
+      "properties": {
+        "Node name for S&R": "H3PromptPackParser",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        }
+      },
+      "widgets_values": [
+        "auto",
+        11,
+        true,
+        "曹贼的性价比_v18_en_v10",
+        "warn",
+        ""
+      ],
+      "widgets_values_named": {
+        "language": "auto",
+        "default_duration": 11,
+        "auto_fix": true,
+        "session_name": "曹贼的性价比_v18_en_v10",
+        "on_issue": "warn",
+        "pack_override": "",
+        "h3_director_panels": ""
+      }
+    }
+  ],
+  "links": [
+    [
+      53,
+      9,
+      0,
+      700,
+      0,
+      "H3_SETTINGS"
+    ],
+    [
+      54,
+      700,
+      0,
+      351,
+      0,
+      "STRING"
+    ],
+    [
+      56,
+      700,
+      2,
+      18,
+      0,
+      "VIDEO"
+    ],
+    [
+      57,
+      700,
+      5,
+      19,
+      0,
+      "STRING"
+    ],
+    [
+      58,
+      700,
+      3,
+      609,
+      0,
+      "IMAGE"
+    ],
+    [
+      61,
+      700,
+      4,
+      701,
+      0,
+      "STRING"
+    ],
+    [
+      21,
+      2,
+      0,
+      3,
+      0,
+      "MODEL"
+    ],
+    [
+      22,
+      4,
+      0,
+      9,
+      1,
+      "CLIP"
+    ],
+    [
+      23,
+      5,
+      0,
+      9,
+      2,
+      "VAE"
+    ],
+    [
+      24,
+      6,
+      0,
+      9,
+      3,
+      "VAE"
+    ],
+    [
+      25,
+      7,
+      0,
+      9,
+      4,
+      "SAMPLER"
+    ],
+    [
+      26,
+      10,
+      0,
+      9,
+      6,
+      "INT"
+    ],
+    [
+      27,
+      10,
+      1,
+      9,
+      7,
+      "INT"
+    ],
+    [
+      28,
+      33,
+      0,
+      34,
+      0,
+      "MODEL"
+    ],
+    [
+      29,
+      38,
+      0,
+      33,
+      0,
+      "MODEL"
+    ],
+    [
+      30,
+      3,
+      0,
+      38,
+      1,
+      "MODEL"
+    ],
+    [
+      31,
+      2,
+      0,
+      38,
+      0,
+      "MODEL"
+    ],
+    [
+      32,
+      40,
+      0,
+      38,
+      2,
+      "BOOLEAN"
+    ],
+    [
+      33,
+      41,
+      0,
+      42,
+      0,
+      "MODEL"
+    ],
+    [
+      34,
+      42,
+      0,
+      35,
+      0,
+      "MODEL"
+    ],
+    [
+      35,
+      34,
+      0,
+      41,
+      0,
+      "MODEL"
+    ],
+    [
+      36,
+      38,
+      0,
+      8,
+      0,
+      "MODEL"
+    ],
+    [
+      37,
+      38,
+      0,
+      43,
+      0,
+      "MODEL"
+    ],
+    [
+      38,
+      8,
+      0,
+      44,
+      1,
+      "SIGMAS"
+    ],
+    [
+      39,
+      43,
+      0,
+      44,
+      0,
+      "SIGMAS"
+    ],
+    [
+      40,
+      40,
+      0,
+      44,
+      2,
+      "BOOLEAN"
+    ],
+    [
+      41,
+      44,
+      0,
+      9,
+      5,
+      "SIGMAS"
+    ],
+    [
+      42,
+      35,
+      0,
+      59,
+      0,
+      "MODEL"
+    ],
+    [
+      43,
+      59,
+      0,
+      9,
+      0,
+      "MODEL"
+    ],
+    [
+      63,
+      361,
+      0,
+      720,
+      0,
+      "STRING"
+    ],
+    [
+      64,
+      720,
+      0,
+      700,
+      1,
+      "STRING"
+    ],
+    [
+      65,
+      720,
+      1,
+      721,
+      0,
+      "STRING"
+    ],
+    [
+      66,
+      731,
+      0,
+      700,
+      5,
+      "IMAGE"
+    ],
+    [
+      67,
+      732,
+      0,
+      700,
+      6,
+      "IMAGE"
+    ],
+    [
+      68,
+      733,
+      0,
+      700,
+      7,
+      "IMAGE"
+    ],
+    [
+      69,
+      734,
+      0,
+      700,
+      8,
+      "IMAGE"
+    ],
+    [
+      70,
+      720,
+      3,
+      700,
+      2,
+      "STRING"
+    ]
+  ],
+  "groups": [
+    {
+      "id": 1,
+      "title": "① 剧本来源（PACK 提示词 → 转换分镜）",
+      "bounding": [
+        70.76752644999995,
+        47.53074476,
+        760,
+        1400
+      ],
+      "color": "#a1309b",
+      "flags": {}
+    },
+    {
+      "id": 2,
+      "title": "② H3 Director（一体化：剧本→渲染→时间线→成片）",
+      "bounding": [
+        870,
+        40,
+        1100,
+        1710
+      ],
+      "color": "#a1309b",
+      "flags": {}
+    },
+    {
+      "id": 3,
+      "title": "③ 主模型 → 加速 LoRA",
+      "bounding": [
+        2030,
+        40,
+        500,
+        1210
+      ],
+      "color": "#3f789e",
+      "flags": {}
+    },
+    {
+      "id": 4,
+      "title": "④ 显存 / 注意力优化",
+      "bounding": [
+        2590,
+        40,
+        530,
+        1000
+      ],
+      "color": "#8ca130",
+      "flags": {}
+    },
+    {
+      "id": 5,
+      "title": "⑤ 链路装配",
+      "bounding": [
+        3180,
+        40,
+        580,
+        2360
+      ],
+      "color": "#3f5159",
+      "flags": {}
+    },
+    {
+      "id": 6,
+      "title": "⑥ 出片存盘（director 的 4 个输出口 → 18/19/609/701）",
+      "bounding": [
+        3820,
+        40,
+        640,
+        1550
+      ],
+      "color": "#a1309b",
+      "flags": {}
+    },
+    {
+      "id": 12,
+      "title": "⑦ 参考图（<Picture 1..4> → Director 的「参考图覆盖」",
+      "bounding": [
+        -6.117440000000078,
+        1827.304479999999,
+        780,
+        940
+      ],
+      "color": "#3f789e",
+      "flags": {}
+    }
+  ],
+  "config": {},
+  "extra": {
+    "ds": {
+      "scale": 0.5559917313492281,
+      "offset": [
+        600.0104853185541,
+        -204.26801511030612
+      ]
+    },
+    "ue_links": [],
+    "links_added_by_ue": [],
+    "frontendVersion": "1.51.10"
+  },
+  "version": 0.4,
+  "seed_widgets": {}
+}

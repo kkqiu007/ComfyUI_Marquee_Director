@@ -1,0 +1,21 @@
+[project]
+name = "comfyui-marquee-director"
+description = "Marquee Director: chain MiniMax H3 renders into one unbroken take. Each segment opens on an exact replay of the last, pinned with AddGuide. Derived from loopforge0/ComfyUI-H3-Continuous (MIT)."
+version = "2.0.0"
+license = { file = "LICENSE" }
+requires-python = ">=3.10"
+dependencies = []
+readme = "README.md"
+repository = "https://github.com/kkqiu007/ComfyUI_Marquee_Director"
+
+# 上游出处：loopforge0/ComfyUI-H3-Continuous（MIT，© 2026 Greg Henry）。
+# 本包在其基础上改名并继续维护，节点 ID 与输出目录刻意保持不变。
+#
+# 若要发布到 registry.comfy.org（ComfyUI Manager 节点列表的来源）：
+# 先在 registry 上创建 publisher，把下面 PublisherId 从 "local" 换成你的 ID，
+# 再执行 `comfy node publish`。
+[tool.comfy]
+PublisherId = "local"
+DisplayName = "Marquee Director"
+Icon = ""
+requires-comfyui = ">=0.34.0"

@@ -1,0 +1,536 @@
+/*
+ * 【已停用 / DISABLED】
+ *
+ * 为什么停用：本文件与 web/js/h3_director.js 里的「分镜提示词 / 预览」面板
+ * 功能重叠，而且两边都挂在 H3PromptPackParser + H3Director 上 —— 700 节点上会
+ * 叠出两个 DOM widget 面板互相打架（同一处编辑有两套写回逻辑）。
+ * 已把本文件的能力并入 h3_director.js，统一由那一份承担：
+ *   · 「从 PACK 原文切段 / 整段替换 / 时间标注 / 写回」→ 模块级 h3* 函数
+ *   · 「写回PACK文本框 / 覆盖Parser」写回模式 → 面板上的模式切换（state.writeMode）
+ *   · 挂载目标扩展到 H3PromptPackParser → isDirector() / isParserNode()
+ * 保留此文件仅供追溯；文件名以 .disabled 结尾，ComfyUI 的 WEB_DIRECTORY 不会加载。
+ * 如需恢复：改回 .js 并删掉 h3_director.js 里的对应实现（不建议，两者会再冲突）。
+ *
+ * --- 以下为停用前的原始说明 ---
+ *
+ * ComfyUI-H3-Continuous 分镜提示词「实时显示 + 修改」编辑器。
+ *
+ * 挂到 H3PromptPackParser 和 H3Director 两个节点上（用户要求两者都加），
+ * 提供：左侧分镜列表（每段 S01..，含时长）/ 右侧六段字段可编辑多行框。
+ *
+ * 数据流（借鉴 ComfyUI_MiniMaxH3_Director 的纯前端闭环）：
+ *   读：POST /h3/pack_preview {text} → 每段返回 full_fields 六字段（后端已改）。
+ *   写：编辑某字段 → POST /h3/pack_rebuild {text, segments:[{index, fields}]}
+ *       重拼整份 PACK → 写回外侧 PrimitiveStringMultiline（写回PACK模式）和/或
+ *       H3PromptPackParser 的 pack_override（直接覆盖 parser，非空时 execute
+ *       优先读它）。两条路都让下一次渲染用到编辑后的提示词。
+ *
+ * 写回模式（面板右上角切换）：
+ *   · PACK文本框（默认）：重拼后的整份 PACK 写回外侧文本框，并清空 pack_override，
+ *     parser 照常读文本框 —— 所见即所得。
+ *   · 覆盖Parser：同时写 parser.pack_override，execution 优先用它。
+ */
+(function () {
+  "use strict";
+
+  /* ---------- app / api 解析（沿用 h3_director.js 的容错方式） ---------- */
+  function _fromWindow(kind) {
+    try {
+      if (typeof window === "undefined") return null;
+      const capi = window.comfyAPI && window.comfyAPI[kind];
+      if (capi && capi[kind]) return capi[kind];
+      if (window[kind]) return window[kind];
+    } catch (e) { /* null */ }
+    return null;
+  }
+  let app = _fromWindow("app");
+  let api = _fromWindow("api");
+  (async () => {
+    try {
+      if (!app) app = (await import("../../scripts/app.js")).app || app;
+      if (!api) api = (await import("../../scripts/api.js")).api || api;
+    } catch (e) { /* 用 window 上的即可 */ }
+  })();
+
+  const EXT = "ComfyUI.H3Continuous.ShotEditor";
+  const PARSER_TYPE = "H3PromptPackParser";
+
+  const FIELD_ORDER = [
+    "subject_definitions",
+    "summary",
+    "retention_analysis",
+    "detailed_description",
+    "overall_soundscape",
+    "non_diegetic_music",
+  ];
+  const FIELD_LABEL = {
+    subject_definitions: "主体定义 subject_definitions",
+    summary: "摘要 summary",
+    retention_analysis: "留存分析 retention_analysis",
+    detailed_description: "详细描述 detailed_description",
+    overall_soundscape: "整体声景 overall_soundscape",
+    non_diegetic_music: "非剧情音乐 non_diegetic_music",
+  };
+
+  /* ---------- 小工具 ---------- */
+  function h(tag, cls, text) {
+    const el = document.createElement(tag);
+    if (cls) el.className = cls;
+    if (text != null) el.textContent = text;
+    return el;
+  }
+  function nodeClass(node) {
+    try {
+      return ((node && node.constructor && node.constructor.comfyClass)
+              || (node && node.comfyClass) || (node && node.type)) || "";
+    } catch (e) { return ""; }
+  }
+  function graphNodes() {
+    const g = app && app.graph;
+    return (g && (g._nodes || g.nodes)) || [];
+  }
+  function findWidget(node, name) {
+    return (node.widgets || []).find((w) => w && w.name === name) || null;
+  }
+  function upstream(node, inputName) {
+    const input = (node.inputs || []).find((i) => i.name === inputName);
+    if (!input || input.link == null) return null;
+    const g = app && app.graph;
+    let link = null;
+    try {
+      if (g.links && typeof g.links.get === "function") link = g.links.get(input.link);
+      else if (g.links) link = g.links[input.link];
+    } catch (e) { link = null; }
+    if (!link) return null;
+    const originId = link.origin_id != null ? link.origin_id
+      : (link.origin_id != null ? link.origin_id
+         : (link.originId != null ? link.originId : link[1]));
+    try { return g.getNodeById ? g.getNodeById(originId) : null; } catch (e) { return null; }
+  }
+  function refit(node) {
+    const run = () => {
+      try {
+        if (typeof node.computeSize !== "function") return node.setDirtyCanvas(true, true);
+        const need = node.computeSize();
+        const hh = Math.max(Math.ceil(need[1] || 0), 80);
+        if (Math.abs((node.size[1] || 0) - hh) > 1) node.setSize([node.size[0], hh]);
+        else node.setDirtyCanvas(true, true);
+        try { if (node.__h3seRelayout) node.__h3seRelayout(); } catch (e2) { /* noop */ }
+      } catch (e) { /* 老版本 */ }
+    };
+    try { requestAnimationFrame(run); } catch (e) { setTimeout(run, 16); }
+  }
+
+  /* ---------- CSS（前缀 h3se-，避免和 h3d- 撞名） ---------- */
+  let _cssInjected = false;
+  function injectCss() {
+    if (_cssInjected || typeof document === "undefined") return;
+    _cssInjected = true;
+    const s = document.createElement("style");
+    s.textContent = `
+.h3se{display:flex;flex-direction:column;gap:8px;font:11px/1.5 system-ui,sans-serif;min-width:300px}
+.h3se-bar{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.h3se-bar .lb{font-weight:600;color:#eef}
+.h3se-bar .stat{color:#7fc;font-size:10px}
+.h3se-mode{display:flex;gap:4px;margin-left:auto}
+.h3se-mode button{font:10px/1 system-ui;padding:3px 7px;border:1px solid #357;border-radius:5px;
+  background:#123a4a;color:#bde;cursor:pointer}
+.h3se-mode button.is-on{background:#1f6f5f;color:#fff;border-color:#3f9}
+.h3se-btn{padding:3px 8px;border:1px solid #357;border-radius:5px;background:#123a4a;
+  color:#bde;font:10px/1 system-ui;cursor:pointer}
+.h3se-body{display:flex;gap:8px;min-height:160px}
+.h3se-list{flex:0 0 128px;max-width:160px;overflow:auto;border:1px solid #244;border-radius:6px;background:#0a1c22}
+.h3se-item{padding:5px 8px;cursor:pointer;border-bottom:1px solid #12222a;color:#cfe}
+.h3se-item:hover{background:#123a4a}
+.h3se-item.is-on{background:#1f6f5f;color:#fff}
+.h3se-item .t{font-weight:600}
+.h3se-item .d{font-size:9px;opacity:.7}
+.h3se-edit{flex:1 1 auto;overflow:auto;border:1px solid #244;border-radius:6px;padding:8px;
+  background:#081318;display:flex;flex-direction:column;gap:8px}
+.h3se-fld{display:flex;flex-direction:column;gap:2px}
+.h3se-fld .l{color:#9bc;font-size:10px}
+.h3se-fld textarea{width:100%;min-height:52px;resize:vertical;box-sizing:border-box;
+  background:#0c2027;color:#e8f4f0;border:1px solid #244;border-radius:5px;
+  padding:5px 6px;font:10px/1.45 ui-monospace,Consolas,monospace}
+.h3se-fld textarea:focus{outline:1px solid #3f9}
+.h3se-empty{color:#8aa;padding:12px;text-align:left}
+.h3se-hint{font-size:10px;color:#8ab;margin-top:-2px}
+`;
+    document.head.appendChild(s);
+  }
+
+  /* ---------- 与图/节点的通信 ---------- */
+  function parserNode() {
+    return graphNodes().find((n) => nodeClass(n) === PARSER_TYPE) || null;
+  }
+  function primitiveOfParser(parser) {
+    if (!parser) return null;
+    return upstream(parser, "pack_text");
+  }
+  /** 当前应作为“源”的 PACK 文本：pack_override 非空取它，否则取文本框。 */
+  function packSourceText() {
+    const parser = parserNode();
+    if (parser) {
+      const ov = findWidget(parser, "pack_override");
+      if (ov && typeof ov.value === "string" && ov.value.trim()) return ov.value;
+      const prim = primitiveOfParser(parser);
+      if (prim) {
+        const w = (prim.widgets || []).find((x) => x && typeof x.value === "string");
+        if (w && w.value.length > 5) return w.value;
+        const dom = (prim.widgets || []).find((x) => x && x.element && x.element.querySelector);
+        if (dom) {
+          const ta = dom.element.querySelector("textarea");
+          if (ta && ta.value.length > 5) return ta.value;
+        }
+      }
+    }
+    return "";
+  }
+
+  /** 把重拼后的整份 PACK 写回外侧 PrimitiveStringMultiline 文本框。 */
+  function setPrimitiveText(prim, text) {
+    if (!prim) return false;
+    let changed = false;
+    (prim.widgets || []).forEach((w) => {
+      if (!w || typeof w.value !== "string") return;
+      w.value = text;
+      changed = true;
+      try {
+        if (w.element) {
+          const ta = w.element.querySelector("textarea");
+          if (ta && ta.value !== text) ta.value = text;
+        }
+      } catch (e) { /* 可能没 DOM */ }
+    });
+    // 兜底：把值也塞进 serialized 数组，保证存盘时带上
+    try {
+      if (Array.isArray(prim.widgets_values)) {
+        prim.widgets_values.forEach((_, i) => {
+          const w = prim.widgets[i];
+          if (w && typeof w.value === "string") prim.widgets_values[i] = w.value;
+        });
+      }
+    } catch (e) { /* 老版本无 widgets_values */ }
+    try { prim.setDirtyCanvas(true, true); } catch (e) { /* noop */ }
+    // 触发 onWidgetChanged / 事件，让其它监听（如 Director 面板）感知变化
+    try { if (app && app.canvas) app.canvas.setDirty(true, true); } catch (e) { /* noop */ }
+    return changed;
+  }
+
+  /** 覆盖 parser 的 pack_override 控件（execute 优先读它）。 */
+  function setOverride(parser, text) {
+    if (!parser) return false;
+    const w = findWidget(parser, "pack_override");
+    if (!w) return false;
+    w.value = text || "";
+    try {
+      if (w.element && w.element.value !== undefined) w.element.value = text || "";
+    } catch (e) { /* noop */ }
+    try { parser.setDirtyCanvas(true, true); } catch (e) { /* noop */ }
+    return true;
+  }
+
+  /* ---------- 单节点编辑器实例 ---------- */
+  function mountEditor(node) {
+    if (!node || node.__h3seMounted) return;
+    injectCss();
+
+    const state = {
+      segs: [],         // 来自 /h3/pack_preview 的 segments（含 full_fields）
+      raw: "",          // 当前源 PACK 文本（写回也基于它）
+      selected: 0,      // 1..N；0 = 未选
+      mode: "pack",     // "pack" = 写回文本框；"json" = 覆盖 parser
+      busy: false,
+      dirty: false,
+    };
+
+    const root = h("div", "h3se");
+    // 顶栏
+    const bar = h("div", "h3se-bar");
+    bar.appendChild(h("span", "lb", "分镜提示词编辑器"));
+    const statEl = h("span", "stat", "未加载");
+    bar.appendChild(statEl);
+    // 写回模式切换
+    const modeBox = h("div", "h3se-mode");
+    const btnPack = h("button", "is-on", "写回PACK文本框");
+    const btnJson = h("button", "", "覆盖Parser JSON");
+    modeBox.appendChild(btnPack);
+    modeBox.appendChild(btnJson);
+    bar.appendChild(modeBox);
+    const btnRefresh = h("button", "h3se-btn", "⟳ 重新解析");
+    bar.appendChild(btnRefresh);
+    root.appendChild(bar);
+
+    // 主体：左列表 + 右编辑器
+    const body = h("div", "h3se-body");
+    const listEl = h("div", "h3se-list");
+    const editEl = h("div", "h3se-edit");
+    editEl.appendChild(h("div", "h3se-empty", "选中左侧某段后，这里会出现六个可编辑字段（subject_definitions、summary、retention_analysis、detailed_description、overall_soundscape、non_diegetic_music）。编辑会自动写回。")); 
+    body.appendChild(listEl);
+    body.appendChild(editEl);
+    root.appendChild(body);
+
+    /* ---------- 渲染分镜列表 ---------- */
+    function renderList() {
+      listEl.replaceChildren();
+      if (!state.segs.length) {
+        listEl.appendChild(h("div", "h3se-empty", "没有解析到分镜。"));
+        return;
+      }
+      state.segs.forEach((seg, i) => {
+        const idx = i + 1;
+        const item = h("div", "h3se-item" + (idx === state.selected ? " is-on" : ""));
+        item.appendChild(h("div", "t", String(seg.id)));
+        item.appendChild(h("div", "d", (seg.new_seconds != null ? seg.new_seconds + "s" : "") + " · " + (seg.words != null ? seg.words + "词" : "")));
+        item.addEventListener("click", () => select(idx));
+        listEl.appendChild(item);
+      });
+      statEl.textContent = state.segs.length + " 段 · " + (state.mode === "pack" ? "写回PACK文本框" : "覆盖Parser");
+    }
+
+    /* ---------- 渲染六字段编辑器 ---------- */
+    const fieldEls = [];   // 每行 {name, el}
+    function renderEditor() {
+      editEl.replaceChildren();
+      fieldEls.length = 0;
+      const seg = state.selected > 0 ? state.segs[state.selected - 1] : null;
+      if (!seg) return;
+      const flds = seg.full_fields || {};
+      editEl.appendChild(h("div", "h3se-hint",
+        "段 " + seg.id + "：在下方修改，松开输入即自动写回（" +
+        (state.mode === "pack" ? "重拼 PACK → 外侧文本框" : "重拼 PACK → parser 覆盖") + "）。"));
+      FIELD_ORDER.forEach((name) => {
+        const row = h("div", "h3se-fld");
+        row.appendChild(h("div", "l", FIELD_LABEL[name] || name));
+        const ta = document.createElement("textarea");
+        ta.value = flds[name] || "";
+        ta.spellcheck = false;
+        ta.addEventListener("input", () => {
+          seg.full_fields = seg.full_fields || {};
+          seg.full_fields[name] = ta.value;
+          scheduleWrite();
+        });
+        row.appendChild(ta);
+        editEl.appendChild(row);
+        fieldEls.push({ name, ta });
+      });
+    }
+
+    /* ---------- 写回报文（防抖） ---------- */
+    let writeTimer = 0;
+    function scheduleWrite() {
+      if (writeTimer) return;
+      writeTimer = setTimeout(writeBack, 500);
+    }
+    function writeBack() {
+      writeTimer = 0;
+      const seg = state.selected > 0 ? state.segs[state.selected - 1] : null;
+      if (!seg || !state.raw) { statEl.textContent = "无源文本，无法写回"; return; }
+      if (state.busy) { state.dirty = true; return; }
+      const fields = Object.assign({}, seg.full_fields || {});
+      state.busy = true;
+      statEl.textContent = "写回中…";
+      fetch("/h3/pack_rebuild", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: state.raw, segments: [{ index: state.selected, fields }] }),
+      })
+        .then((r) => r.json())
+        .then((data) => {
+          state.busy = false;
+          if (!data || !data.ok) {
+            statEl.textContent = "写回失败：" + ((data && data.error) || "未知");
+            return;
+          }
+          state.raw = data.text || state.raw;
+          applyToSource(state.raw);
+          statEl.textContent = "✓ 已写回 " + state.segs.length + " 段";
+        })
+        .catch((err) => {
+          state.busy = false;
+          statEl.textContent = "写回出错：" + (err && err.message ? err.message : err);
+        })
+        .finally(() => {
+          if (state.dirty) { state.dirty = false; setTimeout(writeBack, 120); }
+        });
+    }
+    function applyToSource(text) {
+      const parser = parserNode();
+      const prim = primitiveOfParser(parser);
+      lastSrc = text;   // 让轮询认为源没变，避免写回立即触发重解析顶掉输入
+      if (state.mode === "pack") {
+        // 写回文本框；清空覆盖，让 parser 照常读文本框
+        setPrimitiveText(prim, text);
+        setOverride(parser, "");
+      } else {
+        // 直接覆盖 parser（execute 优先读它）；顺带写文本框保持可见
+        setOverride(parser, text);
+        setPrimitiveText(prim, text);
+      }
+    }
+
+    /* ---------- 选择 / 解析 ---------- */
+    function select(idx) {
+      state.selected = idx > 0 ? idx : 0;
+      renderList();
+      renderEditor();
+      refit(node);
+    }
+
+    // 源文本轮询的“上一个值”：我们自己写回后同步它，避免写回立即触发重解析
+    // 把正在输入中的编辑区覆盖掉（失焦/丢光标）。
+    let lastSrc = "";
+    function inputFocused() {
+      try { return fieldEls.some((f) => document.activeElement === f.ta); } catch (e) { return false; }
+    }
+
+    function parse(silent) {
+      btnRefresh.disabled = true;
+      btnRefresh.textContent = "解析中…";
+      statEl.textContent = "解析中…";
+      const text = packSourceText();
+      lastSrc = text;
+      if (!text) {
+        state.segs = [];
+        state.raw = "";
+        renderList();
+        editEl.replaceChildren();
+        editEl.appendChild(h("div", "h3se-empty",
+          "没找到 PACK 文本源。请把 H3 分镜提示词接到 H3PromptPackParser 的 pack_text（外侧 PrimitiveStringMultiline），或先用其它方式填好 pack_override。"));
+        btnRefresh.disabled = false;
+        btnRefresh.textContent = "⟳ 重新解析";
+        refit(node);
+        return;
+      }
+      state.raw = text;
+      const parser = parserNode();
+      let sess = "";
+      try { const w = parser && findWidget(parser, "session_name"); sess = w && w.value ? String(w.value) : ""; } catch (e) { /* noop */ }
+      fetch("/h3/pack_preview", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text, session_name: sess }),
+      })
+        .then((r) => r.json())
+        .then((data) => {
+          btnRefresh.disabled = false;
+          btnRefresh.textContent = "⟳ 重新解析";
+          if (!data || !data.ok) {
+            state.segs = [];
+            ctxError((data && data.error) || "解析失败");
+            return;
+          }
+          state.segs = data.segments || [];
+          if (!state.selected || state.selected > state.segs.length) state.selected = state.segs.length ? 1 : 0;
+          renderList();
+          // 用户正在编辑某个字段时，别用刚解析的 canonical 文本把它顶掉
+          if (!inputFocused()) renderEditor();
+          refit(node);
+        })
+        .catch((err) => {
+          btnRefresh.disabled = false;
+          btnRefresh.textContent = "⟳ 重新解析";
+          ctxError(err && err.message ? err.message : String(err));
+        });
+    }
+    function ctxError(msg) {
+      renderList();
+      editEl.replaceChildren();
+      editEl.appendChild(h("div", "h3se-empty", "解析出错：" + msg));
+      refit(node);
+    }
+
+    /* ---------- 模式切换 ---------- */
+    function setMode(mode) {
+      state.mode = mode;
+      btnPack.className = mode === "pack" ? "is-on" : "";
+      btnJson.className = mode === "json" ? "is-on" : "";
+      renderList();
+      renderEditor();
+    }
+    btnPack.addEventListener("click", () => setMode("pack"));
+    btnJson.addEventListener("click", () => setMode("json"));
+    btnRefresh.addEventListener("click", parse);
+
+    /* ---------- 装配 DOM widget + 布局 ---------- */
+    const dom = node.addDOMWidget("h3_shot_editor", "div", root, {
+      serialize: false,
+      hideOnZoom: false,
+      getValue() { return ""; },
+      setValue() {},
+    });
+    node.__h3seRelayout = () => {
+      try { refit(node); } catch (e) { /* noop */ }
+    };
+    node.setDirtyCanvas(true, true);
+    // 内容尺寸变化时重新贴合节点高度
+    try {
+      if (typeof ResizeObserver !== "undefined") {
+        let t = 0;
+        const ro = new ResizeObserver(() => {
+          if (t) return;
+          t = setTimeout(() => { t = 0; refit(node); }, 40);
+        });
+        ro.observe(root);
+        node.__h3seRO = ro;
+      }
+    } catch (e) { /* noop */ }
+
+    // 初次解析 + 监听源文本变化（字节级 diff，有变化才重解析）
+    setTimeout(parse, 60);
+    let lastSrc = "";
+    const pollTimer = setInterval(() => {
+      const cur = packSourceText();
+      if (cur !== lastSrc) {
+        lastSrc = cur;
+        // 避免我们自己写回触发重复解析，简单节流即可（写回解析是幂等的）
+        try { parse(); } catch (e) { /* noop */ }
+      }
+    }, 1500);
+    node.__h3seMounted = true;
+    node.__h3seCleanup = () => {
+      try { clearInterval(pollTimer); } catch (e) { /* noop */ }
+      try { if (node.__h3seRO) node.__h3seRO.disconnect(); } catch (e) { /* noop */ }
+    };
+  }
+
+  /* ---------- 挂载到目标节点 ---------- */
+  function isTarget(node) {
+    return nodeClass(node) === PARSER_TYPE || nodeClass(node) === "H3Director";
+  }
+  function sweep() {
+    try {
+      if (!app) app = _fromWindow("app");
+      const g = app && app.graph;
+      if (!g) return;
+      for (const n of (g._nodes || g.nodes || [])) {
+        if (isTarget(n)) mountEditor(n);
+      }
+    } catch (e) { /* noop */ }
+  }
+
+  function registerExtension() {
+    if (!app || typeof app.registerExtension !== "function") return;
+    try {
+      app.registerExtension({
+        name: EXT,
+        async setup() { sweep(); },
+        beforeRegisterNodeDef() {},
+        nodeCreated(node) {
+          if (isTarget(node)) mountEditor(node);
+        },
+      });
+    } catch (e) { /* noop */ }
+    // 兜底：启动后一直扫（幂等），road 上“早已创建”的节点也能挂上
+    let n = 0;
+    const iv = setInterval(() => {
+      try { sweep(); } catch (e) { /* noop */ }
+      if (++n > 60 && typeof unloadH3SE === "function") clearInterval(iv);
+    }, 1200);
+    if (typeof unloadH3SE === "undefined") {
+      window.unloadH3SE = () => { try { clearInterval(iv); } catch (e) { /* noop */ } };
+    }
+  }
+
+  registerExtension();
+})();
