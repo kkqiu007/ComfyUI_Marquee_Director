@@ -7,8 +7,10 @@
 - 无第三方依赖，不需要 `pip install`。
 - 需要 **ComfyUI 0.34.0 或更新**（更早的版本根本没有 MiniMax H3 节点）。
 - 装好后的自检：重启 ComfyUI，双击画布输入 `H3 Chain`，能搜到 **H3 Chain Settings** 即成功。
-  （`H3 Director` / `H3 Prompt Pack Parser` / `MinimaxH3SaveJson` / `MinimaxH3LoadJson`
-  是本包的另外四个现行节点。）
+  本包现行注册的节点共八个：`H3 Chain Settings` / `H3 Prompt Pack Parser` / `H3 Director` /
+  `H3 Refine` / `H3 FaceRefine` / `H3 Script Translate` / `MinimaxH3SaveJson` /
+  `MinimaxH3LoadJson`。其中 `H3 Refine` / `H3 FaceRefine` / `H3 Script Translate` 是
+  **可选外接**，不接线就不参与渲染。
 
 > **2026-09-20 变更**：`H3ScriptBatchRender` / `H3ScriptRepairSegment` /
 > `H3ChainToVideo` / `H3LoadSession` / `H3SegmentTimeline` / `H3ShotPrompt` /
@@ -66,10 +68,13 @@ Diffusion 模型 21 GB，建议用支持断点续传的工具（`curl -C -`、ID
 
 ### 也可以交给 ComfyUI 自己拉
 
-`workflows/h3_director_unlimited_storyboard.json` 里每个 loader 节点的
-`properties.models` 都带着下载
-地址（ComfyUI 官方模板的做法）。打开工作流时若有文件缺失，ComfyUI 会直接提示
+`workflows/h3_director_unlimited_storyboard.json` 里 H3 链路上的五个 loader 节点
+（UNET / 文本编码器 / 视频 VAE / 音频 VAE / Turbo LoRA）的 `properties.models`
+都带着下载地址（ComfyUI 官方模板的做法）。打开工作流时若有文件缺失，ComfyUI 会直接提示
 要不要替你下载，比手动放文件省事。
+
+第六个 loader（`CLIPLoader`，喂 **H3 Script Translate**）没有带 —— 它只在英译节点
+切到 `local` 时才被读，工作流默认走 `openai_api`，用不到。
 
 ---
 

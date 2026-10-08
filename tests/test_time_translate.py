@@ -2,7 +2,7 @@
 """ComfyUI_Marquee_Director 时间逻辑 + 英译分块 回归用例（离线，零依赖）。
 
 跑法：
-  "<ComfyUI>/.venv/Scripts/python.exe" tests_regression.py
+  "<ComfyUI>/.venv/Scripts/python.exe" tests/test_time_translate.py
 
 覆盖四类已修缺陷：
   A. translate_nodes.split_parts / _needs_translation 把 PACK 头部误送翻译，

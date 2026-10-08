@@ -12,7 +12,7 @@ Chain any number of MiniMax H3 renders into **one unbroken take**.
 > **⚠ 2026-09-20 — 节点集已收敛到 `H3 Director` 一体化链路。**
 > 本文档下面的 A/B 两种接线（`H3 Render Segment` 一镜一节点、`H3 Chain to Video`
 > 拼接、`H3 Load Session` 续接、`H3 Repair Segment` 单段修复、`H3 Segment Timeline`
-> 时间线）描述的是**旧范式**。现行注册的节点共七个：
+> 时间线）描述的是**旧范式**。现行注册的节点共八个：
 >
 > | 节点 | 作用 |
 > | --- | --- |
@@ -21,8 +21,12 @@ Chain any number of MiniMax H3 renders into **one unbroken take**.
 > | `H3 Director` | 剧本 → 分段渲染 → 时间线 → 成片，一个节点全包 |
 > | `H3 Refine` | 二采精修（可选外接，见下） |
 > | `H3 FaceRefine` | 脸部修复（可选外接，见下） |
+> | `H3 Script Translate` | 剧本英译：中文剧本 → 英文单版（可选外接，需文本模型） |
 > | `MinimaxH3SaveJson` | 分镜 JSON 存档 |
 > | `MinimaxH3LoadJson` | 存档读回 |
+>
+> 三个可选外接（`H3 Refine` / `H3 FaceRefine` / `H3 Script Translate`）都不接就
+> 不参与渲染，注册它们不会改变任何既有链路的行为。
 >
 > `H3 Refine` 借鉴 `ComfyUI_MiniMaxH3_Director` 的 `refine` 外接形态：接到
 > `H3 Director` 的 `refine` 口才生效，不接就是原来的一采成片。二采发生在每段
@@ -194,23 +198,35 @@ renders from that. This is the one to copy once you are doing real multi-shot wo
 
 > **⚠️ It does not run out of the box.** It is published as a reference for how the
 > panel is wired, and it loads checkpoints and reference images that are not in this
-> repo. Before it will render you have to swap two things:
+> repo. Before it will render you have to touch three things:
 
-**1. The checkpoints.** It points at files that are not published here:
+**1. The checkpoints.** Three of the six loaders point at files that are not
+published here:
 
-| Loader | Points at | Use instead |
+| Loader | Ships pointing at | What to do |
 | --- | --- | --- |
-| `UNETLoader` | `Minimax_H3/Minimax-h3_Singularity_ref2va_Pruned_v1.3_int8.safetensors` | `minimax_h3_ref2va_pruned_int8_convrot.safetensors` |
-| `CLIPLoader` | `qwen3vl_32b_minimax_h3_int8_convrot.safetensors` | `qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors` |
-| `VAELoader` (video) | `minimax_h3_video_vae_int8_convrot.safetensors` | `minimax_h3_video_vae_fp16.safetensors` |
-| `LoraLoaderModelOnly` ×2 | `H3/H3_Combat_V2.safetensors`, `H3/minimax-h3-facial-realism-closeup-cp2000_comfy_prefix.safetensors` | anything you like — they ship at strength `0`, so bypassing them changes nothing |
+| `UNETLoader` | `Minimax_H3/Minimax-h3_Singularity_ref2va_Pruned_v1.3_int8.safetensors` | reselect → `minimax_h3_ref2va_pruned_int8_convrot.safetensors` |
+| `CLIPLoader` (main) | `qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors` | already the published file |
+| `VAELoader` (video) | `minimax_h3_video_vae_int8_convrot.safetensors` | reselect → `minimax_h3_video_vae_fp16.safetensors` |
+| `VAELoader` (audio) | `minimax_h3_audio_vae_fp32.safetensors` | already the published file |
+| `LoraLoaderModelOnly` | `H3/minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16.safetensors` | the same file, minus the `H3/` folder — drop it into `models/loras/` and reselect |
+| `CLIPLoader` (translate) | `qwen3vl_8b_int8_convrot.safetensors` | only read when **H3 Script Translate** is on `local`; leave that node on `openai_api` (it ships that way) and this loader is unused |
 
-The four files in the right column are the ones listed under **Get the models**
-above, so if you set up workflow A you already have them.
+The five H3-chain files in the middle column are the ones listed under **Get the
+models** above, so if you set those up you already have them. The 8B translate
+encoder is the exception — it is not part of that list.
 
-**2. The reference images.** The four `Load Image` nodes point at PNGs generated on
-the author's machine (`Qwen_4View_sheet_*`, `Krea2_turbo_*`, `krea2_identity_edit_*`).
-Drop in your own.
+**2. The reference images.** All eight `Load Image` nodes ship **blank** —
+nothing generated on the author's machine is published here. `image_0` … `image_3`
+are wired to the Director, `image_4` … `image_7` are spares. Drop in your own.
+
+**3. The translate branch.** Group ① runs the PACK through **H3 Script Translate**
+before the parser, so the storyboard is built from the English single version rather
+than from your Chinese source. It ships on `model_source = openai_api` with the key
+field **empty** — the node reads it from the `AGNES_API_KEY` environment variable
+instead, so no key is baked into the file. Point `api_base_url` / `api_model` at your
+own endpoint, set that variable, or switch `model_source` to `local` and load the 8B
+encoder. With **启用英译** off the node passes its input straight through.
 
 The wiring, the Director settings and the storyboard JSON format are the part worth
 copying. The assets are not.
@@ -220,7 +236,7 @@ copying. The assets are not.
 | Pack | Used for |
 | --- | --- |
 | [ComfyUI-KJNodes](https://github.com/kijai/ComfyUI-KJNodes) | `BOOLConstant`, `MiniMaxChunkFeedForward`, `MiniMaxLowVRAMAttention` |
-| [comfyui-obvpm](https://github.com/obvpm/comfyui-obvpm) | `LazySwitch` |
+| [ComfyUI-Execution-Inversion](https://github.com/akatz-ai/ComfyUI-Execution-Inversion) | `LazySwitch` |
 | [comfyui-custom-scripts](https://github.com/pythongosssss/ComfyUI-Custom-Scripts) | `ShowText` |
 
 ---
@@ -234,9 +250,10 @@ downloaded. Most of them will already be right if you only have one of each.
 
 Then decide your quality/speed trade-off:
 
-* **Fast (recommended to start):** click the **Turbo LoRA** node once and press
-  **Ctrl+B** to un-bypass it, then set **BasicScheduler** `steps` to **4**.
-* **Best quality:** leave the LoRA bypassed (it ships that way) and `steps` at 20.
+* **Fast (recommended to start):** set **🎛 总开关 LoRA+步数** to `true`. One switch
+  does both jobs — the Turbo LoRA goes inline and the 8-step schedule is picked.
+* **Best quality:** set it to `false` — no LoRA, 20-step schedule. Nothing has to be
+  bypassed by hand; both branches stay wired and the switch chooses between them.
 
 Set the canvas size on **ResolutionSelector** — pick an aspect ratio and a megapixel
 budget. `0.41` MP (480×864 in 9:16) is a good, safe starting point on 12 GB. On 8 GB,
