@@ -43,7 +43,6 @@ IDLE_MINUTES = 15
 SWEEP_INTERVAL = 600
 
 _SEG_RE = re.compile(r"^seg_(\d+)\.mp4$")
-_TAIL_RE = re.compile(r"\.tail(\..+)?$")
 _TIMELINE_RE = re.compile(r"^h3_timeline_\d+_\.png$", re.I)
 
 _installed = False
@@ -264,8 +263,12 @@ def _periodic():
     global _timer
     try:
         sweep()
-    except Exception:
-        pass
+    except Exception as exc:
+        # ★ 不能静默吞掉。这个定时器**只在 install() 时挂一次**，之后靠自身
+        #   递归续期：一旦这里抛出且不记日志，巡检就**永久停摆**，而用户毫无
+        #   察觉 —— 会话目录再也不会被自动清理（只有下次重启才恢复）。
+        from .common import log
+        log("H3 cleanup: 定时巡检失败（%s），本轮跳过、下轮继续", exc)
     _timer = threading.Timer(SWEEP_INTERVAL, _periodic)
     _timer.daemon = True
     _timer.start()

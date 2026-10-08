@@ -7,6 +7,16 @@
 - 无第三方依赖，不需要 `pip install`。
 - 需要 **ComfyUI 0.34.0 或更新**（更早的版本根本没有 MiniMax H3 节点）。
 - 装好后的自检：重启 ComfyUI，双击画布输入 `H3 Chain`，能搜到 **H3 Chain Settings** 即成功。
+  （`H3 Director` / `H3 Prompt Pack Parser` / `MinimaxH3SaveJson` / `MinimaxH3LoadJson`
+  是本包的另外四个现行节点。）
+
+> **2026-09-20 变更**：`H3ScriptBatchRender` / `H3ScriptRepairSegment` /
+> `H3ChainToVideo` / `H3LoadSession` / `H3SegmentTimeline` / `H3ShotPrompt` /
+> `H3ShotsBoard` / `H3ShotRenderer` 已下线（全部被 `H3 Director` 取代）。
+> 原先随包分发的 `workflows/h3_continuous.json`、
+> `workflows/h3_continuous_local_prompt.json`、`demo_8shots_workflow.json`
+> 引用了这些节点，已一并移除。现行样例工作流是
+> **`workflows/h3_director_unlimited_storyboard.json`**。
 
 ---
 
@@ -56,7 +66,8 @@ Diffusion 模型 21 GB，建议用支持断点续传的工具（`curl -C -`、ID
 
 ### 也可以交给 ComfyUI 自己拉
 
-`workflows/h3_continuous.json` 里每个 loader 节点的 `properties.models` 都带着下载
+`workflows/h3_director_unlimited_storyboard.json` 里每个 loader 节点的
+`properties.models` 都带着下载
 地址（ComfyUI 官方模板的做法）。打开工作流时若有文件缺失，ComfyUI 会直接提示
 要不要替你下载，比手动放文件省事。
 
@@ -75,7 +86,7 @@ ComfyUI/output/h3_continuous/<会话名>/
 | `seg_01.mp4`, `seg_02.mp4`, … | 各段独立输出 |
 | `seg_XX.tail.*` | 各段结尾帧，下一段靠它对齐接缝 |
 | `manifest.json` | 本次渲染的记录，含每段的指纹 |
-| 成片 | 由 `H3 Chain To Video` 拼出的完整一条 |
+| 成片 | 由 `H3 Director` 的「成片」输出口拼出的完整一条 |
 
 `<会话名>` 来自 **H3 Chain Settings** 的 `session_name`。
 改 `session_name` 就是开一个全新会话，旧的段文件不会被复用。

@@ -259,6 +259,29 @@ const CSS = `
 .h3d-item .v.is-empty { color: #555; font-weight: 400; }
 .h3d-item .v .sub { font-size: 10px; font-weight: 400; color: #7d7d7d; }
 
+/* 元信息行（原「规则版本 / 布局 / 会话 / 参考图槽」扩展行）已于
+   2026-09-24 18:23 按用户要求**删除**：面板只保留 6 项头部，
+   CSS 一并移除，不留死样式。 */
+
+/* ========= 修脸质检（2026-10-06）=========
+ * 一行开关 + 两枚压印钮 + 一条报告。材质全部走既有 --h3d-* 令牌，
+ * 所以它和参考图卡片、段块玻璃是同一套语言（README 的 Liquid Glass 规则：
+ * 内容层不玻璃，这里只有按钮与文字，没有缩略图）。
+ * 无障碍：报告色不单独承载语义 —— 失败时除了红色还带「未通过」字样，
+ * 纯文字/高对比模式下仍然可读（Increase Contrast 下白描边见下）。 */
+.h3d-fqc-label { font: 10px/1 system-ui, sans-serif; color: #9a9a9a;
+                 min-width: 76px; }
+.h3d-fqc-ctrls { display: flex; align-items: center; gap: 5px; min-width: 0; }
+.h3d-fqc-num { font: 10.5px/1 system-ui, sans-serif; color: #d8d8d8;
+               min-width: 14px; text-align: center; font-variant-numeric: tabular-nums; }
+.h3d-fqc-report { margin-top: 8px; font: 9.5px/1.5 system-ui, sans-serif;
+                  color: #8a8a8a; white-space: pre-wrap; word-break: break-word;
+                  padding: 6px 8px; border-radius: var(--h3d-r-sm);
+                  background: rgba(255,255,255,.04);
+                  border: 1px solid rgba(255,255,255,.07); }
+.h3d-fqc-report.is-ok  { color: var(--h3d-acc);  border-color: rgba(79,255,143,.28); }
+.h3d-fqc-report.is-bad { color: var(--h3d-bad);  border-color: rgba(255,139,139,.30); }
+
 /* ========= 2) 参考图（2026-09-16 第 17 轮：Apple Liquid Glass 设计语言）=========
  *
  * 第 16 轮的遮罩式 hover 面板方向已确认正确，本轮按 Apple Liquid Glass 规范
@@ -672,24 +695,32 @@ const CSS = `
      绝不给缩略图本身套 backdrop-filter。 */
 .h3d-segs { display: flex; gap: 3px; min-width: 0; }
 .h3d-seg { position: relative; flex: 1 1 0; min-width: 30px; height: 87px;
-           /* ★ 与 .h3d-ref 同款圆角：原本段块用 --h3d-r-sm（4px）偏方正，
-              参考图用 --h3d-r-md（8px）更柔和。两个区域视觉语言统一一下。 */
+           /* ★ 第 21 轮：与 .h3d-ref 同款玻璃语言。rim 改走 ::after —— 这样
+              状态色 glow（is-active）才能独占 cell 的 box-shadow 而不打架。
+              hover 也不再 lift（translateY -1px）—— 玻璃层要"稳"，微跳动
+              反而破坏 Liquid Glass 的厚度感。 */
            border-radius: var(--h3d-r-md); overflow: hidden;
            background: rgba(255,255,255,.04);
            border: 1px solid rgba(255,255,255,.10);
-           box-shadow: var(--h3d-rim);
            cursor: pointer;
            transition: border-color var(--h3d-dur-fast),
-                       box-shadow var(--h3d-dur-fast),
-                       transform var(--h3d-dur-fast); }
-.h3d-seg:hover { border-color: rgba(255,255,255,.24);
-                 box-shadow: var(--h3d-rim), var(--h3d-lift-sm);
-                 transform: translateY(-1px); }
+                       box-shadow var(--h3d-dur-fast); }
+/* ★ 与参考图同款：rim 由 ::after 承担，inset 上下渐变（亮上暗下），玻璃厚度感。
+   z-index 2 —— 压在图片/视频之上、状态点/勾选框之下，hover 浮现时高光自动接管。 */
+.h3d-seg::after { content: ""; position: absolute; inset: 0; z-index: 2;
+                  border-radius: inherit; pointer-events: none;
+                  box-shadow: var(--h3d-rim);
+                  transition: box-shadow var(--h3d-dur-fast); }
+.h3d-seg:hover { border-color: rgba(255,255,255,.24); }
+.h3d-seg:hover::after { box-shadow: inset 0 1px 0 rgba(255,255,255,.22),
+                                    inset 0 -1px 0 rgba(0,0,0,.32); }
 /* ★ 与 .h3d-ref .dot 同款：渲染状态点用参考图同色令牌（--h3d-acc / --h3d-bad /
    灰中点），统一两个区域的状态语言。 */
 .h3d-seg.is-done   { border-color: rgba(79,255,143,.42); }
+/* is-active 的发光已经不在 rim 那一层（rim 搬去了 ::after），这里只剩 glow。
+   与 .h3d-seg:hover 的 rim 升级叠加即可："正在渲 + 被悬停"时同时亮。 */
 .h3d-seg.is-active { border-color: var(--h3d-acc);
-                     box-shadow: var(--h3d-rim), 0 0 0 1px rgba(79,255,143,.35),
+                     box-shadow: 0 0 0 1px rgba(79,255,143,.35),
                                  0 0 12px rgba(79,255,143,.22); }
 .h3d-seg video, .h3d-seg img { width: 100%; height: 100%; object-fit: cover;
                                display: block; }
@@ -741,15 +772,25 @@ const CSS = `
                         「单按钮居中」形态。hover 显现后只露 ↻ 入口。 */
                      display: flex; align-items: center; justify-content: center;
                      border-radius: inherit;
-                     /* ★ 第 42 轮（2026-09-17）：这一层铺在**视频缩略图**上面，
-                        原样照搬玻璃的模糊滤镜会把画面糊成一团（12px 高斯 +
-                        35% 暗 —— 用户实测「hover 时画面一团模糊」，第 29 轮
-                        记录里就写了这个取舍，现在按用户要求翻过来）。
-                        改成「只压暗、不模糊」：薄纱 22% 黑，画面照常清晰可辨；
-                        ↻ 按钮自己有半透明白底 + 高光描边 + 顶部亮线，照样读得出。
-                        覆盖范围仍是 inset:0（第 29 轮要求：铺满整个缩略图）。
-                        ★ 本块内不得再出现任何模糊滤镜 —— 见回归断言。 */
-                     background: rgba(0, 0, 0, .22);
+                     /* ★ 第 43 轮（2026-09-19）：与参考图 .h3d-ref .veil **完全同源**。
+                        用户要求「鼠标滑过缩略图要玻璃模糊背景，和参考图缩略图统一」，
+                        所以这里直接用同一组令牌 —— 模糊 + 亮度 + 饱和度 + 35% 变暗
+                        + rim-lg，跟 .veil 一字不差。想调强度改 --h3d-glass-blur
+                        一处即可，两边同时生效，不会再出现两个区域材质不一样。
+
+                        ⚠ 历史留档：第 42 轮曾把它改成「只压暗、不模糊」，原因是
+                        用户实测「hover 时画面一团模糊」。本轮按用户明确要求翻回来。
+                        若再次觉得糊，只需把 --h3d-glass-blur 调小（例如 6px），
+                        **不要**再单独给 .re-glass 写一套 —— 那正是两个区域
+                        视觉分裂的根源。
+                        覆盖范围仍是 inset:0（第 29 轮要求：铺满整个缩略图）。 */
+                     background: var(--h3d-glass-dim);
+                     backdrop-filter: blur(var(--h3d-glass-blur))
+                                      brightness(.92)
+                                      saturate(var(--h3d-glass-sat));
+                     -webkit-backdrop-filter: blur(var(--h3d-glass-blur))
+                                              brightness(.92)
+                                              saturate(var(--h3d-glass-sat));
                      box-shadow: var(--h3d-rim-lg);
                      opacity: 0; pointer-events: none;
                      transition: opacity var(--h3d-dur) var(--h3d-ease); }
@@ -759,7 +800,11 @@ const CSS = `
    ★ 第 32 轮：圆形按钮位置由 .re-glass 的 flex 推到中心（与本卡片
      「重渲该段」按钮 + 参考图卡片的「↻」圆形按钮三处保持一致 —— 同语义
      的入口在同一视觉位置，鼠标记一次就够）。 */
-.h3d-seg .re-glass .vact { width: 28px; height: 28px; border-radius: 50%;
+/* ★ 第 43 轮：与 .run 同层级 —— 两个都是段块上的**交互件**，之前一个是
+   28px 圆形、另一个是 20px 方框，尺寸和材质都不在同一层，看起来像两类东西。
+   现在统一到 22px：.vact 保持圆形（动作按钮的语义），.run 保持 3px 圆角方框
+   （勾选框的语义），但**尺寸档位、描边、玻璃底料三者一致**。 */
+.h3d-seg .re-glass .vact { width: 22px; height: 22px; border-radius: 50%;
                             cursor: pointer; flex: none;
                             /* ★ 第 33 轮：z-index: 6 只在 .re-glass 自己的
                                stacking context 内生效 —— 它带
@@ -803,7 +848,8 @@ const CSS = `
    集合语义、aria-checked / data-run="on" 触发绿底白勾与上轮一致。 */
 .h3d-seg .run {
               position: absolute; left: 4px; bottom: 4px;
-              width: 20px; height: 20px; margin: 0; padding: 0;
+              /* ★ 第 43 轮：20px → 22px，与 .vact 同一尺寸档位（见 .vact 注释） */
+              width: 22px; height: 22px; margin: 0; padding: 0;
               flex: none; cursor: pointer;
               border: 1px solid rgba(255,255,255,.55);
               border-radius: 3px;
@@ -811,6 +857,9 @@ const CSS = `
               color: #fff;
               font-size: 13px; font-weight: 700; line-height: 1;
               display: flex; align-items: center; justify-content: center;
+              /* ★ 与 .vact 一样加一层轻玻璃底料：两个交互件在缩略图上
+                 都该"浮"起来，而不是一个玻璃一个纯色。 */
+              box-shadow: var(--h3d-rim-hi);
               transition: background .12s, border-color .12s, color .12s;
               backdrop-filter: blur(2px); }
 .h3d-seg .run:hover { background: rgba(255,255,255,.18);
@@ -1015,7 +1064,15 @@ const CSS = `
 
 /* 轨道：小马脚下这条线 —— 两层叠在一起：
  *   .base = 暗虚线（未渲染），.fill = 实线（已跑到），宽和亮度由 JS 按进度给。
- *   小马跑到哪儿，.fill 就长到哪儿：由虚到实、由暗到亮。 */
+ *   小马跑到哪儿，.fill 就长到哪儿：由虚到实、由暗到亮。
+ *
+ * ★ 第 43 轮试过给轨道加"卡片化"外观（圆角 + 1px 描边 + specular rim + 底色），
+ *   用户两轮反馈后**全部撤掉**：
+ *     1. 不要 background（轨道不是卡片，铺实心底会盖住面板层次）
+ *     2. 不要 border / 圆角 / rim（"小马没用边框，只有脚下的线"）
+ *   结论：轨道就是**一条线**，不是容器。视觉重量全部交给那条
+ *   由虚到实、由暗到亮的进度线本身，别再往上堆框。
+ *   这里保留这段记录，免得以后又想给它加框。 */
 .h3d-rail { position: relative; height: 38px; margin-top: 1px;
             overflow: hidden; }
 .h3d-rail-line { position: absolute; left: 0; right: 0; bottom: 5px;
@@ -1421,6 +1478,10 @@ textarea.h3d-in { height: auto; min-height: 42px; padding: 4px 7px;
    以前这类坏数据完全不显示，用户只能对着空提示词框猜。 */
 .h3d-note.is-warn.is-fatal { color: #ff8080; font-weight: 600; }
 .h3d-note.is-link { cursor: pointer; }
+/* ★ 第 31 轮：「已自动修复」用绿色与黄字警告分开 —— 修过的不算 bug，不该让
+   用户误以为满屏都是问题（以前混在 issues 里打成「注意：…已自动补…台词行
+   缺少 (Sx)…」一长串，根本分不清哪条是 bug 哪条是节点代改好的）。 */
+.h3d-note.is-fix { color: #4f9d6a; }
 .h3d-note.is-link:hover { color: #4fff8f; }
 `;
 
@@ -1482,6 +1543,76 @@ function findWidget(node, name) {
   return (node.widgets || []).find((w) => w.name === name) || null;
 }
 
+/** 标量松散比较：字符串 "1" 与数字 1 视为相等（widgets_values_named 里数字是字符串）。 */
+function h3SameScalar(a, b) {
+  if (a === b) return true;
+  if (typeof a === "boolean" || typeof b === "boolean") {
+    const nb = (v) => (typeof v === "boolean" ? v : String(v).toLowerCase() === "true");
+    return nb(a) === nb(b);
+  }
+  const na = Number(a), nbb = Number(b);
+  if (isFinite(na) && isFinite(nbb) && String(a).trim() !== "" && String(b).trim() !== "") {
+    return na === nbb;
+  }
+  return String(a) === String(b);
+}
+
+/** ★★ 数据体检：`widgets_values` 与「可序列化控件」是否对得上。
+ *
+ *  背景（2026-09-20 实测，坑 49）：ComfyUI 前端 `configure` 是**按位置**把
+ *  `widgets_values` 灌给可序列化控件的：
+ *      else if (e.widgets_values) {
+ *        let t = 0;
+ *        for (let n of this.widgets ?? []) {
+ *          if (n.serialize === false) continue;
+ *          n.value = e.widgets_values[t++];
+ *        }
+ *      }
+ *  所以数组长度必须 == 可序列化控件数。而历史工作流里它可能被写成
+ *  「**全部输入位**」序（socket 槽填空串）—— H3Director 就是 25 vs 19，
+ *  于是从 `sensitivity` 起全体错位，`ref_classify` 读到了 `crf` 的 14.0：
+ *  参考图面板整块渲染失败、时间线第 N 格一起炸，而界面只会说"某个版块坏了"，
+ *  用户完全看不出根因是**保存的数据本身错位**。
+ *
+ *  这里做一次对账（名字表是权威，位置表是前端实际灌进去的），
+ *  错位就在面板顶部挂一条红字 —— 这类问题以后不可能再静默。
+ */
+function h3WidgetAlignment(node) {
+  const raw = node && node.widgets_values;
+  if (!Array.isArray(raw) || !raw.length) return null;      // 新建节点：没有历史值
+  const ws = (node.widgets || []).filter((w) => w && w.serialize !== false);
+  if (!ws.length) return null;
+  const named = node.widgets_values_named;
+  const bad = [];
+  if (named && typeof named === "object") {
+    ws.forEach((w, i) => {
+      if (!w.name || !(w.name in named)) return;
+      if (!h3SameScalar(named[w.name], raw[i])) {
+        bad.push({ i: i, name: w.name, pos: raw[i], named: named[w.name] });
+      }
+    });
+    if (bad.length) return { got: raw.length, want: ws.length, bad: bad };
+    return null;
+  }
+  return raw.length === ws.length ? null : { got: raw.length, want: ws.length, bad: [] };
+}
+
+/** 把原生 widget 的值转成 `<input type="number">` 能接受的字面量。
+ *
+ *  ★ 为什么必须过这一道：老工作流里某个槽位可能还留着**布尔**——
+ *    `unload_every` 的前身 `unload_models_after` 存的就是 true/false。
+ *    `String(true)` === "true" 会被浏览器直接拒收，`<input type="number">`
+ *    于是渲染成**空白**，看起来就像「这个参数没生效 / 填不进去」。
+ *    布尔按旧语义等价折算（true→1、false→0）；其它非法值退回 ""，
+ *    让 placeholder（如「0 = 从不」）兜底说明默认口径。
+ */
+function numText(v) {
+  if (v == null || v === "") return "";
+  if (typeof v === "boolean") return v ? "1" : "0";
+  const n = parseFloat(v);
+  return isFinite(n) ? String(n) : "";
+}
+
 function graphNodes() {
   const g = app.graph;
   return (g && (g._nodes || g.nodes)) || [];
@@ -1508,8 +1639,31 @@ function upstream(node, inputName) {
   }
 }
 
-/** ref_image_0..8 输入口 → 上游 LoadImage 选的文件名 */
+/** ref_image_0..8 输入口 → 上游 LoadImage 选的文件名
+ *
+ *  ★ 带一层极短的记忆化（默认 100ms）。
+ *    这个函数一次要遍历 node.inputs（9 次 find）+ 沿连线回溯上游节点拿控件值，
+ *    而它被调用的地方密度很高：参考图轮询（1s 一次）、时间线每段块建缩略图
+ *    （N 段 = N 次）、参考图面板 renderInner（两次）、提示词胶囊、@ 提及菜单。
+ *    渲染途中这些会被成倍放大。
+ *    100ms 的窗口足以把"同一次重绘里的 N 次调用"合并成 1 次，同时短到用户
+ *    换图后下一帧就能看到 —— 上游 onConnectionsChange 与 refWatch 的签名
+ *    轮询都会主动调 invalidateRefSlots()，所以换图不会被缓存挡住。
+ */
+const REF_SLOTS_TTL_MS = 100;
+const _refSlotsMemo = new WeakMap();     // node -> { stamp, slots }
+
+function invalidateRefSlots(node) {
+  if (node) _refSlotsMemo.delete(node);
+}
+
 function refSlotImages(node) {
+  if (!node) return [];
+  const now = (typeof performance !== "undefined" && performance.now)
+    ? performance.now() : Date.now();
+  const memo = _refSlotsMemo.get(node);
+  // WeakMap 的 value 里带时间戳；节点被回收时整条记录随之消失，不会泄漏。
+  if (memo && (now - memo.stamp) < REF_SLOTS_TTL_MS) return memo.slots;
   const out = [];
   for (let i = 0; i < 9; i++) {
     const input = (node.inputs || []).find((x) => x.name === `ref_images.ref_image_${i}`);
@@ -1522,6 +1676,8 @@ function refSlotImages(node) {
     }
     out.push({ slot: i + 1, file, linked: !!input.link, node: src });
   }
+  try { _refSlotsMemo.set(node, { stamp: now, slots: out }); }
+  catch (e) { /* WeakMap 不可用就退化成每次都算 */ }
   return out;
 }
 
@@ -1557,14 +1713,16 @@ function segBrief(seg) {
   return stripTaskPrefix(norm(seg.prompt));
 }
 
-/* 官方任务前缀：后端 summary 规范**要求**以 [xxx] 开头
- * （见 prompt_pack.TASK_PREFIXES / 校验里那条
+/* 官方任务前缀：后端 summary 规范**要求**以 [xxx] 开头（校验里那条
  *  "summary 没有用官方任务前缀开头"），所以原文必须保留、绝不能改。
  * 但时间线缩略图那一行只有一行高度、宽度又窄，前缀纯属噪音 ——
  * 用户要的是"这段讲什么"，不是"这是什么任务类型"。
  * → 只在**展示层**剥掉，数据层一个字不动。
- * ★ 只认行首 + 只认后端登记过的那几种前缀，不能全局删中括号
- *   （正文里可能有作者自己写的中括号，那是有意义的）。 */
+ * ★ 只认行首 + 只认下面登记过的那几种前缀，不能全局删中括号
+ *   （正文里可能有作者自己写的中括号，那是有意义的）。
+ * ★ 这份清单现在是**唯一一份**：后端 prompt_pack 里那个 TASK_PREFIXES 常量
+ *   全包零引用，2026-09-20 已删（两份真相迟早对不上）。改前缀要改这里。
+ *   注意后端校验只查了行首是不是 `[`，比这份清单宽松。 */
 const TASK_PREFIX_RE = /^\s*\[\s*(?:keyframe completion|reference generation|video editing|video continuation|audio reuse|audio reference)[^\]]*\]\s*/i;
 
 /** 剥掉展示用的任务前缀。可能重复出现（"video continuation + reference generation"
@@ -2175,7 +2333,20 @@ function attachMentionMenu(ta, node) {
   return view;   // 交给调用方插到 textarea 下面
 }
 
-function viewUrl(name, type, subfolder) {
+/** 造一个 /view 预览 URL。
+ *
+ *  ★ `bust` 默认 **false** —— URL 保持稳定（同样的输入 → 同样的字符串）。
+ *   以前无条件拼 `&t=Date.now()`，看起来是为了"换图后立刻看到新图"，实际
+ *   代价大得多：URL 每帧都在变 → 浏览器缓存永远命中不了 → 每重建一次面板
+ *   就把参考图、分段视频的字节全部重拉一遍。分段视频动辄几 MB，渲染途中
+ *   每 4 秒一次心跳重建，那就是每 4 秒重下一次整排视频。
+ *
+ *   真正需要破缓存的只有一种情况：**同一个文件名对应的内容被换掉了**
+ *   （用户在 LoadImage 上换了图、某段被重渲）。ComfyUI 的 /view 不看
+ *   mtime，所以那时才需要显式 bust —— 调用方（换图 / 重渲完成路径）传
+ *   true 即可，代价只落在真正变化的那一次。
+ */
+function viewUrl(name, type, subfolder, bust) {
   let filename = name || "";
   let sub = subfolder || "";
   if (!sub && filename.includes("/")) {
@@ -2185,7 +2356,7 @@ function viewUrl(name, type, subfolder) {
   }
   let url = `/view?filename=${encodeURIComponent(filename)}&type=${type}`;
   if (sub) url += `&subfolder=${encodeURIComponent(sub)}`;
-  return url + `&t=${Date.now()}`;
+  return bust ? url + `&t=${Date.now()}` : url;
 }
 
 function debounce(fn, ms) {
@@ -2738,13 +2909,17 @@ const PARAM_SECTIONS = [
     title: "分镜切分",
     note: "决定脚本怎么切成镜头；改完要重新「解析 PACK」才生效。",
     fields: [
+      // 剧本来源：这一组的其余字段（切点灵敏度 / 最短最长镜头 / 缺省提示词）
+      // 只在「源视频自动切分」下生效，所以开关必须放在这组最前面 —— 分镜JSON
+      // 模式下它们全是灰的，用户会以为功能坏了。
+      { name: "source", label: "剧本来源", kind: "sel" },
       { name: "sensitivity", label: "切点灵敏度", kind: "sel" },
       { name: "min_shot_seconds", label: "最短镜头", kind: "num",
         unit: "秒", min: 0.1, step: 0.1 },
       { name: "max_shot_seconds", label: "最长镜头", kind: "num",
         unit: "秒", min: 0.1, step: 0.1 },
       { name: "max_shots", label: "最多分镜", kind: "num",
-        unit: "段", min: 0, step: 1, ph: "0 = 全部" },
+        unit: "段", min: 0, step: 1, int: true, ph: "0 = 全部" },
       { name: "handoff_seconds", label: "回放衔接", kind: "num",
         unit: "秒", min: 0, step: 0.05 },
       { name: "fallback_prompt", label: "缺省提示词", kind: "area" },
@@ -2759,7 +2934,12 @@ const PARAM_SECTIONS = [
         min: 0, max: 51, step: 1, ph: "越小越清晰" },
       { name: "stabilize", label: "亮度稳定", kind: "num",
         min: 0, max: 1, step: 0.05 },
-      { name: "unload_models_after", label: "每段后卸载模型", kind: "chk" },
+      { name: "unload_every", label: "每 N 段卸载模型", kind: "num",
+        unit: "段", min: 0, max: 99, step: 1, int: true, ph: "0 = 从不" },
+      // 「选择渲染段」2026-09-19 起是真的只渲选中段（逐段双端锚定），
+      // 以前只在节点的高级输入里，没人找得到 —— 提到面板里并给出格式示例。
+      { name: "run_segments", label: "选择渲染段（只渲这些段）", kind: "str",
+        ph: "空=全部；如 1,3,5-7" },
       { name: "resume", label: "断点续接", kind: "chk" },
       { name: "duration_is_new_content", label: "duration = 新增时长", kind: "chk" },
     ],
@@ -2864,10 +3044,16 @@ function buildWidgetSection(node, spec) {
       if (f.min != null) el.min = String(f.min);
       if (f.max != null) el.max = String(f.max);
       el.step = String(f.step != null ? f.step : 0.1);
-      el.value = w.value == null ? "" : String(w.value);
+      if (f.ph) el.placeholder = f.ph;
+      // numText：非法值（老工作流残留的布尔等）不能让数字框变成空白，见该函数注释。
+      el.value = numText(w.value);
       const push = () => {
-        const n = parseFloat(el.value);
-        if (isFinite(n)) setWidget(node, f.name, n);
+        let n = parseFloat(el.value);
+        if (!isFinite(n)) return;
+        // f.int：后端是 Int 控件的字段（max_shots / unload_every）。
+        // 不取整的话手输 1.5 会以浮点写进 Int 控件，存盘与工作流 diff 都难看。
+        if (f.int) n = Math.round(n);
+        setWidget(node, f.name, n);
       };
       el.oninput = push; el.onchange = push;
     } else {
@@ -2931,8 +3117,15 @@ function buildWidgetSection(node, spec) {
 }
 
 /* ------------------------------------------------------------------ */
-/* 版块 2：剧本 PACK —— 只 5 个字段，一行紧凑键值                       */
+/* 版块 2：剧本 PACK —— 头部 6 项 + 诊断 issues / fixes                 */
 /* ------------------------------------------------------------------ */
+/* 用户定版（2026-09-24 18:23）：面板**只要这 6 项** ——
+ *   项目 / 模式 / 总时长 / 段数 / 画幅 / 配乐
+ * 版本 / 日期 / 规则版本 / 布局 / 会话 / 参考图槽 一律**不显示**
+ * （后端照样算、照样下发，只是面板不渲染 —— 想要看去 ①-C 报告）。
+ *
+ * 顺序与 PACK 头部块（prompt_pack.pack_text 拼写）前 6 行一致，避免
+ * 「面板看到 A B D，文件里写 A B C D」这种错位。 */
 function buildPackPanel(node, state) {
   const sec = h("div", "h3d-sec");
   const head = sectionHead(0, "剧本 PACK");
@@ -2942,45 +3135,47 @@ function buildPackPanel(node, state) {
   hd.appendChild(btn);
   const bd = h("div", "h3d-bd");
 
+  /* === PACK 头部 6 项，键名与后端 header 字典 1:1 === */
   const meta = h("div", "h3d-meta");
   const cells = {};
-  [
-    ["项目", "project", "—"],
-    ["模式", "mode", "—"],
-    ["总时长", "total_duration", "—"],
-    ["段数", "segments", "—"],
-    ["画幅", "aspect", "—"],
-  ].forEach(([label, key, fallback]) => {
+  const HEAD_ROWS = [
+    ["项目", "project"],
+    ["模式", "mode"],
+    ["总时长", "total_duration"],
+    ["段数", "segments"],
+    ["画幅", "aspect"],
+    ["配乐", "music"],
+  ];
+  HEAD_ROWS.forEach(([label, key]) => {
     const it = h("div", "h3d-item");
     it.appendChild(h("span", "k", label));
-    const v = h("span", "v is-empty", fallback);
+    const v = h("span", "v is-empty", "—");
     cells[key] = v;
     it.appendChild(v);
     meta.appendChild(it);
   });
   bd.appendChild(meta);
 
-  /* ★ 第 30 轮：后端 /h3/pack_preview 算出的 issues 以前整条丢弃 ——
-     老代码只把头部 5 项填进 meta，issues 拿到手就扔了。
-     后果很实在：PACK 里某段正文被清空时（实测 —— 工作流 JSON 里 PACK 存了
-     两份 widgets_values / widgets_values_named，ComfyUI 加载了 S01 英文块
-     被清空的那一份），界面上一个字都不报，用户只看到空提示词框，
-     分不清是"本来就没内容"还是"数据坏了"。
-     这里补一条诊断区：普通 issue 黄字，致命 issue（整段正文为空）红字，
-     并且右上「N 段」徽标一起变红 —— 让坏数据自己会喊。 */
-  const issueBox = h("div", "h3d-note is-warn");
-  issueBox.style.display = "none";
-  issueBox.style.marginTop = "6px";
-  bd.appendChild(issueBox);
+  /* ★ 用户定版（2026-09-24 18:33）：面板**只**显示 6 项头部
+   （项目 / 模式 / 总时长 / 段数 / 画幅 / 配乐），issues / fixes
+   诊断区一律**不渲染**。要看诊断信息去 ①-C 报告。
+   issueBox / fixBox DOM 已**删除** —— 连「读不到 PACK 文本」、
+   「解析失败」的兜底文字也不再显示，徽标 + console.error 即够。
+   fatal 致命判定（整段正文为空）仍用于把徽标变红，避免误以为解析成功。 */
 
   collapsible(node, bd, head.title, head.badge);
 
   async function parse() {
     const text = state.packText();
     if (!text || !text.trim()) {
+      // 「读不到 PACK 文本」兜底：徽标 + console.error，不写 issueBox
+      // （issueBox 已被用户要求删除）。
       tag.textContent = "无 PACK";
       tag.className = "h3d-tag is-bad";
-      state.onPack(null);
+      console.warn("[H3 Director] 读不到 PACK 文本："
+        + "上游 H3PromptPackParser 的 pack_text 口没接文本框，或文本框为空。");
+      state.onPackFail("读不到 PACK 文本（pack_text 口没接文本框，或文本框为空）");
+      refit(node);
       return;
     }
     tag.textContent = "解析中…";
@@ -3000,57 +3195,82 @@ function buildPackPanel(node, state) {
       if (!data.ok) throw new Error(data.error || "解析失败");
       const head = data.header || {};
 
-      // 显示 5 项头部信息；后端 issues 现在也要显示（见 issueBox 注释）
-      ["project", "mode", "total_duration", "segments", "aspect"]
-        .forEach((key) => {
-          const el = cells[key];
-          if (!el) return;
-          let raw = key === "segments"
-            ? (head.segments || String(data.segments.length))
-            : head[key];
-          if (!raw) {
-            el.textContent = "—";
-            el.className = "v is-empty";
-            return;
-          }
-          el.textContent = "";
-          el.className = "v";
-          el.appendChild(document.createTextNode(String(raw)));
-          if (key === "total_duration") {
-            const tn = data.total_new_seconds, tg = data.total_gen_seconds;
-            if (tn != null && tg != null) {
-              const sub = h("span", "sub");
-              sub.textContent = "  " + tn.toFixed(1) + "s 新增 / "
-                                + tg.toFixed(1) + "s 生成";
-              el.appendChild(sub);
-            }
-          }
-        });
+      // 只显示头部 6 项：项目 / 模式 / 总时长 / 段数 / 画幅 / 配乐。
+      //   版本 / 日期 / 规则版本 / 布局 / 会话 / 参考图槽 一律不渲染
+      //   （用户定版 2026-09-24 18:23，后端照样算、①-C 报告里照样能看）。
+      const headerData = data.header || {};
+      const writeCell = (el, raw, afterNode) => {
+        if (!raw) {
+          el.textContent = "—";
+          el.className = "v is-empty";
+          return;
+        }
+        el.textContent = "";
+        el.className = "v";
+        el.appendChild(document.createTextNode(String(raw)));
+        if (afterNode) el.appendChild(afterNode);
+      };
 
-      // ★ 第 30 轮：把后端诊断真正显示出来（以前整条丢弃，见 issueBox 注释）。
-      //   致命 issue（整段正文为空）转红字，徽标也转红 —— 一眼看见坏数据。
+      ["project", "mode", "total_duration", "segments",
+       "aspect", "music"].forEach((key) => {
+        const el = cells[key];
+        if (!el) return;
+        let raw = key === "segments"
+          ? (headerData.segments || String(data.segments.length))
+          : headerData[key];
+        let after = null;
+        if (key === "total_duration") {
+          const tn = data.total_new_seconds, tg = data.total_gen_seconds;
+          if (tn != null && tg != null) {
+            const sub = h("span", "sub");
+            sub.textContent = "  " + tn.toFixed(1) + "s 新增 / "
+                              + tg.toFixed(1) + "s 生成";
+            after = sub;
+          }
+        }
+        writeCell(el, raw, after);
+      });
+
+      // ★ 用户定版（2026-09-24 18:33）：面板只显示框中 6 项头部，
+      //   issues / fixes **不在面板渲染**（要看去 ①-C 报告）。
+      //   这里只保留致命判定（整段正文为空）的徽标变红提示，避免用户
+      //   误以为「解析成功」其实首段是空的。
       const issues = Array.isArray(data.issues) ? data.issues : [];
       const fatal = issues.filter((s) => H3_FATAL_ISSUE_RE.test(String(s)));
-      issueBox.replaceChildren();
-      if (!issues.length) {
-        issueBox.style.display = "none";
-      } else {
-        issueBox.style.display = "";
-        issueBox.className = fatal.length
-          ? "h3d-note is-warn is-fatal" : "h3d-note is-warn";
-        issueBox.appendChild(document.createTextNode(
-          (fatal.length ? "⚠ " : "") + issues.join("   ·   ")));
-      }
 
-      tag.textContent = data.segments.length + " 段"
-        + (fatal.length ? " ⚠" : "");
-      tag.className = fatal.length ? "h3d-tag is-bad" : "h3d-tag is-ok";
+      // ★ 0 段必须按失败处理（2026-09-25）：后端 ok=true 却一段都没有时，
+      //   徽标若还是绿的「0 段」，用户看到的就是「剧本 PACK / 参考图 /
+      //   分镜时间线」三块全空且毫无提示 —— 最常见的成因是 h3PackTextSource()
+      //   认错了文本框（上游夹了纯计算节点时，容易拿到别的控件的值）。
+      const nSeg = (data.segments || []).length;
+      if (nSeg === 0) {
+        const srcHit = h3PackTextSource();
+        const srcNode = srcHit ? srcHit.node : null;
+        const label = srcNode
+          ? ("节点 #" + srcNode.id + " " + (srcNode.title || srcNode.type || "")
+             + " 的控件「" + String((srcHit.widget && srcHit.widget.name) || "?") + "」")
+          : "（没找到源节点）";
+        console.warn("[H3 Director] PACK 解析出 0 段 —— 源文本长度 "
+          + text.length + "，取自 " + label + "，开头 120 字符："
+          + JSON.stringify(text.slice(0, 120))
+          + "。若这段不是剧本，说明面板找错了文本框。");
+      }
+      const segBad = fatal.length > 0 || nSeg === 0;
+      tag.textContent = nSeg + " 段" + (segBad ? " ⚠" : "");
+      tag.className = segBad ? "h3d-tag is-bad" : "h3d-tag is-ok";
+      // ★ 语言可用性必须在 onPack 之前落进 state：onPack 会触发 plan.render()，
+      //   而 render() 要靠这两个标志决定「中文 ZH」标签藏不藏。
+      state.hasEn = data.has_en !== false;
+      state.hasZh = !!data.has_zh;
       state.onPack(data);
     } catch (err) {
+      const msg = (err && err.message) || String(err);
       tag.textContent = "解析失败";
       tag.className = "h3d-tag is-bad";
-      issueBox.style.display = "none";
-      state.onPack(null);
+      // 「解析失败」兜底：徽标 + console.error，不写 issueBox。
+      console.error("[H3 Director] PACK 解析失败：", err,
+        "—— 面板上的段数 / 参考图引用是上一次成功解析的结果。");
+      state.onPackFail("PACK 解析失败：" + msg);
     }
     refit(node);   // PACK 解析完，项目信息那行会变宽，节点要跟着贴合
   }
@@ -3066,6 +3286,179 @@ function buildPackPanel(node, state) {
 /* ------------------------------------------------------------------ */
 /* 分辨率读/写 ResolutionSelector（无则直写 H3 Chain Settings）；时长读/写
  * PACK 解析器的 default_duration 与 H3Director 的 handoff_seconds。 */
+/* ------------------------------------------------------------------ */
+/* 修脸质检 —— H3FaceRefine 的开关与报告                                 */
+/* ------------------------------------------------------------------ */
+/* ★ 为什么这块面板要挂在 H3Director 上、却操作**另一个节点**：
+ *   修脸是可选外接的（Director 的 face_refine 口接不接 H3FaceRefine 都合法），
+ *   开关与阈值天然长在 H3FaceRefine 上。面板放在时间线后面，是因为
+ *   「调画质」正好是这条操作链的下一站：定规格 → 看进度 → 调画质。
+ *   找不到 H3FaceRefine 节点时**如实说没找到**，而不是给一个点不动的开关 ——
+ *   静默失效的开关比没有开关更糟（用户会以为质检开着）。 */
+function buildFaceQcPanel(node, state) {
+  const sec = h("div", "h3d-sec");
+  const head = sectionHead(0, "修脸质检");
+  const hd = head.hd, tag = head.tag;
+  const bd = h("div", "h3d-bd");
+  sec.appendChild(head.hd);
+  sec.appendChild(bd);
+
+  const faceNode = () => findNodeByClass("H3FaceRefine");
+
+  /* 开关本体：与 .h3d-btn 同族的「压印」控件，不加 backdrop-filter
+     （README 的 Liquid Glass 规则：按钮不叠玻璃，避免 glass-on-glass）。
+     开态复用既有的 .is-on（与 .h3d-lang-tab 选中态同一语言），不用
+     .is-primary —— 那个是「主操作」语义（解析/运行），这里是「一个状态」。 */
+  const btnQc = h("button", "h3d-btn", "质检：关");
+  const bdFields = h("div", "h3d-fields");
+  const noteWired = h("div", "h3d-note", "");
+  const report = h("div", "h3d-fqc-report", "");
+  bd.appendChild(bdFields);
+  bd.appendChild(report);
+
+  const btnRow = h("div", "h3d-field");
+  btnRow.appendChild(h("div", "lb", "质量自检"));
+  const ctrls = h("div", "h3d-fqc-ctrls");
+  ctrls.appendChild(btnQc);
+  btnRow.appendChild(ctrls);
+  bdFields.appendChild(btnRow);
+
+  /* 另两枚：最大遍数 + 自适应强度。做成两枚 .h3d-btn（而不是裸 input）
+     是因为数字输入在这个面板里出现频率极低，值域又只有 1..3，
+     「−/＋」比输入框更少误触 —— 也省掉一处 input 焦点与面板重绘的耦合。 */
+  const btnAttemptsDown = h("button", "h3d-btn", "−");
+  const btnAttemptsUp = h("button", "h3d-btn", "＋");
+  const attemptsVal = h("span", "h3d-fqc-num", "3");
+  const rowAttempts = h("div", "h3d-field");
+  rowAttempts.appendChild(h("div", "lb", "最多修几遍"));
+  const ctrlsA = h("div", "h3d-fqc-ctrls");
+  ctrlsA.appendChild(btnAttemptsDown);
+  ctrlsA.appendChild(attemptsVal);
+  ctrlsA.appendChild(btnAttemptsUp);
+  rowAttempts.appendChild(ctrlsA);
+  bdFields.appendChild(rowAttempts);
+
+  const btnAdaptive = h("button", "h3d-btn", "自适应强度：开");
+  const rowAdaptive = h("div", "h3d-field");
+  rowAdaptive.appendChild(h("div", "lb", "按脸大小"));
+  const ctrls2 = h("div", "h3d-fqc-ctrls");
+  ctrls2.appendChild(btnAdaptive);
+  rowAdaptive.appendChild(ctrls2);
+  bdFields.appendChild(rowAdaptive);
+
+  function qcWidget() {
+    const fn = faceNode();
+    return fn ? findWidget(fn, "quality_check") : null;
+  }
+  function adaptiveWidget() {
+    const fn = faceNode();
+    return fn ? findWidget(fn, "adaptive_denoise") : null;
+  }
+  function attemptsWidget() {
+    const fn = faceNode();
+    return fn ? findWidget(fn, "max_attempts") : null;
+  }
+
+  function render() {
+    const fn = faceNode();
+    if (!fn) {
+      btnQc.textContent = "质检：未接";
+      btnQc.disabled = true;
+      btnQc.className = "h3d-btn";
+      btnAdaptive.disabled = true;
+      btnAttemptsDown.disabled = true;
+      btnAttemptsUp.disabled = true;
+      noteWired.textContent =
+        "画布上还没有 H3FaceRefine 节点。加一个并把它的 face_refine 接到 "
+        + "H3Director 的同名口，这里才能开质检。";
+      noteWired.className = "h3d-note is-warn";
+      tag.textContent = "未接";
+      report.textContent = "";
+      report.className = "h3d-fqc-report";
+      return;
+    }
+    const w = qcWidget();
+    const on = !!w && w.value === "开启";
+    btnQc.disabled = false;
+    btnAdaptive.disabled = false;
+    btnAttemptsDown.disabled = !on;
+    btnAttemptsUp.disabled = !on;
+    btnQc.textContent = "质检：" + (on ? "开" : "关");
+    btnQc.className = "h3d-btn" + (on ? " is-on" : "");
+
+    const wa = adaptiveWidget();
+    const ad = !wa || !!wa.value;
+    btnAdaptive.textContent = "自适应强度：" + (ad ? "开" : "关");
+    btnAdaptive.className = "h3d-btn" + (ad ? " is-on" : "");
+
+    const wm = attemptsWidget();
+    attemptsVal.textContent = String(wm && wm.value != null ? wm.value : 3);
+
+    /* sigmas 口才是修脸的总开关：不接 = 整段不修。这里如实反映，
+       免得用户在面板上开着质检、实际一条脸都没修。 */
+    let hasSig = false;
+    try { hasSig = !!upstream(fn, "sigmas"); } catch (e) { hasSig = false; }
+    noteWired.className = hasSig ? "h3d-note" : "h3d-note is-warn";
+    noteWired.textContent = hasSig
+      ? "已接噪声表 —— 修脸生效中。"
+      : "H3FaceRefine 的 sigmas 口没接 —— 修脸整体不生效（此时质检开关无意义）。";
+    tag.textContent = hasSig ? (on ? "质检开" : "质检关") : "未生效";
+  }
+
+  /* 改完控件要通知 ComfyUI「这个节点脏了」，否则运行按钮可能不亮。
+   * 宿主版本之间钩子位置不一致，逐一尝试、失败就算了断：
+   * 控件值已经写进 widget，运行时会照新值走，只是按钮可能要点两下。 */
+  function dirty() {
+    const fn = faceNode();
+    if (!fn) return;
+    try { if (typeof fn.setDirtyCanvas === "function") { fn.setDirtyCanvas(true, true); return; } } catch (e) { /* 换下一种 */ }
+    try {
+      const g = app && app.graph;
+      if (g && typeof g.beforeChange === "function") { g.beforeChange(); return; }
+    } catch (e) { /* 没有图级钩子 */ }
+  }
+
+  btnQc.onclick = () => {
+    const w = qcWidget();
+    if (!w) return;
+    w.value = w.value === "开启" ? "关闭" : "开启";
+    dirty();
+    render();
+  };
+  btnAdaptive.onclick = () => {
+    const w = adaptiveWidget();
+    if (!w) return;
+    w.value = !w.value;
+    dirty();
+    render();
+  };
+  const bumpAttempts = (delta) => {
+    const w = attemptsWidget();
+    if (!w) return;
+    let v = parseInt(w.value, 10);
+    if (!isFinite(v)) v = 3;
+    v = Math.min(3, Math.max(1, v + delta));
+    w.value = v;
+    dirty();
+    render();
+  };
+  btnAttemptsDown.onclick = () => bumpAttempts(-1);
+  btnAttemptsUp.onclick = () => bumpAttempts(1);
+
+  /** 渲染后由 Director 的运行报告调用：把每段的质检结论摊开给人看。 */
+  function setReport(text, ok) {
+    if (text == null || text === "") {
+      report.textContent = "";
+      report.className = "h3d-fqc-report";
+      return;
+    }
+    report.textContent = text;
+    report.className = "h3d-fqc-report" + (ok === false ? " is-bad" : " is-ok");
+  }
+
+  return { sec, bd, render, setReport, node: faceNode };
+}
+
 function buildOutputPanel(node, state) {
   const sec = h("div", "h3d-sec");
   const head = sectionHead(0, "输出规格");
@@ -3568,6 +3961,22 @@ function buildRefPanel(node, state) {
 
   let _refErr = "";
 
+  /* 参考图「刚换过」的槽位 → 这些槽位的预览图必须绕过浏览器缓存。
+ *
+ * ★ 为什么需要它：viewUrl() 默认返回**稳定 URL**（不拼时间戳），这样面板
+ *   重绘时才能命中缓存、不重拉字节。但同名文件被覆盖时（用户把新的
+ *   kate.png 覆盖到 input 目录、或 ComfyUI 复用了同一个输出名），文件名
+ *   没变、URL 就没变，浏览器会继续显示旧图 —— 用户表现为"换图没反应"，
+ *   而实际渲染用的已经是新图。
+ *   所以只在**真正发生过替换**的槽位上打这个标记，作用域精确到那一格；
+ *   下次该槽位渲染完就清掉，不会让整排参考图永久放弃缓存。 */
+  const _refFresh = new Set();
+  function markRefFresh(slot) {
+    _refFresh.add(Number(slot));
+    // 一帧之后清掉：本次重绘用破缓存 URL，之后回到稳定 URL。
+    setTimeout(() => _refFresh.delete(Number(slot)), 0);
+  }
+
   function assign(slot, filename) {
     _refErr = refPush(slot, filename) || "";
     // 只有"写不回画布"时才退回面板内存里存着（至少缩略图能看），
@@ -3575,6 +3984,7 @@ function buildRefPanel(node, state) {
     state.refOverride = state.refOverride || {};
     if (_refErr) state.refOverride[slot] = { file: filename };
     else delete state.refOverride[slot];
+    markRefFresh(slot);          // 内容可能同名被覆盖 → 这一次要破缓存
     save();
     render();
   }
@@ -3612,18 +4022,32 @@ function buildRefPanel(node, state) {
     const have = new Set(refSlotImages(node).filter((s) => s.file).map((s) => s.slot));
     Object.keys(state.refOverride || {}).forEach((k) => have.add(parseInt(k, 10)));
     const missing = [...used].filter((n) => !have.has(n)).sort((a, b) => a - b);
+    // ★ 剧本未知（没解析 / 解析失败）时，"需 M"是问号，不是 0 —— 把 used.size=0
+    //   当成"剧本不需要参考图"会把整块统计隐藏掉，用户看到的是"没有需求"，
+    //   而事实是"还不知道"。接了图却看不见"需 ?"，正是误判的起点。
+    const packKnown = state.packKnown();
 
     /* 顶部统计（第 14 轮重设计）：
      * 旧版是「7 参考图 需 1/2/3/4」—— 数量和缺失挤成一坨，分不清哪个是哪个。
      * 现在拆成两个语义明确的东西：
      *   refStat = 「已接 N / 剧本需 M」（主信息，灰底中性）
      *   tag     = 「缺 1/2/3/4」警示条（只在真缺时出现，黄底，不抢主信息） */
-    // 没有剧本就没有「需 M」，整块统计隐藏（只留按钮那一行）
-    statEl.style.display = used.size ? "" : "none";
+    // 有剧本需求 → 正常显示；没需求但有图且剧本未知 → 也要显示（需 ?）
+    statEl.style.display = (used.size || (have.size && !packKnown)) ? "" : "none";
     statNum.textContent = String(have.size);
     statSep.textContent = "/";
-    statNeed.textContent = String(used.size);
+    statNeed.textContent = packKnown ? String(used.size) : "?";
 
+    if (!packKnown) {
+      // 未知 ≠ 已齐，也 ≠ 缺图。中性措辞，不冒充任何结论。
+      missEl.className = "miss";
+      missEl.textContent = state.packError ? "剧本未解析" : "待解析";
+      missEl.title = state.packError
+        ? (state.packError + " —— 无法判断剧本引用了哪些 <Picture N>")
+        : "剧本还没解析出分镜，无法判断引用了哪些 <Picture N>。"
+          + "点「剧本 PACK」里的「解析 PACK」。";
+      return;
+    }
     if (!used.size) { missEl.className = "miss is-ok"; missEl.textContent = ""; return; }
     if (missing.length) {
       missEl.className = "miss";
@@ -3761,7 +4185,11 @@ function buildRefPanel(node, state) {
     return "";
   }
 
-  /** 剧本里每个 <Picture N> 被多少分镜引用过。槽位编号与 N 一一对应。 */
+  /** 剧本里每个 <Picture N> 被多少分镜引用过。槽位编号与 N 一一对应。
+   *
+   *  ★ ``known`` 必须一起返回：pictures 空可能是"剧本真的没引用"，也可能是
+   *    "剧本压根没解析出来"。调用方（卡片徽标 / 说明行）只有拿到 known 才能
+   *    决定说「0 镜 · 未被引用」还是「? · 待解析」—— 前者是断言，后者是实情。 */
   function pictureUsage() {
     const counts = new Map();
     const needed = new Set();
@@ -3773,7 +4201,7 @@ function buildRefPanel(node, state) {
         counts.set(n, (counts.get(n) || 0) + 1);
       });
     });
-    return { counts, needed };
+    return { counts, needed, known: state.packKnown() };
   }
 
   function makeCard(slot, savedRow, slotInfo, usage) {
@@ -3781,6 +4209,10 @@ function buildRefPanel(node, state) {
     const file = (ov && ov.file) || (slotInfo && slotInfo.file) || "";
     const count = (usage && usage.counts.get(slot)) || 0;
     const needed = !!(usage && usage.needed.has(slot));
+    // ★ 剧本未知时**不能**说「未被引用」。以前 count=0 就直接打黄标
+    //   「0 镜 · 未被引用：剧本里没有任何 <Picture N> 指向它」—— 那是在
+    //   "不知道剧本写了什么"的前提下编出来的断言（解析失败时每次都会出现）。
+    const known = !!(usage && usage.known);
     const card = h("div", "h3d-ref");
     card.dataset.slot = String(slot);
     card.dataset.kind = (savedRow && savedRow.kind) || "";
@@ -3791,7 +4223,8 @@ function buildRefPanel(node, state) {
 
     if (file) {
       const img = document.createElement("img");
-      img.src = viewUrl(file, "input");
+      // 该槽刚被换过图 → 这一帧破缓存，保证用户立刻看到新图（见 markRefFresh）。
+      img.src = viewUrl(file, "input", null, _refFresh.has(slot));
       img.onerror = () => { img.style.visibility = "hidden"; };
       card.appendChild(img);
     } else {
@@ -3801,7 +4234,7 @@ function buildRefPanel(node, state) {
     /* 状态条：左侧 4px 色边（::before），替代旧版压在脸上的文字徽标。
      * 未引用（接了图但剧本没点名）= 黄；缺图（剧本点名但没接）= 红。 */
     if (!file && needed) card.classList.add("is-missing");
-    else if (file && !count) card.classList.add("is-unused");
+    else if (file && !count && known) card.classList.add("is-unused");
 
     /* ---- 遮罩层 .veil（第 16 轮）：hover 时整卡压半透明灰底，数据+功能居中排列 ----
      * 第 14/15 轮把「引用次数」放右上角标、「操作按钮」放右侧竖排工具条，
@@ -3819,10 +4252,16 @@ function buildRefPanel(node, state) {
     if (count) {
       cnt.textContent = count + " 镜";
       cnt.title = "被 " + count + " 个分镜引用（<Picture " + slot + ">）";
-    } else if (file) {
+    } else if (file && known) {
       cnt.textContent = "0 镜";
       cnt.className = "cnt is-warn";
       cnt.title = "未被引用：剧本里没有任何 <Picture " + slot + "> 指向它，H3 不会把它画进画面";
+    } else if (file) {
+      // 剧本未知：中性问号，不下结论。
+      cnt.textContent = "?";
+      cnt.className = "cnt";
+      cnt.title = "剧本还没解析出分镜，无法判断 <Picture " + slot
+        + "> 有没有引用它。点「剧本 PACK」里的「解析 PACK」重试。";
     } else if (needed) {
       cnt.textContent = "! 缺图";
       cnt.className = "cnt is-bad";
@@ -4025,8 +4464,27 @@ function buildRefPanel(node, state) {
     return tile;
   }
 
+  /** 参考图面板重绘。**外层只做一件事：把 renderInner 的异常接住并显式报出来。**
+   *
+   *  ★ 为什么必须这样（2026-09-20 第 42 轮实测）：
+   *    以前 render() 第一句就是 `grid.innerHTML = ""`，然后一张张 appendChild。
+   *    只要**任何一张卡片**在构造途中抛异常，grid 就永久停在空白 ——
+   *    用户看到的是「参考图版块整个丢了」（4 张图明明都接好了）。
+   *    而调用方 onPack 里的 catch 是空的，一个字都不报，排查时完全无迹可寻。
+   *    现在：卡片先建在游离 fragment 里、建完才整体提交（要么全有要么全不动），
+   *    并且把异常写成面板上的红字 + 控制台堆栈。 */
   function render() {
-    grid.innerHTML = "";
+    try {
+      renderInner();
+    } catch (err) {
+      console.error("[H3 Director] 参考图面板渲染失败：", err);
+      noteRef.textContent = "⚠ 参考图面板渲染失败：" + ((err && err.message) || err)
+        + "　—— 卡片保持上一次的样子（没有丢），详细堆栈见浏览器控制台。";
+      noteRef.className = "h3d-note is-warn is-fatal";
+    }
+  }
+
+  function renderInner() {
     const slots = refSlotImages(node);
     const saved = classify();
     /* ★ 空槽不再占位（2026-09-16 第 11 轮）。
@@ -4053,12 +4511,17 @@ function buildRefPanel(node, state) {
     list.sort((a, b) => a - b);
 
     const usage = pictureUsage();
+    /* ★ 原子提交：整批卡片先建在**游离 fragment** 里，全部建完才一次性换上去。
+     *   以前是 `grid.innerHTML = ""` 之后逐个 appendChild —— 中途抛异常就只剩
+     *   空白网格（"参考图版块丢了"）。现在失败时旧卡片原样保留，信息不丢。 */
+    const frag = document.createDocumentFragment();
     list.forEach((slot) => {
       const info = slots.find((s) => s.slot === slot) || null;
       const row = saved.find((r) => r.slot === slot) || {};
-      grid.appendChild(makeCard(slot, row, info, usage));
+      frag.appendChild(makeCard(slot, row, info, usage));
     });
-    grid.appendChild(makeAdd());
+    frag.appendChild(makeAdd());
+    grid.replaceChildren(frag);      // ← 只有走到这里，界面才真的换新
     refreshTag();
     // 把"到底有没有接进画布"说清楚 —— 这一步以前是静默的
     if (_refErr) {
@@ -4068,6 +4531,12 @@ function buildRefPanel(node, state) {
       const slotsNow = refSlotImages(node);
       const n = slotsNow.filter((s) => s.file).length;
       const usage = pictureUsage();
+      // ★ 剧本是否**已知**。packData 为 null（还没解析 / 解析失败）或解出来是
+      //   空的时候，needed 必然是空集 —— 但那是"我们不知道"，不是"剧本没写"。
+      //   以前不区分，于是每次解析失败/首屏还没解析完，参考图面板都会打出
+      //   「⚠ 槽 1/2/3/4 接了图但剧本没引用 —— H3 不会把它画进画面」，
+      //   把用户引到"剧本坏了"的错误方向（实测截图原文）。
+      const packKnown = state.packKnown();
       // 双向对账，和后端 ref_images.reconcile 说同一件事：
       // 剧本点名了却没图 → H3 自己补人；接了图剧本没提 → H3 不会画它。
       const missing = [...usage.needed].filter(
@@ -4081,16 +4550,28 @@ function buildRefPanel(node, state) {
           + ">，对应槽位没接图 —— H3 会自己补出角色");
       }
       if (unused.length) {
-        notes.push("⚠ 槽 " + unused.join("/")
-          + " 接了图但剧本没引用 —— H3 不会把它画进画面");
+        if (packKnown) {
+          notes.push("⚠ 槽 " + unused.join("/")
+            + " 接了图但剧本没引用 —— H3 不会把它画进画面");
+        } else {
+          // 措辞必须中性：这是"没解析出来"，不是"剧本没引用"。
+          // packError 本身就是一句完整的话（"PACK 解析失败：…" / "读不到 PACK 文本…"），
+          // 直接接上，别再套一层括号 —— 套了会变成「PACK 解析失败（PACK 解析失败：x）」。
+          notes.push("槽 " + unused.join("/") + " 接了图 —— "
+            + (state.packError || "剧本还没解析出分镜")
+            + "，暂时无法确认有没有被 <Picture N> 引用。"
+            + "点「剧本 PACK」里的「解析 PACK」重试。");
+        }
       }
       if (!notes.length) {
         notes.push("还没接参考图。「添加图片」= 上传新文件；"
           + "要换已有的图，改画布上 LoadImage 的 image 控件，面板会自动跟上。");
       }
       noteRef.textContent = notes.join("　");
+      // ★ 黄底告警只在**真的**发现问题时给：unused 但剧本未知不算问题，
+      //   给黄底就等于把"读不到剧本"渲染成"剧本有毛病"，还是误导。
       noteRef.className = "h3d-note"
-        + ((missing.length || unused.length) ? " is-warn" : "");
+        + ((missing.length || (unused.length && packKnown)) ? " is-warn" : "");
     }
     refit(node);   // 参考图增删会改变行数，节点高度跟着贴合
   }
@@ -4129,10 +4610,12 @@ function buildTimelinePanel(node, state) {
   renderBtns.appendChild(btnFull);
   renderBtns.appendChild(btnResume);
   renderBtns.appendChild(btnRerunDirty);
-  hd.appendChild(renderBtns);
-
+  // ★ 第 21 轮：「刷新状态」也放进同一个 renderBtns —— 之前单独 appendChild
+  //   到 hd，导致它和 renderBtns 之间的间距是 hd 的 8px，而内部 3 个按钮的间距
+  //   是 10px，**视觉上不在同一层级**。现在四个按钮同一容器、同一间距。
   const btnRefresh = h("button", "h3d-btn", "刷新状态");
-  hd.appendChild(btnRefresh);
+  renderBtns.appendChild(btnRefresh);
+  hd.appendChild(renderBtns);
   const bd = h("div", "h3d-bd");
 
   // 进度条
@@ -4190,6 +4673,10 @@ function buildTimelinePanel(node, state) {
       // 不再使用 is-run-start —— 集合语义下没有"起点"概念，
       // 起点由后端按 min(run_set) 在执行时确定。
     });
+    // 勾选集进 render() 的重建签名：run_segments 变了，段块的 .is-run 高亮
+    // 就必须重画。这里在**写控件之后**再记 —— setWidget 引发的重绘读到的
+    // 已经是新值，不会出现「高亮慢一拍」的中间态。
+    state.runSetSig = Array.from(set).sort((a, b) => a - b).join(",");
   }
 
   /* ── 借鉴融合：键盘 + 滚轮导航（参考 AIMixer 时间线的 keydown / wheel）──
@@ -4285,6 +4772,10 @@ function buildTimelinePanel(node, state) {
   const HOOF_MAX = 60;         // 蹄印数量上限（animationend 没触发时的兜底）
   let _raf = null, _x = 0, _running = false, _hoofAcc = 0, _hoofAlt = false;
   let _t0 = 0;                 // 起跑时刻，用来算步态相位
+  /* 当前段已跑比例（0..1）。render() 会把段块 DOM 整个重建，重建后必须按这个值
+   * 把当前段的实线重画回去 —— 以前 render() 在跑动中写死 paintRail(0)，每次
+   * 重画都把当前段已经长出来的实线清零（进度事件一来一次，看着像闪断）。 */
+  let _progress = 0;
 
   function span() { return Math.max(0, (rail.clientWidth || 0) - PONY_W); }
 
@@ -4391,12 +4882,27 @@ function buildTimelinePanel(node, state) {
       _hoofAcc += PONY_SPEED;
       if (_hoofAcc >= HOOF_STEP) { _hoofAcc = 0; dropHoof(_x); }
       // 脚下的线跟着小马走：跑到哪儿，实线就长到哪儿、亮到哪儿
-      if (r) paintRail((_x - from) / (to - from));
+      // ★ 有当前段（r）时按小马位置画；没进任何段（准备阶段跑全程）时也要画一次，
+      //   否则 render() 重建 DOM 之后新段块的填充没人管，会一直停在 0。
+      _progress = r ? (_x - from) / (to - from) : 0;
+      paintRail(_progress);
     } else {
       pony.wrap.style.left = "0px";
+      _progress = 0;
     }
     ponyGait(pony, gaitClock() - _t0);   // 四蹄交替 + 身子起伏
     if (_running) _raf = requestAnimationFrame(step);
+  }
+
+  /** 只更新状态栏文案，**不碰小马**（位置 / rAF / 轨道填充 / 蹄印都不动）。
+   *
+   *  为什么需要它：渲染途中有一些"顺手刷新"（每段完成后的 /h3/session 拉取、
+   *  用户点「刷新状态」）不该把小马按停，但状态栏仍应如实反映最新计数。 */
+  function setPonyText(text) {
+    if (!text) return;
+    // 解析成 caption / shot_id 徽标 / task 绿色徽标；纯文字（空闲/错误/断点提示）走兜底。
+    _renderStatusText(status, text, _running);
+    node.setDirtyCanvas(true, true);
   }
 
   function setPony(running, text) {
@@ -4404,6 +4910,7 @@ function buildTimelinePanel(node, state) {
     if (_raf) { cancelAnimationFrame(_raf); _raf = null; }
     if (_running) {
       _t0 = gaitClock();
+      _progress = 0;          // 新的一段从段首起跑，实线从 0 长起
       _raf = requestAnimationFrame(step);
     } else {
       // 空闲时停在「已渲染前沿」，蹄印收干净，四蹄回到静止张角
@@ -4413,13 +4920,10 @@ function buildTimelinePanel(node, state) {
       clearHoofs();
       pony.wrap.style.left = _x + "px";
       ponyGait(pony, 0);
+      _progress = 1;
       paintRail(1);   // 停下来了：当前段（如果有）算跑满，其余按 done 画
     }
-    if (text) {
-      // 解析成 caption / shot_id 徽标 / task 绿色徽标；纯文字（空闲/错误/断点提示）走兜底。
-      _renderStatusText(status, text, running);
-    }
-    node.setDirtyCanvas(true, true);
+    setPonyText(text);
   }
 
   /** 会话名 —— 决定时间线去查哪个会话目录，**必须和后端落盘用的同名**。
@@ -4635,12 +5139,93 @@ function buildTimelinePanel(node, state) {
     ruler.appendChild(end);
   }
 
-  function render() {
+  /** 时间线重绘。外层只负责把 renderInner 的异常接住并**显式报出来**。
+   *
+   *  ★ 为什么（2026-09-20 第 42 轮实测）：以前 render() 第一句是
+   *    `segsRow.innerHTML = ""`，之后一段段 appendChild。只要**某一段**在构造
+   *    途中抛异常，段块就永远缺在后面 —— 实测用户截图里「4 段的分镜只画出
+   *    3 个段块、进度条还停在 0 / 0」，而且 onPack 的 catch 是空的、一个字
+   *    都不报，看上去就像"pack 没注入"。
+   *    现在：异常写进状态栏红字 + 控制台堆栈，且段块循环里每段独立兜底，
+   *    一格坏掉不会再拖垮整排。 */
+  /* ★ 重建签名 —— render() 的短路判据。
+     renderInner() 会 `segsRow.innerHTML = ""` 再逐段重建：每个段块要建 DOM、
+     要建 <video>（已渲染的段）、还要在 body 上挂一个 hover 浮层。渲染一跑
+     几十分钟，事件（phase 心跳每 4s、segment_done、finish、refreshRendered）
+     一直在调 render()，而**大多数时候段块的可见状态压根没变** —— 变的只有
+     小马位置和状态栏文案，那两样本来就不走 render()。
+
+     不短路的后果：每 4 秒把整排段块连同所有 <video> 元素销毁重建一次。
+     <video> 被换掉 = 播放中断、重新缓冲，用户看段缩略图会看到画面反复闪；
+     而 ComfyUI 的 /view 又不给强缓存，重建的 video 还会重新拉一遍字节。
+
+     签名必须覆盖**所有会改变段块外观的输入**：段数与各自时长、已完成集合、
+     当前段、已改待重渲集合、已渲染 URL（段落盘后缩略图要换）、run_segments
+     勾选集。任何一项变了都必须重建，所以宁可多算几项也不能漏。 */
+  function renderSignature() {
+    const segs = state.segments();
+    const parts = [
+      "n" + segs.length,
+      "d" + Array.from(doneSet).sort((a, b) => a - b).join(","),
+      "a" + activeIndex,
+      "r" + (state.runSetSig || ""),
+      "g" + Array.from(state.dirtySegs || []).sort((a, b) => a - b).join(","),
+    ];
+    for (let i = 0; i < segs.length; i++) {
+      const seg = segs[i] || {};
+      parts.push(
+        i + ":" + (seg.id || "") + ":" + (seg.new_seconds || 0) + ":"
+        + (seg.handoff_seconds || 0) + ":" + (state.renderedUrl(i + 1) || ""));
+    }
+    return parts.join("|");
+  }
+
+  function render(force) {
+    // 签名没变 = 段块外观一模一样，重建只会闪断 <video>，直接跳过。
+    // force=true 用于「宁可重画一次也不要陈旧」的调用点。
+    const sig = renderSignature();
+    if (!force && sig === _lastRenderSig) {
+      /* ★ 短路不等于「什么都不做」。renderInner() 末尾除了重建 DOM，还做三件
+       *   与段块无关的事；跳过重建就必须把它们补上，否则会留下"上一帧的残局"：
+       *     · 空闲态把小马摆回已渲前沿（renderInner 末尾的 setPony(false)）——
+       *       漏掉的话渲染刚停、小马还停在跑动的位置，用户看到"停了但马在跑"；
+       *     · paintRuler() —— 标尺要在折叠/展开、节点拉宽后重排，而那两条
+       *       路径正是"DOM 没变、标尺该变"的典型；
+       *     · refit(node) —— 高度贴合。
+       *   paintRail 在跑动中不能碰（小马位置归它自己的 rAF 管），这里只在
+       *   空闲时动 setPony(false)，与 renderInner 的口径一致。 */
+      if (!_running) { try { setPony(false); } catch (e) { /* 还没挂上 */ } }
+      try { paintRuler(); } catch (e) { /* 折叠中会自行跳过 */ }
+      try { refit(node); } catch (e) { /* 老版本没有 */ }
+      return;
+    }
+    _lastRenderSig = sig;
+    try {
+      renderInner();
+    } catch (err) {
+      console.error("[H3 Director] 时间线渲染失败：", err);
+      status.textContent = "⚠ 时间线渲染失败：" + ((err && err.message) || err)
+        + "　—— 详细堆栈见浏览器控制台。";
+      status.className = "h3d-status is-error";
+      node.setDirtyCanvas(true, true);
+    }
+  }
+  let _lastRenderSig = null;
+  // 本面板建在 body 上的 hover 浮层清单（每个已渲染段块一个）。
+  // 登记在这里而不是靠全文档选择器清理：A 节点重画时不该删掉 B 节点的浮层。
+  let _pops = [];
+
+  function renderInner() {
     segsRow.innerHTML = "";
     railLine.innerHTML = "";
     railSpans = [];
-    // 浮层挂在 body 上，重建段块时得顺手把上一批清掉，否则会越积越多
-    document.querySelectorAll(".h3d-pop.is-body").forEach((el) => el.remove());
+    // 浮层挂在 body 上，重建段块时得顺手把上一批清掉，否则会越积越多。
+    // ★ 用本面板自己登记的清单，而不是 `document.querySelectorAll(".h3d-pop")`
+    //   —— 那是全文档扫描，而画布上每个 H3 节点都有一套浮层：A 节点重画时
+    //   会把 B、C 节点正在显示的 hover 浮层一起删掉（用户正看着另一段的
+    //   预览，它凭空消失）。范围收回到"本面板建的"，两边的问题一起消掉。
+    _pops.forEach((el) => { try { el.remove(); } catch (e) { /* 已没了 */ } });
+    _pops = [];
     const segs = state.segments();
     // 不再渲染会话名标签 —— 跟下面的「已渲 X / Y」进度条、§9 功能规划头部
     // 重复，且 session name 错了也只是时间线空、不会再误导操作。
@@ -4653,7 +5238,9 @@ function buildTimelinePanel(node, state) {
       barFill.style.width = "0%";
       barText.textContent = "0 / 0";
       tag.textContent = "";
-      setPony(false);
+      // ★ 渲染途中绝不在这里按停小马：这一段 render() 只是"没分镜可画"，
+      //   不代表渲染结束。停由 finish / segment_done(末段) 负责。
+      if (!_running) setPony(false);
       return;
     }
 
@@ -4662,7 +5249,12 @@ function buildTimelinePanel(node, state) {
     //   界面只如实显示"勾了哪几段"。
     const runSet = parseRunSegments(readStr(node, "run_segments", ""), segs.length);
 
-    segs.forEach((seg, i) => {
+    /** 单段段块的构造。★ 抽成独立函数是为了让**每一段各自兜底**：
+     *  以前整段逻辑直接写在 forEach 回调里，只要第 N 段一抛异常，后面就再也
+     *  没有段块了 —— 实测"4 段的分镜只画出 3 个段块，进度条还停在 0 / 0"，
+     *  看上去就像"pack 没注入"。现在一格坏掉只坏那一格（并在格子上写明），
+     *  其余照常画完。 */
+    function buildCell(seg, i) {
       const idx = i + 1;
       const done = doneSet.has(idx);
       const active = activeIndex === idx;
@@ -4866,6 +5458,7 @@ function buildTimelinePanel(node, state) {
         meta.appendChild(h("span", "tip", "点击段块 = 新窗口打开完整视频"));
         pop.appendChild(meta);
         document.body.appendChild(pop);
+        _pops.push(pop);          // 登记到本面板清单，重建时只清自己那批
         cell.addEventListener("mouseenter", () => {
           const r = cell.getBoundingClientRect();
           // 浮层默认向正上方弹；上方顶到屏幕外就翻到段块下方
@@ -4899,6 +5492,29 @@ function buildTimelinePanel(node, state) {
       rl.appendChild(h("i", "fill"));
       railLine.appendChild(rl);
       railSpans[idx - 1] = rl;
+    }
+
+    segs.forEach((seg, i) => {
+      try {
+        buildCell(seg, i);
+      } catch (err) {
+        // 一格坏掉不能让整排消失。画出"失败格"占位，并把原因写在 title 上，
+        // 同时打到控制台 —— 以前这里没有兜底，异常直接冒到 onPack 的空 catch，
+        // 界面上留下"少了几格"的残骸而没有任何解释。
+        console.error("[H3 Director] 第 " + (i + 1) + " 段块渲染失败：", err);
+        const bad = h("div", "h3d-seg is-bad");
+        bad.dataset.index = String(i + 1);
+        bad.appendChild(h("div", "no", (seg && seg.id) || ("S" + (i + 1))));
+        bad.appendChild(h("div", "dur", "渲染失败"));
+        bad.title = "这一段块渲染失败：" + ((err && err.message) || err)
+          + " —— 详细堆栈见浏览器控制台";
+        segsRow.appendChild(bad);
+        const rl = h("div", "h3d-rail-seg");
+        rl.appendChild(h("i", "base"));
+        rl.appendChild(h("i", "fill"));
+        railLine.appendChild(rl);
+        railSpans[i] = rl;
+      }
     });
 
     const total = segs.reduce((a, s) => a + (s.new_seconds || 0), 0);
@@ -4916,9 +5532,11 @@ function buildTimelinePanel(node, state) {
     tag.className = "h3d-tag "
       + (doneSet.size === segs.length ? "is-ok" : "");
 
-    // 轨道重画：已渲=亮实线铺满，当前段交给小马那边的 rAF 按进度填，
-    // 未渲=暗虚线。跑着的时候别抢 rAF 的位置，只画到 0。
-    if (_running) paintRail(0); else setPony(false);
+    // 轨道重画：已渲=亮实线铺满，当前段按小马当前跑到的比例画，未渲=暗虚线。
+    // ★ 跑着的时候用 _progress（小马当下的位置）重画，**不能写死 0** ——
+    //   render() 会把段块 DOM 整个重建，写死 0 就等于每来一个进度事件都把当前段
+    //   已经长出来的实线清零（实测表现为"实线反复闪断"）。
+    if (_running) paintRail(_progress); else setPony(false);
     paintRuler();   // A2：标尺刻度随段数 / 宽度重排
     refit(node);   // 段数/进度变了，时间线块会换行，节点高度跟着贴合
   }
@@ -4938,18 +5556,64 @@ function buildTimelinePanel(node, state) {
     }, typeof delay === "number" ? delay : 400);
   }
 
-  async function refreshRendered() {
+  /** 把 /h3/session 的返回灌进 state.rendered / doneSet。
+   *
+   *  ★ 刷新与「断点渲染」按钮原本各写了一份同样的三行（取 url → 拼缓存键 →
+   *    填 doneSet），两处都还在拼 ``Date.now()``。合成一处后缓存键只有一种
+   *    口径，mtime 键改一次两处同时生效 —— 不会再出现「刷新后视频是新的、
+   *    点断点又退回旧缓存」这种前后不一致。
+   */
+  function absorbSession(data) {
+    const rows = data.segments || [];
+    state.rendered.clear();
+    rows.forEach((s) => {
+      if (s.url) {
+        state.rendered.set(s.index,
+          s.url + "&t=" + (s.mtime != null ? s.mtime : "0"));
+      }
+    });
+    doneSet = new Set(rows.map((s) => s.index));
+  }
+
+  /** 拉一次 /h3/session，把「磁盘上已渲好的段」同步进时间线。
+   *
+   *  ``silent`` = 只更新缩略图/计数，不改状态栏文案（给 finish 收尾用，
+   *  免得把「✓ 全部完成」覆盖成「✓ 刷新：…」）。
+   *
+   *  ★ 视频 URL 用后端下发的 ``mtime`` 做缓存键，**不再**拼 ``Date.now()``。
+   *    mtime 只在这一段被真正重渲时才会变：内容不变 → URL 不变 → 浏览器
+   *    命中缓存、``<video>`` 也不必重建（时间线 render() 的签名因此稳定，
+   *    分段视频不会每 4 秒闪一次）。重渲那一段 mtime 变 → URL 变 → 破缓存
+   *    生效，用户照样立刻看到新画面。这就是破缓存该有的粒度。
+   */
+  async function refreshRendered(silent) {
     try {
       const res = await api.fetchApi(
         "/h3/session?name=" + encodeURIComponent(sessionName()));
       const data = await res.json();
-      state.rendered.clear();
-      (data.segments || []).forEach((s) => {
-        if (s.url) state.rendered.set(s.index, s.url + "&t=" + Date.now());
-      });
-      doneSet = new Set((data.segments || []).map((s) => s.index));
       state.done = Number(data.done || 0);
+      absorbSession(data);
       render();
+      if (silent) return;
+      /* ★★ 第 41 轮：渲染途中**绝不能**碰小马。
+         以前这里无条件 setPony(false, …)，于是「每段完成 → 400ms 后自动刷新」
+         这一枪正好落在**下一段**的渲染中途：
+           段 N 完成 → segment_start(N+1) 让小马起跑 → 400ms 后本次刷新把
+           小马按停、状态栏改写成「✓ 刷新：已渲 N / M 段」→ 接下来整段
+           （本机实测 40+ 分钟）小马一动不动、文案也不再更新。
+         断点渲染把这条路径放到了最大：前几段全是磁盘缓存、毫秒级走完，
+         最后一次刷新必然落在**唯一真正在烧显卡的那一段**里 —— 用户看到的就是
+         「断点渲染，小马就不联动了」。
+         正确做法：渲染中只同步缩略图与计数（render() 已做），小马的位置、
+         rAF 与轨道填充都交给它自己的 rAF 循环，一个字都别动。 */
+      if (_running) return;
+      // 空闲时才把 pony 摆回「已渲前沿」：按 doneSet / total 算 frac 重新定位，
+      // 蹄印收干净、四蹄回到静态站姿。一定要在 render() 之后 ——
+      // state.segments() 要从刚重建过的 segsRow 拿。
+      const segs = state.segments();
+      setPony(false, segs.length
+        ? "✓ 刷新：已渲 " + doneSet.size + " / " + segs.length + " 段"
+        : "✓ 刷新：磁盘上没有已完成的段");
     } catch (e) { /* 会话还不存在，正常 */ }
   }
 
@@ -5006,14 +5670,24 @@ function buildTimelinePanel(node, state) {
       const data = await res.json();
       done = Number(data.done || 0);
       state.done = done;
-      (data.segments || []).forEach((s) => {
-        if (s.url) state.rendered.set(s.index, s.url + "&t=" + Date.now());
-      });
-      doneSet = new Set((data.segments || []).map((s) => s.index));
+      absorbSession(data);
       render();
     } catch (err) { /* 会话还不存在：从第 1 段开始，正常 */ }
 
     const total = (state.segments() || []).length || 0;
+
+    // ★ 第 21 轮：断点 = 从磁盘上的 last done 段接着渲。
+    //   run_segments / repair_segment 若有残留值（来自「重渲已改段」或时间线
+    //   勾选框），后端会按「选择渲染段」或「单段修复」走 —— 表面上点的是「断点」，
+    //   实际渲的是另一个子集。这是用户报「断点渲染逻辑错了」的根本原因：
+    //   之前没清这两个 widget，所以一键断点从来都跑不出预期的"从 last done 继续"。
+    //   ★ 修这个的同时把它们清空，再同步段块视觉，免得下次还残留。
+    const wSeg = findWidget(node, "run_segments");
+    if (wSeg && wSeg.value !== "") { wSeg.value = ""; }
+    const wRepair = findWidget(node, "repair_segment");
+    if (wRepair && wRepair.value !== 0) { wRepair.value = 0; }
+    syncRunSegmentsToUI();   // 段块 chks 同步：去掉勾选
+
     const w = findWidget(node, "resume");
     if (w) w.value = true;
     if (node.setDirtyCanvas) node.setDirtyCanvas(true, true);
@@ -5084,16 +5758,25 @@ function buildTimelinePanel(node, state) {
       render();
       setPony(true, "准备渲染 " + d.total + " 段…");
     } else if (d.event === "segment_start") {
-      // 这一段正在渲，就不再算「已渲」。否则重渲一个磁盘上已存在的段时，
-      // 进度条会把它同时算成已完成（「已渲 2/4」）又在状态栏写「正在渲第
-      // 1/4 段」——同一个段既是"已完成"又是"正在渲"，自相矛盾。
-      // 等 segment_done 再把它加回 doneSet，计数自然对得上。
-      doneSet.delete(d.index);
+      /* ★★ 不再把这一段从 doneSet 删掉（2026-09-20 第 44 轮，断点渲染）。
+       *
+       * 旧行为：`doneSet.delete(d.index)` —— 理由是"这一段正在渲，不该同时算已渲"。
+       * 但它带来的后果是**进度倒退**：plan 刚广播「已渲 3/4」，紧接着
+       * segment_start(1) 就把它删成「已渲 2/4」，段块上的 ✓ 也一起消失。
+       * 磁盘上 seg_01.mp4 明明还在，用户看到的就是"面板把已完成状态弄丢了"
+       * （实测截图：已渲 2/4，S01 无 ✓ 却带着绿框在渲）。
+       *
+       * 「正在重渲」这件事由 activeIndex（段块高亮 + 状态栏「第 N/M 段」）表达
+       * 已经足够，不必靠删计数 —— 两个信息本来就不冲突：**磁盘上有** 和
+       * **本次正在重做** 是两回事，各自如实显示即可。
+       * 真渲完时 segment_done 会再 add 一次，计数不会错。 */
+      const wasDone = doneSet.has(d.index);
       activeIndex = d.index;
       render();
       setPony(true, "第 " + d.index + "/" + d.total + " 段 · " + d.shot_id
         + " · " + d.frames + " 帧 · " + (d.task || "")
-        + " · 参考图 " + d.refs + " 张");
+        + " · 参考图 " + d.refs + " 张"
+        + (wasDone ? " · 重渲已渲段" : ""));
     } else if (d.event === "segment_done") {
       doneSet.add(d.index);
       // 该段已用新提示词重渲完成 → 清掉「已改待重渲」角标
@@ -5110,14 +5793,74 @@ function buildTimelinePanel(node, state) {
       //   刚落盘的 seg_NN.mp4，把时间线上的参考图换成真实分段视频。
       //   末段多留 1.2s 给后端收尾（拼接 / 写 manifest）。
       scheduleRefreshRendered(d.index >= d.total ? 1200 : 400);
-    } else if (d.event === "finish") {
+        } else if (d.event === "phase") {
+      /* 相位心跳（2026-10-02）：渲染途中每 4s 一次 —— 状态行走秒、小马不停蹄。
+         只动文案不碰小马（setPonyText 的设计用途正在于此：渲染途中的顺手刷新）。 */
+      setPonyText("第 " + d.index + "/" + d.total + " 段 · " + (d.phase || "")
+        + " · 已渲 " + (d.elapsed != null ? Math.round(d.elapsed) + "s" : ""));
+} else if (d.event === "finish") {
       activeIndex = -1;
       render();
-      setPony(false, "✓ 全部完成");
-      refreshRendered();
+      /* ★ 断点续渲到底复用了没有（2026-09-20 第 44 轮）。
+       * 后端随 finish 一起报上来。以前「没从已有的继续渲染」这件事在面板上
+       * **完全看不出来** —— 只能去翻 ComfyUI 日志里的 `-- reusing seg_NN.mp4`，
+       * 而那行只在**命中**时才有，没命中时一片沉默。现在收尾直接写明。 */
+      const rc = Number(d.reused_count);
+      const rd = Number(d.rendered_count);
+      const tail = (isFinite(rc) && isFinite(rd) && (rc + rd) > 0)
+        ? " · 复用 " + rc + " 段 / 重渲 " + rd + " 段" : "";
+      setPony(false, "✓ 全部完成" + tail);
+      // silent：收尾这一次只同步缩略图，别把「✓ 全部完成」覆盖成「✓ 刷新：…」。
+      refreshRendered(true);
     }
   }
   api.addEventListener("h3.director.progress", timelineProgressHandler);
+
+  /* ★★ 第 41 轮：渲染"死掉"也必须让小马停下来。
+     面板原来只监听自定义的 h3.director.progress —— 而那条链只在 Director 正常
+     走到底时才会发出 finish 事件。于是两种最常见的收场都收不到任何通知：
+       · 后端抛异常（OOM / patchify / ValueError）→ finish 永不触发；
+       · 用户点「取消」→ execution_interrupted，同样没有 finish。
+     两种情况下小马都会**一直跑**、状态栏永远停在最后那一段 —— 用户看到的就是
+     「小马不联动了 / 一直在跑但画面早就不动了」。
+     （本机 2026-09-20 那次 seg_04 从未落盘，日志停在 decode 阶段，就是这一种。）
+     这里补上 ComfyUI 自己的执行结束事件兜底。 */
+  function executionEndHandler(kind, detail) {
+    const d = detail || {};
+    // 有 node_id 就只认本节点；老前端不带时兜底处理 —— 同一时刻只跑一张图。
+    if (d.node_id != null && String(d.node_id) !== String(node.id)) return;
+    if (!_running) return;             // 没在跑就不抢（别覆盖空闲态的"✓ 刷新"）
+    activeIndex = -1;
+    render();
+    if (kind === "interrupted") {
+      setPony(false, "⏹ 已中断（已渲 " + doneSet.size + " 段，"
+        + "点「断点渲染」可从这里继续）");
+    } else if (kind === "error") {
+      const msg = String(d.exception_message || d.exception_type || "未知错误")
+        .split("\n")[0].slice(0, 120);
+      setPony(false, "⚠ 渲染失败：" + msg
+        + "（已渲 " + doneSet.size + " 段，可点「断点渲染」继续）");
+    } else {
+      // execution_success 兜底：正常路径已由 finish 收尾，走到这里说明
+      // finish 没来（老后端 / 事件丢失），补一次收尾，别让小马空转。
+      // ★ 不能无脑写「✓ 全部完成」：ComfyUI 的 execution_success 是**整张图**
+      //   级别的事件、**不带 node_id**（execution_error / interrupted 才带），
+      //   所以用户跑一张不含本节点的图时也会打到这里。按磁盘实况说人话。
+      const segs = state.segments();
+      const all = segs.length > 0 && doneSet.size >= segs.length;
+      setPony(false, all ? "✓ 全部完成"
+        : "✓ 执行结束（已渲 " + doneSet.size + " / "
+          + (segs.length || "?") + " 段）");
+    }
+    // 失败 / 中断后磁盘上可能已经多出几段，静默同步时间线
+    refreshRendered(true);
+  }
+  const _onExecError = (e) => executionEndHandler("error", e && e.detail);
+  const _onExecInterrupted = (e) => executionEndHandler("interrupted", e && e.detail);
+  const _onExecSuccess = (e) => executionEndHandler("success", e && e.detail);
+  try { api.addEventListener("execution_error", _onExecError); } catch (e) { /* 老前端没有 */ }
+  try { api.addEventListener("execution_interrupted", _onExecInterrupted); } catch (e) { /* 老前端没有 */ }
+  try { api.addEventListener("execution_success", _onExecSuccess); } catch (e) { /* 老前端没有 */ }
 
   function windowResizeHandler() { if (!_running) setPony(false); }
   if (typeof window !== "undefined") {
@@ -5143,11 +5886,18 @@ function buildTimelinePanel(node, state) {
 
   function cleanupTimeline() {
     try { api.removeEventListener("h3.director.progress", timelineProgressHandler); } catch (e) { /* 不支持移除就算了 */ }
+    try { api.removeEventListener("execution_error", _onExecError); } catch (e) { /* 同上 */ }
+    try { api.removeEventListener("execution_interrupted", _onExecInterrupted); } catch (e) { /* 同上 */ }
+    try { api.removeEventListener("execution_success", _onExecSuccess); } catch (e) { /* 同上 */ }
     try { window.removeEventListener("resize", windowResizeHandler); } catch (e) { /* 不支持移除就算了 */ }
     try { if (_railRO) _railRO.disconnect(); } catch (e) { /* 已断开就算了 */ }
     if (_raf) { cancelAnimationFrame(_raf); _raf = null; }
     // 面板销毁后别再往 /h3/session 打请求（节点删除 / 折叠重建时走这里）
     if (_refreshTimer) { clearTimeout(_refreshTimer); _refreshTimer = null; }
+    // 浮层挂在 body 上，不随节点 DOM 一起消失 —— 必须显式清掉，否则删节点
+    // 之后这些浮层会永远留在页面上（还各自持着一个 <video>）。
+    _pops.forEach((el) => { try { el.remove(); } catch (e) { /* 已没了 */ } });
+    _pops = [];
     _running = false;
   }
 
@@ -5197,22 +5947,109 @@ function h3FindParser() {
     || n.type === "H3PromptPackParser") || null;
 }
 
-/** 当前 PACK 源文本：H3PromptPackParser 的 pack_text 上游文本框（如 361）。 */
-function h3PackText() {
-  const parser = h3FindParser();
-  if (!parser) return "";
-  const src = upstream(parser, "pack_text");
-  if (!src) return "";
-  const w = (src.widgets || []).find(
-    (x) => x && typeof x.value === "string" && x.value.length > 20);
-  if (w) return w.value;
-  const dom = (src.widgets || []).find(
-    (x) => x && x.element && x.element.querySelector);
-  if (dom) {
-    const ta = dom.element.querySelector("textarea");
-    if (ta) return ta.value;
+/** 一个字符串值看起来像不像「整份剧本」。
+ *
+ *  ★★ 不能只用「长度 > 20」判（2026-09-25 修的真实故障）：
+ *    ①-A 与 ①-B 之间夹了「剧本英译」(H3ScriptTranslate) 之后，
+ *    h3PackTextSource() 走到它身上，而它的第一个长字符串控件是
+ *    api_base_url（"https://apihub.agnes-ai.com/v1"，29 字符）—— 被当成
+ *    PACK 文本框 → 面板拿 API 地址去 POST /h3/pack_preview → **0 段** →
+ *    「剧本 PACK / 参考图 / 分镜时间线」三块同时全空，且**没有任何报错**
+ *    （0 段时后端 ok=true，徽标还是绿的）。
+ *    同一个误判还会让 h3WritePackSource() 把整份 PACK 写进 api_base_url
+ *    控件，静默改坏英译节点的接口地址。
+ *
+ *  判据：够长 +（有换行 或 带 PACK 特征标记），且排除纯 URL / 纯密钥串。
+ *  空串返回 false —— 空文本框要靠下面的 textarea 分支认出来。 */
+function _h3LooksLikePackText(v) {
+  const s = String(v == null ? "" : v);
+  if (!s.trim()) return false;
+  if (s.length < 120) return false;
+  const one = s.trim();
+  if (/^https?:\/\/\S+$/.test(one)) return false;                       // api_base_url
+  if (/^(?:sk-|Bearer\s+)?[A-Za-z0-9_\-]{24,}$/.test(one)) return false; // api_key / token
+  return /[\r\n]/.test(s)
+    || /(?:SHOT\s+PROMPT\s+PACK|subject_definitions|<Picture\s*\d+|<Subject\s*\d+|\[\s*Shot\s*\d+\s*\])/i.test(s);
+}
+
+/** 某个节点本身是不是「装 PACK 的文本框」？是就返回 {node, widget, textarea}。
+ *
+ *  顺序（2026-09-25 修订：textarea 提到最前，长字符串改成特征判定）：
+ *   ① 有 textarea 的控件 —— 这才是真正的多行文本框（PrimitiveStringMultiline）。
+ *      长度为 0 的空文本框也要认得出来，面板才能报「文本框是空的」而不是
+ *      「没接文本框」（指错方向最坑）。
+ *   ② 没有 textarea（①-A 用单行 STRING 控件时）—— 按 _h3LooksLikePackText
+ *      的内容特征认，**不能只看长度**。
+ *
+ *  ★ 两处都要跳过我们自己挂的面板 DOM 控件（h3_director_panels /
+ *    h3_director_error）：它们内部也有 textarea（分镜提示词编辑器），
+ *    而 H3 系节点都会挂面板 —— 认错的话拿到的是编辑器里那一段，不是源文。 */
+function _h3TextBoxOf(node) {
+  const widgets = (node && node.widgets) || [];
+  const isOwnPanel = (x) => !!x && String(x.name || "").indexOf("h3_director") === 0;
+  for (const x of widgets) {
+    if (!x || isOwnPanel(x)) continue;
+    if (!x.element || typeof x.element.querySelector !== "function") continue;
+    const ta = x.element.querySelector("textarea");
+    if (ta) return { node, widget: x, textarea: ta };
   }
-  return "";
+  const w = widgets.find(
+    (x) => x && !isOwnPanel(x) && typeof x.value === "string"
+      && _h3LooksLikePackText(x.value));
+  if (w) return { node, widget: w, textarea: null };
+  return null;
+}
+
+/** 从 ①-B 的 ``pack_text`` 口往上游走，找到**真正装 PACK 的文本框**。
+ *
+ *  ★★ 不能只看**直接**上游（2026-09-24 修的）：①-A 与 ①-B 之间可能夹着
+ *    「剧本英译」这类**纯计算节点** —— 它的输出才是 ①-B 真正吃的文本，
+ *    而 PACK 原文在它上游的文本框里。夹了节点之后，原来那三处「取直接上游」
+ *    全都会错：
+ *      · ``h3PackText()``        取不到文本 → 面板报「读不到 PACK 文本」，
+ *                                参考图 / 分镜时间线跟着全空；
+ *      · ``h3WritePackSource()`` 会把整份 PACK 塞进中间节点的字符串 widget
+ *                                （例如英译节点的 ``extra_rules``）—— 静默写坏控件；
+ *      · ``bindPackSource()``    把「改文本→重新解析」的监听挂到中间节点上，
+ *                                于是改 ①-A 不触发解析、改别的才触发。
+ *
+ *  遍历策略：先看当前节点是不是文本框；不是就往上游走，
+ *  **STRING 类型的输入口优先**（PACK 是字符串，英译节点的 text 口是 STRING、
+ *  clip 口是 CLIP），其余口排后面。带环保护与节点数上限。
+ */
+function h3PackTextSource() {
+  const parser = h3FindParser();
+  if (!parser) return null;
+  const seen = new Set();
+  const queue = [];
+  const first = upstream(parser, "pack_text");
+  if (first) queue.push(first);
+  let guard = 0;
+  while (queue.length && guard++ < 40) {
+    const node = queue.shift();
+    const key = (node.id != null) ? node.id : node;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const hit = _h3TextBoxOf(node);
+    if (hit) return hit;
+    const ins = (node.inputs || []).filter((i) => i && i.link != null);
+    ins.sort((a, b) => (String(a.type) === "STRING" ? 0 : 1)
+                     - (String(b.type) === "STRING" ? 0 : 1));
+    for (const i of ins) {
+      const up = upstream(node, i.name);
+      if (up) queue.push(up);
+    }
+  }
+  return null;
+}
+
+/** 当前 PACK 源文本：H3PromptPackParser 的 pack_text 上游文本框（如 361）。
+ *  中间夹了纯计算节点（如剧本英译）也能穿透找到真正的文本框。 */
+function h3PackText() {
+  const hit = h3PackTextSource();
+  if (!hit) return "";
+  if (hit.textarea) return hit.textarea.value;
+  return String(hit.widget.value || "");
 }
 
 /** 把一段的六字段拼成标准六段式正文（与后端 _format_segment_fields 同格式：
@@ -5229,9 +6066,100 @@ function h3SegToBlock(fields, fallback) {
   return String(fallback || "").trim();
 }
 
+/** 这份 PACK 里**真的有**哪几侧语言内容。
+ *  与后端 ``prompt_pack.lang_section_available`` 同口径：
+ *   - 双语 PACK（``[1] 中文版`` / ``[2] 英文版`` 分块）→ 按分块算；
+ *   - 单语 PACK（现行 minimax-h3-shot-segment 技能只交付英文版，没有任何
+ *     语言分块）→ 按正文推断，``<d>…</d>`` 台词块里的中文不算（台词本来就是
+ *     原语言，不能拿它当"这版是中文"的证据）。
+ *  返回 ``Set``，元素是 ``"zh"`` / ``"en"``。 */
+/** 官方六段字段名（与后端 prompt_pack.FIELD_ORDER 同源）。 */
+const H3_FIELD_NAMES = [
+  "subject_definitions", "summary", "retention_analysis",
+  "detailed_description", "overall_soundscape", "non_diegetic_music",
+];
+
+/** 一行是不是「段名行」→ 返回字段名，否则 ""。
+ *  ★ 与后端 prompt_pack._match_field 同口径，必须拆三种写法分别判：
+ *    写成"可选标记 + 可选冒号"会让正文里 `summary of the scene: …`
+ *    被当成段名行，整段正文被劈开。 */
+function h3FieldNameOf(line) {
+  const s = String(line || "").trim();
+  const pick = (n) => (H3_FIELD_NAMES.indexOf(String(n || "").toLowerCase()) >= 0
+    ? String(n).toLowerCase() : "");
+  let m = s.match(/^([A-Za-z_][A-Za-z0-9_]*)\s*[:：]/);
+  if (m) return pick(m[1]);
+  m = s.match(/^#{1,6}\s*([A-Za-z_][A-Za-z0-9_]*)\s*[:：]?/);
+  if (m) return pick(m[1]);
+  m = s.match(/^(?:\*\*|__)\s*([A-Za-z_][A-Za-z0-9_]*)\s*(?:\*\*|__)\s*[:：]?/);
+  if (m) return pick(m[1]);
+  return "";
+}
+
+/** 取 PACK 里 detailed_description 那一节的正文（含 [Shot N] 行）。找不到返回 ""。
+ *  推语言用：整段式 [Shot N] 脚本没有段标题，只能靠这一节 —— 绝不能拿整篇，
+ *  PACK 头尾都带中文（"Project / 项目"、"文件结束"）会把英文稿判成中文版。 */
+function h3DetailSectionText(lines) {
+  const arr = lines || [];
+  let start = -1;
+  for (let i = 0; i < arr.length; i++) {
+    if (h3FieldNameOf(arr[i]) === "detailed_description") { start = i + 1; break; }
+  }
+  if (start < 0) return "";
+  let end = arr.length;
+  for (let i = start; i < end; i++) {
+    if (h3FieldNameOf(arr[i])) { end = i; break; }
+  }
+  return arr.slice(start, end).join("\n").trim();
+}
+
+function h3PackLangs(lines) {
+  const langs = new Set();
+  let marked = 0;
+  (lines || []).forEach((ln) => {
+    const m = String(ln).trim().match(/^\[\s*([12])\s*\]\s*(.*)$/);
+    if (!m) return;
+    const name = m[2] || "";
+    const l = /中文/.test(name) ? "zh"
+      : (/英文/.test(name) || /\ben\b/i.test(name)) ? "en" : null;
+    if (l) { marked++; langs.add(l); }
+  });
+  if (marked) return langs;
+  /* ★ 千万别拿整篇文本去推断 —— PACK 的头尾都带中文：
+     头部 `Project / 项目 : 曹贼的性价比`、尾部 `END OF PACK / 文件结束`，
+     会被误判成中文版（实测那样 has_zh 为真、守卫形同虚设，lang="zh" 照样把
+     英文段块清空）。只取**第一段正文**：首个段标题行 → 下一个段标题行
+     （或 END OF PACK 之前）。 */
+  const segRe = /^\s*#{3,}\s*S?\d+[A-Za-z]?\s*\/.*?#{3,}\s*$/;
+  const endRe = /^END\s+OF\s+(?:PROMPTS|PACK)\b.*$/i;
+  const heads = [];
+  (lines || []).forEach((ln, i) => {
+    if (segRe.test(String(ln).trim())) heads.push(i);
+  });
+  let body;
+  if (!heads.length) {
+    /* ★ 整段式 [Shot N] 脚本没有 ########## 段标题，这里以前退回**整篇** ——
+       与后端 lang_section_available 的老毛病同一个：PACK 头尾都带中文
+       （"Project / 项目"、"文件结束"），英文稿会被判成中文版，has_en/has_zh
+       正好反。只取 detailed_description 那一节推语言。 */
+    const detail = h3DetailSectionText(lines);
+    body = detail || (lines || []).join("\n");
+  } else {
+    const start = heads[0];
+    let end = heads.length > 1 ? heads[1] : (lines || []).length;
+    for (let i = start + 1; i < end; i++) {
+      if (endRe.test(String(lines[i]).trim())) { end = i; break; }
+    }
+    body = (lines || []).slice(start, end).join("\n");
+  }
+  body = body.replace(/<d>[\s\S]*?<\/d>/g, "");
+  langs.add(/[\u4e00-\u9fff\u3000-\u303f\uff00-\uffef]/.test(body) ? "zh" : "en");
+  return langs;
+}
+
 /** 定位「某段某语言版」在 PACK 行数组里的字段区范围 [start, end)（不含段头行）。
  *  返回 null 表示没找到。双语 PACK 按 lang 限定在 [1] 中文版 / [2] 英文版 版块内。 */
-function h3LocateSegRange(lines, segId, lang) {
+function h3LocateSegRange(lines, segId, lang, packRange) {
   const num = (s) => { const m = String(s || "").match(/\d+/); return m ? m[0] : ""; };
   const target = num(segId);
   if (!target) return null;
@@ -5246,13 +6174,23 @@ function h3LocateSegRange(lines, segId, lang) {
     if (l) marks.push([i, l]);
   });
   if (lang === "zh" || lang === "en") {
+    let hit = false;
     for (let k = 0; k < marks.length; k++) {
       if (marks[k][1] === lang) {
         lo = marks[k][0] + 1;
         hi = (k + 1 < marks.length) ? marks[k + 1][0] : lines.length;
+        hit = true;
         break;
       }
     }
+    /* ★ 这份 PACK 里**没有**这一侧内容 → 直接判「找不到」，绝不退回全篇定位。
+       退回的话，英文单版 PACK（现行技能只交付英文版，没有任何 [1]/[2] 语言
+       分块）上只要 lang="zh" 命中，替换就会打到**英文段块**上 —— 实测
+       PACK 44079 → 31643 字符、S01 英文正文 8469 → 0，界面表现就是
+       "提示词莫名消失"。
+       单语 PACK 里 lang 与正文语言一致时（如英文单版传 "en"）仍然退回全篇：
+       没有分块可依据，"全篇"就是那一侧，行为与 lang=null 相同。 */
+    if (!hit && !h3PackLangs(lines).has(lang)) return null;
   }
   const segRe = /^\s*#{3,}\s*(S?\d+[A-Za-z]?)\s*\/.*?#{3,}\s*$/;
   let start = -1, end = hi;
@@ -5266,7 +6204,23 @@ function h3LocateSegRange(lines, segId, lang) {
       break;
     }
   }
-  if (start < 0) return null;
+  if (start < 0) {
+    /* ★ 整段式 [Shot N] 脚本**没有** ########## 段标题：段是"时间切片"，正文块
+       只能靠后端 /h3/pack_preview 算好的行区间定位（shot_script_segment_ranges，
+       与解析时的分段同源）。
+       没有它以前就是 return null —— 时间线上每段提示词切出来是空的，编辑器只能
+       显示后端兜底拼的内容，而且 doWrite 会因为 fromFallback 拒绝写回
+       （表现：在分镜时间线上改了提示词，什么都没发生）。
+       区间非法就仍然返回 null：调用方退回"只读兜底"，绝不瞎写。 */
+    if (Array.isArray(packRange) && packRange.length === 2) {
+      const s = Number(packRange[0]), e = Number(packRange[1]);
+      if (Number.isFinite(s) && Number.isFinite(e)
+          && s >= 0 && e > s && e <= lines.length) {
+        return { start: s, end: e, byRange: true };
+      }
+    }
+    return null;
+  }
   for (let i = start; i < end; i++) {
     const s = lines[i].trim();
     if (/^={5,}$/.test(s) || /^END\s+OF\s+PROMPTS$/i.test(s)) { end = i; break; }
@@ -5275,30 +6229,50 @@ function h3LocateSegRange(lines, segId, lang) {
 }
 
 /** 从 PACK 原文切出「某段某语言版」的六段式正文。不依赖后端 full_fields ——
- *  改 JS 立即生效，且显示的就是 PACK 原文，保真度最高。 */
-function h3ExtractSegBlock(packText, segId, lang) {
+ *  改 JS 立即生效，且显示的就是 PACK 原文，保真度最高。
+ *  ``packRange`` 是整段式 [Shot N] 脚本的兜底行区间（见 h3LocateSegRange）。 */
+function h3ExtractSegBlock(packText, segId, lang, packRange) {
   const text = String(packText || "");
   if (!text) return "";
   const lines = text.split("\n");
-  const r = h3LocateSegRange(lines, segId, lang);
+  const r = h3LocateSegRange(lines, segId, lang, packRange);
   if (!r) return "";
   return lines.slice(r.start, r.end).join("\n").trim();
 }
 
 /** 用编辑后的整段正文替换 PACK 里对应段的字段区（纯前端字符串操作）。 */
-function h3ReplaceSegBlock(packText, segId, lang, newBody) {
+function h3ReplaceSegBlock(packText, segId, lang, newBody, packRange) {
   const text = String(packText || "");
   if (!text) return text;
   const lines = text.split("\n");
-  const r = h3LocateSegRange(lines, segId, lang);
+  const r = h3LocateSegRange(lines, segId, lang, packRange);
   if (!r) return text;
   const bodyLines = String(newBody || "").replace(/\n+$/, "").split("\n");
+  /* ★ 整段式脚本的区间里就是**该段那段正文**（不含全片共享的五段），所以：
+     · 不额外加空行 —— 区间首尾本身就是正文行，加空行会在原稿里留出空洞；
+     · 但要把区间**原有的首尾空行保留下来**（extract 会 .trim() 掉它们）。
+       不保留的话 extract→replace 就不幂等：每写一次都会吃掉一个空行。 */
+  if (r.byRange) {
+    let s = r.start, e = r.end;
+    const head = [], tail = [];
+    while (s < e && !String(lines[s]).trim()) { head.push(lines[s]); s++; }
+    while (e - 1 >= s && !String(lines[e - 1]).trim()) { tail.push(lines[e - 1]); e--; }
+    return lines.slice(0, s).concat(head, bodyLines, tail.reverse(), lines.slice(r.end)).join("\n");
+  }
   const out = lines.slice(0, r.start).concat([""], bodyLines, [""], lines.slice(r.end));
   return out.join("\n");
 }
 
+/** 段在**原文**里的行区间（整段式 [Shot N] 脚本才有；分段 PACK 为 null）。
+ *  来自后端 /h3/pack_preview 的 ``pack_range``，与解析时的分段同源。 */
+function h3SegPackRange(seg) {
+  const r = seg && seg.pack_range;
+  return (Array.isArray(r) && r.length === 2) ? r : null;
+}
+
 /** 分镜时间统计：取 PACK 段头 ########## S02 / 11s+1.6=12.6 / EN ##########
- *  里 `/` 之间的时长标注（与段头同源）。取不到返回空串。 */
+ *  里 `/` 之间的时长标注（与段头同源）。取不到返回空串 —— 调用方会按
+ *  new/handoff/gen 秒数拼等价文本（整段式 [Shot N] 脚本走的就是这条）。 */
 function h3SegTimeLabel(packText, segId, lang) {
   const text = String(packText || "");
   if (!text) return "";
@@ -5314,10 +6288,9 @@ function h3SegTimeLabel(packText, segId, lang) {
 /** 把整份 PACK 写回上游文本框（PrimitiveStringMultiline，如 361）。
  *  ★ 四路同步：只改 DOM textarea 而不改 widget.value 的话，Queue 时节点仍读旧值。 */
 function h3WritePackSource(text) {
-  const parser = h3FindParser();
-  if (!parser) return;
-  const src = upstream(parser, "pack_text");
-  if (!src) return;
+  const hit = h3PackTextSource();
+  if (!hit) return;
+  const src = hit.node;
   (src.widgets || []).forEach((w) => {
     if (!w) return;
     const ta = (w.element && w.element.querySelector)
@@ -5433,6 +6406,31 @@ function buildPlanPanel(node, state) {
   tabBar.appendChild(tabZh);
   tabEn.onclick = () => { edLang = "en"; tabEn.classList.add("is-active"); tabZh.classList.remove("is-active"); applyLang(); };
   tabZh.onclick = () => { edLang = "zh"; tabZh.classList.add("is-active"); tabEn.classList.remove("is-active"); applyLang(); };
+
+  /* ★ 只有 PACK 里**真的有**那一侧内容，才显示对应的语言标签。
+     现行 minimax-h3-shot-segment 技能只交付英文单版（没有 [1] 中文版 /
+     [2] 英文版 分块），此时藏掉「中文 ZH」—— 否则点进去看到的是**英文内容**
+     （zh 侧解析在单语 PACK 上会退回英文），一编辑还会把英文段块整段覆写掉。
+     可用性来自后端 /h3/pack_preview 的 has_en / has_zh（见 parse()）。 */
+  function syncLangTabs() {
+    const zhOk = !!state.hasZh;
+    const enOk = state.hasEn !== false;
+    tabZh.style.display = zhOk ? "" : "none";
+    tabEn.style.display = enOk ? "" : "none";
+    tabZh.title = zhOk
+      ? "编辑 PACK 里 [1] 中文版 分块（Director 实际渲染的是英文版）"
+      : "这份 PACK 没有中文版分块（现行技能只交付英文单版），已隐藏";
+    if (editorEls) editorEls.zh.title = tabZh.title;
+    // 当前语言侧已不可用 → 强制回到还可用的一侧，并重填文本框。
+    const want = (edLang === "zh" && !zhOk && enOk) ? "en"
+      : (edLang === "en" && !enOk && zhOk) ? "zh" : edLang;
+    if (want !== edLang) {
+      edLang = want;
+      tabEn.classList.toggle("is-active", edLang === "en");
+      tabZh.classList.toggle("is-active", edLang === "zh");
+      applyLang();
+    }
+  }
   // 语言 + 写回模式两组胶囊挂进标题行的 toolSlot（见上，barTop 已 append 到 body）。
   // 仍然**不进左栏卡片**：那样左栏内容区会被推低、右栏视频却紧贴标题，左右上下都错位。
   toolSlot.appendChild(tabBar);
@@ -5530,7 +6528,7 @@ function buildPlanPanel(node, state) {
     const packText = state.packText();
     if (!packText) return;
     // 内容没真变就不写（用户只是聚焦/失焦、或改回原样），避免误标「已改」。
-    const current = h3ExtractSegBlock(packText, seg.id, edLang);
+    const current = h3ExtractSegBlock(packText, seg.id, edLang, h3SegPackRange(seg));
     if (body.trim() === current.trim()) return;
     // ★ 空正文 + 原文非空 = 误伤（文本框还没填上就被判定为「用户删光了」）。
     //   真要清空请手动全选删除 —— 那种情况下 body 会带用户的操作痕迹，
@@ -5538,7 +6536,7 @@ function buildPlanPanel(node, state) {
     if (!body.trim() && current.trim()) return;
     // 纯前端替换该段正文 → 写回 PACK 源（同步 widget.value）→ 触发 input →
     // 重解析 → 面板刷新。不经过后端，改 JS 后刷新浏览器即可生效。
-    const next = h3ReplaceSegBlock(packText, seg.id, edLang, body);
+    const next = h3ReplaceSegBlock(packText, seg.id, edLang, body, h3SegPackRange(seg));
     if (next !== packText) {
       // 写回模式（面板右上角切换）：
       //   pack     —— 写回外侧 PACK 文本框（所见即所得，默认）
@@ -5691,7 +6689,7 @@ function buildPlanPanel(node, state) {
     ["en", "zh"].forEach((lang) => {
       const ta = editorEls[lang];
       if (!ta) return;
-      let block = h3ExtractSegBlock(state.packText(), seg.id, lang);
+      let block = h3ExtractSegBlock(state.packText(), seg.id, lang, h3SegPackRange(seg));
       let fromFallback = false;
       if (!block) {
         // 兜底：PACK 里切不到该语言版块时，用后端解析出的字段拼；
@@ -5896,6 +6894,8 @@ function buildPlanPanel(node, state) {
   }
 
   function render() {
+    // 语言标签可用性先对齐（PACK 换过之后 has_en / has_zh 可能变）
+    syncLangTabs();
     let idx = state.planSelectedIndex || 0;
     // idx = 0 表示"未选"，>0 是真正选中的段号。
     // parser 上没有时间线跟随，PACK 一解析出来就默认展示第 1 段，
@@ -6015,7 +7015,18 @@ function safePanel(name, fn) {
   }
 }
 
-/* ---- 诊断条：不开 devtools 也能一眼看到扩展跑到哪一步了 ---- */
+/* ---- 诊断条：默认关闭 ----
+ * 这个右下角浮层本来就只是"不开 devtools 也能看到跑到哪一步"的临时脚手架，
+ * 平时碍事，所以默认不插 DOM。真要排查时，在 DevTools Console 里跑一行：
+ *     localStorage.setItem("h3d.diag", "1")
+ * 然后刷新页面（Ctrl+Shift+R）即可重新出现；排查完删掉：
+ *     localStorage.removeItem("h3d.diag")
+ */
+const DIAG_ENABLED = (() => {
+  try { return String(localStorage.getItem("h3d.diag") || "") === "1"; }
+  catch (e) { return false; }
+})();
+
 const diag = { appOk: !!(app && app.registerExtension), graphOk: false,
                found: 0, mounted: 0, lastErr: "", el: null };
 
@@ -6030,8 +7041,13 @@ function diagRender() {
   ];
   if (diag.lastErr) lines.push("最近错误: " + diag.lastErr);
   el.textContent = "";
-  // 挂上了就别一直杵在屏幕上：6 秒后自己消失。挂不上才常驻等你来看。
-  if (diag.mounted > 0 && !diag.lastErr && !diag._armed) {
+  // 挂上了就别一直杵在屏幕上：6 秒后自己消失。
+  // （原逻辑还要求 !diag.lastErr，结果一旦记过一次错误就永远不消失 —— 这正是
+  //   "常驻标签"的直接原因。错误改走 console，屏幕上不再赖着。）
+  if (diag.lastErr && typeof console !== "undefined") {
+    console.warn("[H3 Director] diag:", diag.lastErr);
+  }
+  if (diag.mounted > 0 && !diag._armed) {
     diag._armed = true;
     setTimeout(() => { if (diag.el) { diag.el.remove(); diag.el = null; } }, 6000);
   }
@@ -6043,6 +7059,7 @@ function diagRender() {
 }
 
 function diagInit() {
+  if (!DIAG_ENABLED) return;
   if (diag.el || typeof document === "undefined" || !document.body) return;
   const el = h("div");
   el.id = "h3d-diag";
@@ -6109,33 +7126,103 @@ function mountPanels(node) {
       //                 execute 里优先读它）。原来是 h3_shot_editor.js 的独立开关，
       //                 现并入本文件统一管理。
       writeMode: "pack",
+      // ★ 这份 PACK 里**真的有**哪几侧语言内容（后端 /h3/pack_preview 的
+      //   has_en / has_zh）。现行 minimax-h3-shot-segment 技能只交付英文单版，
+      //   此时 hasZh=false —— 「中文 ZH」标签必须藏掉。
+      //   以前不区分：zh 侧在单语 PACK 上会退回英文内容，"中文"标签里显示的
+      //   其实是英文；用户在那儿一编辑，lang="zh" 的替换还会打到英文段块上
+      //   （实测 PACK 44079 → 31643 字符、S01 英文正文清零）。
+      hasEn: true,
+      hasZh: false,
+      // 上一次解析失败的原因（""= 没失败）。★ 为什么需要它：
+      //   parse() 失败时以前走 onPack(null)，把已解析的结果整个清空 —— 于是
+      //   参考图面板拿不到 pictures，就把「不知道剧本写了什么」渲染成
+      //   「⚠ 槽 1/2/3/4 接了图但剧本没引用 —— H3 不会把它画进画面」。
+      //   那是在用"我不知道"冒充"剧本没写"，用户会以为剧本坏了。
+      //   现在失败**保留**上一次结果，并把原因显式说出来。
+      packError: "",
+      // 剧本是否**已知**：解析成功且真的解出了分镜。
+      //   packData 为 null（还没解析 / 解析失败）或 segments 为空，都算"未知"，
+      //   此时任何「剧本没引用 <Picture N>」的结论都是无中生有。
+      packKnown: () => !!(state.packData && (state.packData.segments || []).length),
       // 当前 PACK 源文本：统一走模块级 h3PackText()，与编辑器 / 写回共用同一份实现
       // （原来这里内联了一份一模一样的查找逻辑，两处容易走偏）。
       packText: () => h3PackText(),
       classify: () => {
-        if (state.classifyRows.length) return state.classifyRows;
+        if (Array.isArray(state.classifyRows) && state.classifyRows.length) {
+          return state.classifyRows;
+        }
         const w = findWidget(node, "ref_classify");
+        const raw = w ? w.value : null;
+        if (raw == null || raw === "") return [];
         try {
-          return JSON.parse(w && w.value ? w.value : "[]") || [];
+          const parsed = JSON.parse(raw);
+          /* ★★ 必须校验是**数组**。以前只写 `|| []`，只能兜住 falsy：
+           *   JSON.parse 返回数字 / 字符串 / true / 对象时会被原样返回，
+           *   下游 `saved.find(...)` 立刻 TypeError。
+           *   实测（2026-09-20）：工作流里本节点的 widgets_values 被写成了
+           *   "全部输入位"序（25 项），而前端是**按位置**灌给可序列化控件的
+           *   （19 个），于是 ref_classify 拿到的是 crf 的 14.0 →
+           *   JSON.parse("14") === 14 → `saved.find is not a function`
+           *   → 参考图面板整块渲染失败、时间线第 N 格也一起炸
+           *   （段块走 refThumbFor → segRefMetas → classify()）。
+           *   这里兜住它：分类表只能是数组，不是数组就当没有分类，
+           *   别让一个坏值把两块面板拖下水。 */
+          if (Array.isArray(parsed)) return parsed;
+          // 单个对象（{slot,kind,name}）是历史脏数据，包一层还能救回来
+          if (parsed && typeof parsed === "object" && "slot" in parsed) return [parsed];
+          console.warn("[H3 Director] ref_classify 不是数组，已按「无分类」处理：", raw);
+          return [];
         } catch (e) {
           return [];
         }
       },
       onPack: (d) => {
         state.packData = d;
+        state.packError = "";
         // 子面板可能构建失败（那时它是个空壳）、parser 上部分面板压根不挂（null），
         // 所以每个都要判空，别让回调把整条链打断。
-        try { output && output.render && output.render(); } catch (e) { /* 已降级/未挂 */ }
-        try { timeline && timeline.render && timeline.render(); } catch (e) { /* 已降级/未挂 */ }
-        try { refs && refs.render && refs.render(); } catch (e) { /* 已降级/未挂 */ }
+        // ★ 但**必须打日志**：以前这里的 catch 是空的（`catch (e) {}`），
+        //   于是"某个子面板刷新时抛异常"完全无声 —— 界面留下一半新一半旧的
+        //   残骸（实测：输出规格显示 4 段、时间线却停在 3 段、参考图说未解析），
+        //   排查时完全看不出是谁炸的。静默失败比崩溃更难查。
+        try { output && output.render && output.render(); }
+        catch (e) { console.error("[H3 Director] 输出规格刷新失败：", e); }
+        try { timeline && timeline.render && timeline.render(); }
+        catch (e) { console.error("[H3 Director] 时间线刷新失败：", e); }
+        try { faceQc && faceQc.render && faceQc.render(); }
+        catch (e) { console.error("[H3 Director] 修脸质检刷新失败：", e); }
+        try { refs && refs.render && refs.render(); }
+        catch (e) { console.error("[H3 Director] 参考图刷新失败：", e); }
         // 功能规划版块的「分镜提示词」编辑区要从最新解析结果刷新内容
         // （尤其 PACK 被外部/写回接口改过之后），否则显示会陈旧。
-        try { plan.render && plan.render(); } catch (e) { /* 面板已降级 */ }
+        try { plan.render && plan.render(); }
+        catch (e) { console.error("[H3 Director] 功能规划刷新失败：", e); }
         // PACK 解析完才知道会话名（session_name 控件空着时用它），所以
         // 「已渲染到第几段」必须等这一下再拉 —— 首屏那次 refreshRendered
         // 是在 pack 解析之前跑的，会话名还是 my_chain，拉回来是空的。
         try { timeline && timeline.refreshRendered && timeline.refreshRendered(); }
-        catch (e) { /* 已降级/未挂 */ }
+        catch (e) { console.error("[H3 Director] 时间线拉取已渲段失败：", e); }
+      },
+      /** 解析失败（网络抖动 / 读不到文本框 / 后端 400）。
+       *
+       *  ★ 与 onPack(null) 的关键区别：**不动 state.packData**。
+       *    一次失败就把已解析的结果清空，代价是整块面板集体失忆 ——
+       *    参考图面板会把"不知道剧本写了什么"说成"剧本没引用 <Picture N>"，
+       *    时间线清空、输出规格回退。上一次成功的结果永远比"什么都不知道"
+       *    更有用，所以这里只标记原因、照常重绘，让各面板自己决定怎么措辞。 */
+      onPackFail: (msg) => {
+        state.packError = String(msg || "解析失败");
+        try { output && output.render && output.render(); }
+        catch (e) { console.error("[H3 Director] 输出规格刷新失败：", e); }
+        try { timeline && timeline.render && timeline.render(); }
+        catch (e) { console.error("[H3 Director] 时间线刷新失败：", e); }
+        try { faceQc && faceQc.render && faceQc.render(); }
+        catch (e) { console.error("[H3 Director] 修脸质检刷新失败：", e); }
+        try { refs && refs.render && refs.render(); }
+        catch (e) { console.error("[H3 Director] 参考图刷新失败：", e); }
+        try { plan.render && plan.render(); }
+        catch (e) { console.error("[H3 Director] 功能规划刷新失败：", e); }
       },
       onClassify: (rows) => {
         state.classifyRows = rows;
@@ -6157,6 +7244,34 @@ function mountPanels(node) {
         node.size[1] = H3D_PANEL_MAX_H;
       }
     } catch (e) { /* 忽略 */ }
+
+    /* ★★ 数据体检横幅（2026-09-20 坑 49）。
+     *  `widgets_values` 与「可序列化控件」对不上 → 前端**按位置**灌值会整体错位，
+     *  面板读到的参数根本不是你以为的那个（实测 ref_classify 读成了 crf 的 14.0）。
+     *  这类问题以前只会表现成"某个版块坏了"，根因完全看不出来 —— 现在直接挂在
+     *  面板最顶上。放这里而不是某个子面板里：它是**节点级**的数据问题，
+     *  不该让某一个版块背锅，也免得被子面板的渲染异常连带吞掉。 */
+    try {
+      const mis = h3WidgetAlignment(node);
+      if (mis) {
+        const el = h("div", "h3d-note is-warn is-fatal");
+        el.style.margin = "0 0 8px 0";
+        el.textContent = "⚠ 本节点保存的 widgets_values 与控件数对不上（"
+          + mis.got + " 项 vs " + mis.want + " 个控件）—— 参数会整体错位，"
+          + "面板读到的值可能不是你以为的那个"
+          + (mis.bad.length
+             ? "（例如 " + mis.bad[0].name + " 读到的是 " + JSON.stringify(mis.bad[0].pos)
+               + "，按名字应该是 " + JSON.stringify(mis.bad[0].named) + "）"
+             : "")
+          + "。修法二选一：① 把该节点的 widgets_values 按「只含可序列化控件」重排"
+          + "（去掉 settings / shots_json / pack_info / video / chain_state / ref_images "
+          + "这些 socket 槽位）；② 打开设置 Comfy.Workflow.NamedValuesRestore，"
+          + "让 ComfyUI 按名字还原。";
+        root.appendChild(el);
+        console.error("[H3 Director] widgets_values 与控件数对不上（参数会整体错位）：", mis);
+      }
+    } catch (e) { /* 体检失败不影响面板 */ }
+
     // 版块顺序 = 人的操作顺序：先填参数 → 定怎么切 → 读剧本 →
     // 定成片规格 → 调画质 → 输出开关 → 核参考图 → 看渲染进度 → 核当前规划。
     // 每个子面板各自独立构建：任何一个崩掉都只坏它自己，其余照常显示。
@@ -6181,6 +7296,10 @@ function mountPanels(node) {
       : safePanel("参考图", () => buildRefPanel(node, state));
     const timeline = parserOnly ? null
       : safePanel("分镜时间线", () => buildTimelinePanel(node, state));
+    // 修脸质检：只在 Director 上挂（parser 没有修脸口）。
+    // 位置紧跟时间线 —— 人的操作顺序是「看进度 → 调画质」。
+    const faceQc = parserOnly ? null
+      : safePanel("修脸质检", () => buildFaceQcPanel(node, state));
     const plan = safePanel("功能规划", () => buildPlanPanel(node, state));
     // 子面板注册的全局监听器在节点删除时统一清理。
     if (timeline && timeline.cleanup) addCleanup(timeline.cleanup);
@@ -6206,6 +7325,8 @@ function mountPanels(node) {
     // parser 上不把 pack 加进 built（不显示、不占编号），只当解析触发器用
     if (!parserOnly) built.push(pack);
     built.push(output, refs, timeline);
+    // 修脸质检排在时间线之后、编号在 pack/output/refs/timeline 之后。
+    if (faceQc) built.push(faceQc);
     // 「功能规划」选中态要在时间线缩略图上同步高亮——
     // 时间线 click 也得回头通知 plan，两边都用 state.planSelectedIndex 当真相源。
     // 切段时不要 timeline.render() 整段重建（会重置所有 hover 弹层和 video），
@@ -6256,6 +7377,7 @@ function mountPanels(node) {
 
     /** 参考图相关的所有视图一起重绘（顺序：先轻后重） */
     function renderAllRefViews() {
+      invalidateRefSlots(node);                            // 主动全刷 = 状态已变
       try { refreshTokenViews(); } catch (e) {}                    // 提示词胶囊
       try { if (refs && refs.render) refs.render(); } catch (e) {}  // 参考图卡片
       try { if (timeline && timeline.render) timeline.render(); } catch (e) {}  // 时间线缩略图
@@ -6268,6 +7390,10 @@ function mountPanels(node) {
       _refWatch = setInterval(() => {
         // 面板已脱离文档（节点删了 / 折叠重建）→ 停表，别越积越多越跑越慢
         if (!root.isConnected) { stopRefWatch(); return; }
+        // ★ 轮询要读的是**真实**槽位状态，所以每次都比对前先把记忆化打掉 ——
+        //   否则 refSlotImages() 在 100ms TTL 内直接返回旧值，这条轮询就成了
+        //   拿缓存跟缓存比，签名永远不变，换图永远刷不出来。
+        invalidateRefSlots(node);
         let sig = "";
         try { sig = refSigNow(); } catch (e) { return; }
         if (sig === _refSig) return;
@@ -6282,6 +7408,7 @@ function mountPanels(node) {
         node.onConnectionsChange = function (...args) {
           try { if (_prevConn) _prevConn.apply(this, args); } catch (e) {}
           try {
+            invalidateRefSlots(node);  // 连线变了，记忆化必然过期
             _refSig = refSigNow();     // 先同步签名，免得紧接着又重绘一次
             renderAllRefViews();
           } catch (e) {}
@@ -6315,6 +7442,29 @@ function mountPanels(node) {
     //   隐藏一次治不了这个——只能定时重钉。500ms 够快，肉眼看不出"先露出
     //   来一下又被藏起来"的闪烁；hideWidget 内部全是幂等操作，没有额外副作用。
     try {
+      /* ★ 面板离开视口 / 标签页切走时不做重钉。
+       *   panelLayout 内部要读 root.scrollHeight —— 那是**强制同步布局**
+       *   （forced reflow）：浏览器必须立刻把布局算完才能给值。500ms 一次、
+       *   每个 H3 节点一次，画布上有五六个 H3 节点就是每半秒十几次强制回流，
+       *   全程跟渲染抢主线程，而 ComfyUI 画布本身也在重绘。
+       *   这里只在节点真的可见时做：不在视口里就跳过（反正没人看得见），
+       *   标签页切到后台也跳过（rAF 本身都停了）。
+       *   注意 hideWidget 的重钉**不能省** —— 它防的是 Vue 把隐藏样式覆盖
+       *   回去，那个与可见性无关；但它全是幂等的样式/属性写入，不触发布局。 */
+      const panelVisible = () => {
+        if (!root.isConnected) return false;
+        if (typeof document !== "undefined" && document.hidden) return false;
+        // 节点被折叠/移出视口时 root 仍 connected，但完全不可见。
+        try {
+          if (typeof node.visible === "boolean" && !node.visible) return false;
+        } catch (e) { /* 老版本没有 visible */ }
+        const r = root.getBoundingClientRect ? root.getBoundingClientRect() : null;
+        if (r && (r.bottom < 0 || r.top > (window.innerHeight || 0) * 4
+                  || r.right < 0 || r.left > (window.innerWidth || 0) * 4)) {
+          return false;
+        }
+        return true;
+      };
       const hiddenTimer = setInterval(() => {
         ALL_HIDDEN_WIDGET_NAMES.forEach((nm) => hideWidget(node, nm));
         /* ★ 容器尺寸也要一起重钉 —— 「显示/隐藏高级输入」两套状态空白不
@@ -6327,6 +7477,7 @@ function mountPanels(node) {
          *   看起来就正常。两个状态一对比，空白明显不一样。
          *   和 hideWidget 同理：一次性补丁扛不住框架重渲染，必须持续重钉。
          *   __h3dRelayout 就是 panelLayout，内部会重新写 height:auto。 */
+        if (!panelVisible()) return;
         try { if (node.__h3dRelayout) node.__h3dRelayout(); } catch (e) { /* 还没挂上 */ }
       }, 500);
       addCleanup(() => { try { clearInterval(hiddenTimer); } catch (e) { /* 忽略 */ } });
@@ -6412,18 +7563,91 @@ function mountPanels(node) {
       try { output && output.render && output.render(); } catch (e) { console.error("[H3 Director] 输出规格首屏失败：", e); }
       try { refs && refs.render && refs.render(); } catch (e) { console.error("[H3 Director] 参考图首屏渲染失败：", e); }
       try { timeline && timeline.refreshRendered && timeline.refreshRendered(); } catch (e) { console.error("[H3 Director] 时间线首屏失败：", e); }
+      try { faceQc && faceQc.render && faceQc.render(); } catch (e) { console.error("[H3 Director] 修脸质检首屏失败：", e); }
       try {
-        // 监听上游 PACK 文本框（边改边刷新）—— parser 查找统一走模块级 h3FindParser()
-        const parser = h3FindParser();
-        const src = parser ? upstream(parser, "pack_text") : null;
-        if (src) {
+        /* 监听上游 PACK 文本框（边改边刷新）—— parser 查找统一走模块级 h3FindParser()。
+         *
+         * ★ 2026-09-19 修「换了 6 段 PACK，面板还停在 4 段」：
+         *   旧代码只在挂载后 400ms 试一次 `querySelector("textarea")`。ComfyUI 的
+         *   DOM widget 是按需渲染的，那一刻 textarea 常常还没建出来，监听就永远
+         *   绑不上 —— 于是 packData 一直是首屏那次解析的结果，段数纹丝不动，
+         *   只有手动点「解析 PACK」才会更新。分镜提示词编辑器与分镜时间线读的是
+         *   同一份 packData，于是一起停在旧段数上。
+         *
+         *   改成**三重触发源**，任一条命中都会刷新，不再依赖单一时机：
+         *     ① widget.callback —— ComfyUI 自己的值变更回调（包装原回调，不改行为）
+         *     ② textarea input  —— 用户打字（textarea 晚建好也要等到，最多等 5s）
+         *     ③ 指纹轮询        —— 前两条都漏时的兜底（外部接口改值 / widget 被
+         *                          替换 / 监听挂到旧 DOM）。只比对指纹，不变不发请求。
+         */
+        const scheduleParse = debounce(
+          () => { try { pack.parse && pack.parse(); } catch (e) { /* 解析失败不打断面板 */ } },
+          1200);
+        const packFingerprint = () => {
+          const t = String((state.packText && state.packText()) || "");
+          // 全长 + 首尾各 64 字符：够区分"换了一份 PACK"，又不必每次算整串哈希
+          return t.length + "|" + t.slice(0, 64) + "|" + t.slice(-64);
+        };
+        let lastFp = packFingerprint();
+
+        const bindPackSource = (tries) => {
+          // ★ 用 h3PackTextSource() 穿透纯计算节点（如剧本英译），
+          //   否则监听会挂到中间节点上：改 ①-A 不触发解析、改别的才触发。
+          const hit = h3PackTextSource();
+          const src = hit ? hit.node : null;
+          if (!src) {
+            if (tries > 0) setTimeout(() => bindPackSource(tries - 1), 500);
+            return;
+          }
+          let bound = false;
           (src.widgets || []).forEach((w) => {
-            if (w && w.element && w.element.querySelector) {
+            if (!w) return;
+            // ① 值变更回调：包装而非覆盖，ComfyUI 自己的行为照旧
+            if (!w.__h3dPackHook) {
+              w.__h3dPackHook = true;
+              const origCb = w.callback;
+              w.callback = function (...args) {
+                try { if (typeof origCb === "function") origCb.apply(this, args); } catch (e) { /* ignore */ }
+                scheduleParse();
+              };
+            }
+            // ② DOM textarea：此刻可能还不存在，交给下面的重试
+            if (w.element && w.element.querySelector) {
               const ta = w.element.querySelector("textarea");
-              if (ta) ta.addEventListener("input", debounce(() => pack.parse && pack.parse(), 1200));
+              if (ta && !ta.__h3dPackHook) {
+                ta.__h3dPackHook = true;
+                ta.addEventListener("input", scheduleParse);
+                bound = true;
+              }
             }
           });
-        }
+          if (!bound && tries > 0) setTimeout(() => bindPackSource(tries - 1), 500);
+        };
+        bindPackSource(10);                    // 最多等 5s，等 textarea 建出来
+
+        // ③ 指纹兜底：前两条监听都没命中时，它也能让面板跟上
+        // ★ 2026-09-20 第 42 轮补「自愈重试」：指纹轮询原来只在**指纹变化**
+        //   时才解析。于是首屏那一次请求只要失败一次（后端还没就绪 / 网络抖动 /
+        //   400），而文本此后一直没变 → 指纹永远相同 → **再也不会重试**，
+        //   面板就永久停在「剧本还没解析出分镜」、时间线停在「0 / 0」，
+        //   用户看到的就是「pack 没有正确注入」。
+        //   现在：文本读得到、结果却还是空 → 主动补解析，最多 5 次
+        //   （有上限，坏 PACK 时不会变成每 3 秒刷一次请求）。
+        let healTries = 0;
+        const packPoll = setInterval(() => {
+          try {
+            const fp = packFingerprint();
+            if (fp !== lastFp) { lastFp = fp; healTries = 0; scheduleParse(); return; }
+            const len = parseInt(fp.split("|")[0], 10) || 0;
+            if (len > 0 && !state.packKnown() && healTries < 5) {
+              healTries += 1;
+              console.warn("[H3 Director] PACK 文本在、但还没解析出分镜，第 "
+                + healTries + " 次补解析…");
+              scheduleParse();
+            }
+          } catch (e) { /* ignore */ }
+        }, 3000);
+        cleanups.push(() => clearInterval(packPoll));
       } catch (e) { /* 找不到就只知道手动点解析 */ }
     }, 400);
 
@@ -6487,13 +7711,27 @@ if (!registerNow()) {
   console.warn("[H3 Director] app 暂不可用，扩展还没注册上；轮询会持续重试。");
 }
 
-/* 兜底轮询：注册重试 + 节点补扫。万一上面几个 hook 都没轮到，这里也能扫到。 */
+/* 兜底轮询：注册重试 + 节点补扫。万一上面几个 hook 都没轮到，这里也能扫到。
+ * ★ 180 拍后**真正把表停掉**（原来只是 `return`，表还在每 1s 空转一辈子）。
+ *   而且提前收工：一旦扩展注册成功、且画布上每个 H3 节点都挂过面板，这条
+ *   兜底路已经没有存在意义 —— 每秒遍历一次整张图去发现"没什么要做的"，
+ *   在大工作流上是白给的开销。只有真的还有节点没挂上（节点后加载、插件
+ *   慢启动）才继续跑。 */
 let _ticks = 0;
-setInterval(() => {
+let _sweepTimer = setInterval(() => {
   _ticks += 1;
-  if (_ticks > 180) return;           // 三分钟后停，别一直占着
+  if (_ticks > 180) {                 // 三分钟后停，别一直占着
+    clearInterval(_sweepTimer);
+    _sweepTimer = null;
+    return;
+  }
   if (!_registered) { if (registerNow()) queueSweep(); }
-  sweep();
+  const found = sweep();
+  // 注册成功 + 画布上每个 H3 节点都已挂上面板 → 兜底使命完成，停表。
+  if (_registered && found > 0 && found === diag.mounted) {
+    clearInterval(_sweepTimer);
+    _sweepTimer = null;
+  }
 }, 1000);
 
 if (typeof document !== "undefined") {

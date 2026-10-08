@@ -6,7 +6,7 @@ obvious, and because the numbers behind the defaults should be checkable rather 
 asserted.
 
 Every measurement was taken on a 12 GB RTX 3060 at 480x864. `tools/check_joins.py`,
-`tools/face_drift.py`, `tools/latent_drift.py` and `tools/bench_chain.py` reproduce
+`tools/face_drift.py` and `tools/latent_drift.py` reproduce
 all of it.
 
 ---
@@ -94,10 +94,11 @@ little free runway after the pinned region and the seam degrades. Keep the hando
 a fifth of the segment. 8 s segments also put the audio exactly on grid: measured drift
 is 0.000 s at 192 frames against 0.017 s at 124.
 
-`tools/check_joins.py <session>` runs all of this against a rendered session, and
-`tools/bench_chain.py --arms pixel latent arrest` renders the same take under
-different settings and measures the difference, which is the only way to answer
-"did that help" on a model where one segment costs minutes.
+`tools/check_joins.py <session>` runs all of this against a rendered session.
+Rendering the same take under different settings and measuring the difference is
+the only way to answer "did that help" on a model where one segment costs
+minutes; the harness that did that for these numbers came out with the retired
+node set and is no longer shipped.
 
 ### Handoff length, exactly
 

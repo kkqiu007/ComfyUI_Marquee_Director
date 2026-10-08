@@ -42,13 +42,21 @@ from .common import (
     FRAME_RESCALE,
     MiniMaxH3AddGuide,
     MiniMaxH3ReferenceToVideo,
+    REFINE_SEED_FOLLOW,
+    REFINE_SEED_INDEPENDENT,
+    REFINE_SEED_OFFSET,
     audio_latent_frames,
     assert_clip_guides_supported,
     evict_dead_loaded_models,
+    free_ram_bytes,
     log,
     slice_audio,
     video_latent_t,
 )
+
+# 延迟到模块尾部导入：face_refine 在模块层要建 comfy_api 的节点类，而本模块
+# 又被 nodes.py 在模块层导入。放在这里能确保 .common / comfy_extras 都已就绪。
+from .face_refine import apply_face_refine  # noqa: E402  (见上)
 
 
 def _reference_conditioning(settings, segment):
@@ -311,6 +319,13 @@ SEAM_MIN_FLOOR = 0.0
 SEAM_MIN_CEIL = 0.95
 AUDIO_SOFT_RELEASE_TICKS = 8
 
+# 逐 step 重绘掩码（见 ``install_prefix_remask``）在 latent 字典上留的两个标记。
+# 采样器只认 ``samples`` / ``noise_mask``，多出来的键会被原样忽略，所以这里
+# 是「把这一段的接缝参数带给采样钩子」的唯一通道 —— 否则渲染节点算出的
+# seam 值要在 render_segment 里照着公式重算一遍，那就是两处真相。
+PREFIX_STEPS_KEY = "_marquee_continue_prefix_steps"
+CONTINUE_SEAM_KEY = "_marquee_continue_seam_min"
+
 
 def clamp_seam_min_mask(value):
     """User-facing「重绘幅度」. Higher = more redraw, less literal copy of the tail."""
@@ -460,11 +475,288 @@ def apply_latent_continue(latent, anchor, seam_min_mask=None):
     )
     audio_mask = _soft_audio_mask(patched_audio, audio_pin_t)
     out["noise_mask"] = _nested(video_mask, audio_mask, samples)
+    out[PREFIX_STEPS_KEY] = int(t_tail)
+    out[CONTINUE_SEAM_KEY] = float(seam)
     log("latent continue: pinned %d video tokens (%d frames) + %d audio ticks; "
         "mask head %.2f -> seam %.2f",
         t_tail, covered, audio_pin_t,
         weights[0] if weights else 0.0, weights[-1] if weights else 0.0)
     return out, t_tail, audio_pin_t
+
+
+# ---------------------------------------------------------------------------
+# 逐 step 重绘掩码（借鉴 ComfyUI_MiniMaxH3_Director 的 _PrefixRemask，Apache-2.0）
+#
+# 静态 noise_mask 的问题不是"锁不锁"，而是"从头锁到尾用的是同一个值"。
+# 采样第 1 步时 x 几乎是纯噪声，把前缀硬锁成上一段的真实帧，等于要求模型在
+# 一片噪声里先认出一帧画面；采样最后几步时模型已经收敛，此时前缀若还是
+# head=1.0（随便重画），模型就会把「上一段的真实结尾」当成可改区域描一遍
+# —— 于是接缝那一帧不是被钉住，而是被重新想象了一次。
+#
+# 改成随 σ 缩放：权重 = 静态权重 × (下一步 σ / 当前步 σ)。采样从高噪走到低噪，
+# 这个比值前期约 0.8、末段趋近 0，于是前缀在早期允许重写、在末期整体锁回
+# latent_image 里写好的那一段尾巴。接缝那几个 token 由 seam_min 兜底，
+# 全程不低于它 —— 无论第几步，接缝永远是"几乎不许动"。
+# ---------------------------------------------------------------------------
+
+
+def _schedule_values(sigmas):
+    """Descending, deduped, finite, non-negative sigma values."""
+    if torch.is_tensor(sigmas):
+        raw = sigmas.detach().float().reshape(-1).cpu().tolist()
+    else:
+        raw = list(sigmas or ())
+    return tuple(sorted({float(v) for v in raw
+                         if math.isfinite(float(v)) and float(v) >= 0.0},
+                        reverse=True))
+
+
+def next_sigma_ratio(current, sigmas):
+    """``next_sigma / current_sigma`` in [0, 1] -- 1 early in sampling, 0 at the end."""
+    cur = float(current)
+    if not math.isfinite(cur) or cur <= 0.0:
+        return 0.0
+    tol = max(1e-7, abs(cur) * 1e-6)
+    for cand in _schedule_values(sigmas):
+        if cand < cur - tol:
+            return max(0.0, min(1.0, cand / cur))
+    return 0.0
+
+
+def live_prefix_weights(prefix_steps, ratio, seam_min=None,
+                        taper_steps=SEAM_TAPER_TOKENS):
+    """Static taper scaled by the step's ratio, never below ``seam_min``."""
+    floor = clamp_seam_min_mask(SEAM_MIN_MASK if seam_min is None else seam_min)
+    out = []
+    for base in prefix_token_weights(prefix_steps, taper_steps, seam_min=floor):
+        value = float(base) * max(0.0, min(1.0, float(ratio)))
+        if floor > 0.0:
+            value = max(floor, value)
+        out.append(max(0.0, min(1.0, value)))
+    return tuple(out)
+
+
+def _unbind_mask(mask):
+    """The (video, audio) pair inside a possibly-nested mask."""
+    if torch.is_tensor(mask):
+        return [mask]
+    if hasattr(mask, "unbind"):
+        return list(mask.unbind())
+    if hasattr(mask, "tensors"):
+        return list(mask.tensors)
+    if isinstance(mask, (tuple, list)):
+        return list(mask)
+    return None
+
+
+class _PrefixRemask:
+    """Per-step prefix redraw weights, installed as a model denoise-mask hook.
+
+    Any shape it does not recognise is handed straight back untouched -- a wrong
+    guess about the mask layout must degrade to the static mask, never to a
+    corrupted frame.
+    """
+
+    def __init__(self, prefix_steps, sigmas, video_shape, seam_min=None):
+        self.prefix_steps = max(0, int(prefix_steps))
+        self.sigmas = _schedule_values(sigmas)
+        self.video_shape = tuple(int(x) for x in video_shape)
+        self.seam_min = clamp_seam_min_mask(SEAM_MIN_MASK if seam_min is None else seam_min)
+        self.steps_seen = 0
+
+    def _weights(self, sigma, extra_options=None):
+        schedule = self.sigmas or _schedule_values(
+            (extra_options or {}).get("sigmas", ()))
+        ratio = next_sigma_ratio(sigma, schedule)
+        return torch.tensor(
+            live_prefix_weights(self.prefix_steps, ratio, self.seam_min),
+            dtype=torch.float32)
+
+    def _write(self, mask, weights):
+        """Write along the temporal axis of a 5D [B,C,T,H,W] video mask."""
+        n = min(int(weights.numel()), int(mask.shape[2]), self.prefix_steps)
+        if n < 1:
+            return mask
+        out = mask.clone()
+        view = [1] * out.ndim
+        view[2] = n
+        sl = [slice(None)] * out.ndim
+        sl[2] = slice(0, n)
+        out[tuple(sl)] = weights[:n].to(device=out.device, dtype=out.dtype).view(*view)
+        return out
+
+    def denoise_mask_function(self, sigma, denoise_mask, extra_options=None):
+        self.steps_seen += 1
+        try:
+            weights = self._weights(sigma, extra_options)
+            # H3 packs the AV latent into [B,1,elems]; the video stream is the
+            # first ``prod(video_shape[1:])`` of it.
+            if (torch.is_tensor(denoise_mask) and denoise_mask.ndim == 3
+                    and len(self.video_shape) == 5):
+                elems = int(math.prod(self.video_shape[1:]))
+                if int(denoise_mask.shape[-1]) < elems:
+                    return denoise_mask
+                packed = denoise_mask.clone()
+                video = packed[..., :elems].reshape(self.video_shape)
+                video = self._write(video, weights)
+                packed[..., :elems] = video.reshape(
+                    packed.shape[0], 1, elems).to(dtype=packed.dtype)
+                return packed
+            if torch.is_tensor(denoise_mask) and denoise_mask.ndim == 5:
+                return self._write(denoise_mask, weights)
+            streams = _unbind_mask(denoise_mask)
+            if streams and torch.is_tensor(streams[0]) and streams[0].ndim == 5:
+                video = self._write(streams[0], weights)
+                rest = list(streams[1:])
+                if rest:
+                    return _nested(video.to(dtype=streams[0].dtype), rest[0],
+                                   denoise_mask)
+                return video.to(dtype=streams[0].dtype)
+            return denoise_mask
+        except Exception as exc:                     # never break a render
+            log("seam remask: 本步回退静态掩码（%s）", exc)
+            return denoise_mask
+
+
+def install_prefix_remask(model, prefix_steps, sigmas, video_shape, seam_min=None):
+    """Return ``(model_with_hook_or_the_original, state_or_None)``.
+
+    The model is *cloned*: a denoise-mask hook is per-render state, and writing
+    it onto the caller's model would leak it into every later segment (and into
+    the first segment, which has no prefix at all).
+    """
+    if model is None or int(prefix_steps or 0) < 1:
+        return model, None
+    if not callable(getattr(model, "clone", None)):
+        return model, None
+    try:
+        patched = model.clone()
+        if not callable(getattr(patched, "set_model_denoise_mask_function", None)):
+            return model, None
+        state = _PrefixRemask(prefix_steps, sigmas, video_shape, seam_min=seam_min)
+        patched.set_model_denoise_mask_function(state.denoise_mask_function)
+        setattr(patched, "_marquee_prefix_remask", state)
+        log("seam remask: 已安装逐 step 掩码（前缀 %d token，seam_min %.2f）",
+            state.prefix_steps, state.seam_min)
+        return patched, state
+    except Exception as exc:
+        log("seam remask: 安装失败，本次用静态掩码（%s）", exc)
+        return model, None
+
+
+def uninstall_prefix_remask(model):
+    """Drop the hook so the clone can be garbage collected after the segment."""
+    if model is None:
+        return
+    state = getattr(model, "_marquee_prefix_remask", None)
+    if state is not None:
+        try:
+            state.steps_seen = 0
+            delattr(model, "_marquee_prefix_remask")
+        except Exception:
+            pass
+    try:
+        options = getattr(model, "model_options", None)
+        if isinstance(options, dict):
+            options.pop("denoise_mask_function", None)
+    except Exception:
+        pass
+
+
+def _refine_seed(pack, first_pass_seed):
+    """The seed the refine pass samples on.
+
+    ``跟随一采`` is the default and the safe one: the second pass then walks the
+    same noise trajectory as the first, so it reads as *continuing to converge on
+    the same image* rather than as a second opinion on it. ``一采+1`` and
+    ``独立种子`` deliberately break that, which is what you want when the point of
+    the refine pass is to shake a detail loose.
+    """
+    mode = pack.get("seed_mode") or REFINE_SEED_FOLLOW
+    if mode == REFINE_SEED_INDEPENDENT:
+        return int(pack.get("seed") or 0)
+    if mode == REFINE_SEED_OFFSET:
+        return (int(first_pass_seed) + 1) % (1 << 63)
+    return int(first_pass_seed)
+
+
+def _refine_sampler(settings, pack):
+    """The SAMPLER object for the refine pass. Follows pass 1 by default."""
+    name = pack.get("sampler")
+    if not name:
+        return settings["sampler"]
+    return comfy.samplers.sampler_object(name)
+
+
+def refine_samples(settings, samples, positive, seed):
+    """Optional second sample pass over a segment's AV latent.
+
+    Returns ``(samples, note)`` — ``note`` is empty when refine is off, which is
+    the case that has to stay byte-identical to the old behaviour.
+
+    The pass reuses pass 1's conditioning wholesale: it carries the
+    ``minimax_keyframes`` pins that lock a segment's opening to the previous
+    segment's tail, so refining cannot drift the seam. It deliberately does NOT
+    carry pass 1's ``noise_mask`` — that mask existed to protect the *replayed*
+    prefix while it was being generated, and by the time we are here that prefix
+    is a finished picture, not an input to protect.
+    """
+    pack = settings.get("refine")
+    if not isinstance(pack, dict):
+        return samples, ""
+    sigmas = pack.get("sigmas")
+    if sigmas is None:
+        # Wired but no schedule: treat as off rather than sampling with pass 1's
+        # sigma table, which would be a full re-generation at denoise=1.
+        return samples, ""
+
+    passes = max(1, int(pack.get("passes") or 1))
+    model = pack.get("model") or settings["model"]
+    sampler = _refine_sampler(settings, pack)
+    refine_seed = _refine_seed(pack, seed)
+
+    guider = Guider_Basic(model)
+    guider.set_conds(positive)
+    try:
+        for i in range(passes):
+            # A fresh noise object per pass: two passes sharing one seed would
+            # start from literally the same noise, which is not "more refining",
+            # it is the same step twice.
+            out = SamplerCustomAdvanced.execute(
+                noise=Noise_RandomNoise(refine_seed + i),
+                guider=guider,
+                sampler=sampler,
+                sigmas=sigmas,
+                latent_image={"samples": samples},
+            )[0]
+            samples = out["samples"]
+            del out
+    finally:
+        del guider
+
+    if hasattr(sigmas, "shape"):
+        shape = "x".join(str(int(s)) for s in sigmas.shape)
+    else:
+        try:
+            shape = "%d steps" % len(sigmas)
+        except TypeError:                                    # pragma: no cover
+            shape = "?"
+    note = "%d pass(es), sigmas %s, %s" % (
+        passes, shape,
+        "跟随一采模型" if pack.get("model") is None else "二采模型")
+    return samples, note
+
+
+def _is_oom(exc):
+    """是不是显存/内存耗尽。
+
+    ComfyUI 抛的是 ``torch.OutOfMemoryError``（``RuntimeError`` 的子类），但不同
+    torch 版本、以及 CUDA 分配器自己抛的消息措辞不一，所以按关键字判定，别只认
+    一个类型名。
+    """
+    if isinstance(exc, torch.OutOfMemoryError):
+        return True
+    return "out of memory" in str(exc).lower()
 
 
 def render_segment(settings, segment, start_anchor=None, end_anchor=None):
@@ -476,9 +768,40 @@ def render_segment(settings, segment, start_anchor=None, end_anchor=None):
 
     ``samples`` is the sampled AV latent, handed back so the caller can cut the next
     handoff out of it without a VAE round trip.
+
+    ★ OOM 自愈（2026-09-26）
+    ------------------------
+    参考图的视觉 token 要过一次 26 GB 的文本编码器，这是整条链里显存峰值最高、
+    也最容易崩的一步：实测 3070 8GB 在**第 5 段**这里 OOM，前 4 段都正常，整条
+    链跑了 50 分钟才死，前 4 段全部白烧。
+
+    单段的 OOM 不该毁掉整条链。这里在进入条件编码前先清一次死槽与缓存碎片
+    （成本几乎为零），失败后再**强制释放显存并原样重试一次**。
+
+    只退显存、不做 ``cleanup_models()`` 的整包内存清理：本包权重约 49 GB 而对
+    象机内存约 40 GB，把权重从内存里丢掉就得从磁盘整包重读，实测会在重载阶段
+    100% CPU 空转卡死十几分钟 —— 那是比 OOM 更坏的结局（见
+    ``free_between_segments`` 的护栏说明）。重试只此一次，再失败就如实抛出。
     """
+    evict_dead_loaded_models()
+    comfy.model_management.soft_empty_cache()
+    try:
+        return _render_segment_once(settings, segment, start_anchor, end_anchor)
+    except RuntimeError as exc:
+        if not _is_oom(exc):
+            raise
+        log("OOM：条件编码/采样阶段显存不足（%s）—— 强制释放显存后原样重试一次",
+            str(exc).strip().splitlines()[0][:160])
+        comfy.model_management.unload_all_models()
+        evict_dead_loaded_models()
+        comfy.model_management.soft_empty_cache()
+        return _render_segment_once(settings, segment, start_anchor, end_anchor)
+
+
+def _render_segment_once(settings, segment, start_anchor=None, end_anchor=None):
     positive, latent = _reference_conditioning(settings, segment)
 
+    remask_model = None
     if start_anchor is not None:
         positive = _pin(settings, positive, latent, start_anchor, 0)
         # The cond above tells the model what the previous segment ended on; this
@@ -493,27 +816,72 @@ def render_segment(settings, segment, start_anchor=None, end_anchor=None):
                 seam = settings.get("seam_min_mask")      # 旧名兼容
             latent, _pinned_tokens, _pinned_ticks = apply_latent_continue(
                 latent, start_anchor, seam_min_mask=seam)
+            # 逐 step 掩码是**可选**的（H3 Chain Settings 的 seam_remask）。
+            # 默认关：它改变的是成片本身，开着会让既有会话的段全部重渲，
+            # 而这不该由一次升级替用户决定。参数从 latent 上读（不是重算），
+            # 保证和上面写进 noise_mask 的是同一套。
+            if settings.get("seam_remask"):
+                _video_stream, _ = _av_streams(latent["samples"])
+                remask_model, _remask_state = install_prefix_remask(
+                    settings["model"],
+                    int(latent.get(PREFIX_STEPS_KEY) or 0),
+                    settings["sigmas"], tuple(_video_stream.shape),
+                    seam_min=latent.get(CONTINUE_SEAM_KEY))
 
     if end_anchor is not None:
         positive = _pin(settings, positive, latent, end_anchor,
                         -anchor_frames(end_anchor))
 
-    guider = Guider_Basic(settings["model"])
+    # 接了逐 step 掩码就用带钩子的那份 clone（它是 model.clone()，权重是同一套，
+    # 只是多了一个 model_options 钩子）；没接就是原来的 model，一分不差。
+    guider = Guider_Basic(remask_model or settings["model"])
     guider.set_conds(positive)
 
-    sampled = SamplerCustomAdvanced.execute(
-        noise=Noise_RandomNoise(segment["resolved_seed"]),
-        guider=guider,
-        sampler=settings["sampler"],
-        sigmas=settings["sigmas"],
-        latent_image=latent,
-    )[0]
+    try:
+        sampled = SamplerCustomAdvanced.execute(
+            noise=Noise_RandomNoise(segment["resolved_seed"]),
+            guider=guider,
+            sampler=settings["sampler"],
+            sigmas=settings["sigmas"],
+            latent_image=latent,
+        )[0]
+    finally:
+        # 钩子是这一段专属的：不卸掉，这个 clone 就带着指向本段 latent 的闭包
+        # 活到下一次 gc，等于每段往内存里留一份模型。
+        uninstall_prefix_remask(remask_model)
+        remask_model = None
 
     samples = sampled["samples"]
+    # ★ 二采必须排在**切尾巴和解码之前**（借鉴 MiniMaxH3_Director 的 refine 口）。
+    #   段间锚点（latent_tail）是从 samples 里切出去的，若继续从一采结果里切，
+    #   下一段开头钉的就是一采画质的帧，而成片里前一段是二采画质 —— 接缝处
+    #   会出现一记画质跳变，正好毁掉这个包存在的理由。
+    #   放在解码之前，尾巴 / 漂移签名 / 成片三者天然同源，不需要额外对齐。
+    samples, refine_note = refine_samples(
+        settings, samples, positive, segment["resolved_seed"])
+    if refine_note:
+        log("refine: %s", refine_note)
     video_latent = samples.unbind()[0] if samples.is_nested else samples
     images = settings["vae"].decode(video_latent)
     if images.ndim == 5:
         images = images.reshape(-1, *images.shape[-3:])
+
+    # ★ 修脸排在**解码之后**：它改的是像素，不是 latent。
+    #   段间锚点 latent_tail 依然从上面那份未修的 samples 里切出去 —— 这是刻意的。
+    #   下一段开头钉的是「没修过脸的尾帧」，所以本段成片必须在段首/段尾把修脸
+    #   结果淡回原图（fade_stitch_at_seams），否则接缝处脸会跳一下。
+    #   反过来，若为了让锚点也带上修脸结果而把整段重新编码，代价是每段多一次
+    #   VAE encode + 一次重采，且接缝两侧变成两次编码的误差叠加，不划算。
+    images, face_note = apply_face_refine(
+        settings, segment, images,
+        prompt=segment.get("prompt") or "",
+        replay_frames=pixel_frames_for_tokens(
+            start_anchor["video_latent"].shape[2])
+        if (isinstance(start_anchor, dict)
+            and start_anchor.get("video_latent") is not None) else 0)
+    if face_note:
+        log("face refine: %s", face_note)
+
     audio = vae_decode_audio(settings["audio_vae"], sampled)
 
     del sampled, video_latent, positive, latent, guider
@@ -536,7 +904,9 @@ def take_tail(images, audio, handoff, fps=FPS):
 
 
 def free_between_segments(unload_models=False):
-    """段间清理。顺序照 ComfyUI_MiniMaxH3_Director 的 cleanup_segment_vram。
+    """段间清理：默认清显存；``unload_models=True`` 时显存 + 内存一起清。
+
+    顺序照 ComfyUI_MiniMaxH3_Director 的 cleanup_segment_vram。
 
     关键在**死槽必须先清**：``is_dead()`` 的 LoadedModel 会一直占着
     ``current_loaded_models``，而 ``unload_all_models()`` 碰不到它们，被钉住的
@@ -546,6 +916,22 @@ def free_between_segments(unload_models=False):
 
     先 ``gc.collect()`` 是让 ModelPatcher 的 weakref 有机会真的死掉，
     否则 ``is_dead()`` 判断不出来、清不掉。
+
+    ★ 内存护栏（2026-09-19 加）
+    ----------------------------
+    清内存是有代价的：权重被丢掉之后，下一段要**从磁盘整包读回**
+    （UNet ~20GB + 文本编码器 ~26GB）。内存本来就装不下这套权重时，
+    读回的过程会把 ComfyUI 的动态显存/内存压力缓存推进自旋 —— 实测
+    **CPU 100% + 磁盘读 0 MB/s 卡死 15 分钟以上**，链再也走不下去。
+
+    用户的诉求是「既要清显存也要清内存，之后**继续**把未渲的段渲完」——
+    关键词是"继续"。所以这里加一道护栏：
+
+      * 可用物理内存 **足够** → 照办，显存 + 内存一起清（真正释放权重）。
+      * 可用物理内存 **不够** → 只清显存，**保留内存里的权重**，并打一行告警。
+
+    这样"清内存"在安全时一定会发生，不安全时也不会把整条链拖死 ——
+    宁可少清一次内存，也不能让剩下的段渲不完。
     """
     import gc
 
@@ -557,10 +943,84 @@ def free_between_segments(unload_models=False):
         pass
     evict_dead_loaded_models()
     if unload_models:
+        # 先算「待会儿重装要多少钱」：当前驻留模型的总大小。
+        need = 0
+        try:
+            for cur in getattr(mm, "current_loaded_models", None) or []:
+                need += int(getattr(cur, "model_memory", 0) or 0)
+        except Exception:
+            need = 0
+        avail = free_ram_bytes()
+        # 护栏：可用内存得能装下"重装后的峰值"，留 1.25 倍余量给碎片与激活。
+        # avail 取不到（None）时不拦 —— 没数据就别自作主张降级。
+        if avail is not None and need > 0 and avail < int(need * 1.25):
+            log("⚠ 跳过本次内存清理：可用物理内存 %.1f GB，重装这 %.1f GB 权重"
+                "会装不下（曾在此处卡死）。本次只清显存，权重留在内存里，"
+                "下一段照常继续渲染。", avail / 2 ** 30, need / 2 ** 30)
+            # 只退显存。对照 comfy/model_management.py 源码核过：
+            #   unload_all_models() -> free_memory(1e30, device) 只把模型挪出显存，
+            #   ModelPatcher 对象还在 current_loaded_models 里，权重仍在 RAM；
+            #   真正让 RAM 释放的是 cleanup_models()（pop + del 断引用）配合 gc。
+            # 所以这里**故意不调** cleanup_models()，内存里的权重得以保留。
+            mm.unload_all_models()
+            mm.soft_empty_cache()
+            return
+        # 真的清内存：先退显存，再断引用 + 多轮 gc 把权重从 RAM 放掉。
         mm.unload_all_models()
         mm.cleanup_models()
         evict_dead_loaded_models()
+        for _ in range(3):
+            gc.collect()
+        mm.cleanup_models_gc()
+        mm.soft_empty_cache()
+        log("已卸载模型：显存 + 内存均已释放（约 %.1f GB 权重），下一段将从磁盘重载。",
+            need / 2 ** 30)
     mm.soft_empty_cache()
+
+
+def unload_every_int(every):
+    """把 ``unload_every`` 归一成 int。
+
+    老工作流存的是布尔（``unload_models_after`` 时代）：``True``→1、``False``→0，
+    正好等于旧语义。垃圾值（``None`` / 字符串 / 对象）→ 0 = 从不卸载。
+
+    ★ 判定与日志**必须走同一个入口**：以前 ``unload_due`` 里自己 try/int 一次、
+    调用点又各写一套，两处口径一旦不一致，就会出现「日志说没到点、其实已经卸了」
+    这种自相矛盾的输出。统一到这一个函数，谁也不许再自己 int()。
+    """
+    try:
+        return int(every)
+    except (TypeError, ValueError):
+        return 0
+
+
+def unload_due(rendered_since_unload, every, is_last=False):
+    """「每 N 段卸载一次模型」的判定。
+
+    ``every`` 语义（2026-09-19 起取代原来的布尔 ``unload_models_after``）：
+
+    ====== ==========================================================
+     ``0`` 从不卸载 —— 连链尾也不卸，完全交给 ComfyUI 自己的收尾释放
+     ``1`` 每段都卸 = 旧 ``unload_models_after=True`` 的行为
+     ``2`` 每渲染满两段卸一次（默认；把加载开销摊薄一半）
+     ``N`` 每渲染满 N 段卸一次
+    ====== ==========================================================
+
+    ``rendered_since_unload`` 是「距上次卸载已经渲了几段」（含本段）。
+    **只数真的烧了显卡的段**：命中磁盘缓存的段不加载模型，不该推进计数器。
+
+    ``is_last=True`` 时无条件卸（``every>0`` 的前提下）—— 这一条是旧行为的保留项：
+    以前每段都卸，链尾自然也卸；链尾释放给后面的拼接 / 编码让出显存，不卸会改变
+    末段之后那一小段的表现。
+
+    ``every`` 收 bool 也认，归一规则见 ``unload_every_int``。
+    """
+    every = unload_every_int(every)
+    if every <= 0:
+        return False
+    if is_last:
+        return True
+    return int(rendered_since_unload) >= every
 
 
 def describe(segment, index, anchored):

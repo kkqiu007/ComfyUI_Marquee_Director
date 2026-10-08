@@ -45,8 +45,14 @@ It does **not** call H3 Script Batch Render / H3 Chain To Video /
 H3 Segment Timeline as subgraphs: those nodes are thin wrappers around
 ``render_segment`` / ``video_io.join`` / on-disk glob, and re-implementing
 them inline drops the node-instantiation cost while reusing the same helpers.
-The session manifest on disk stays identical, so ``H3ScriptRepairSegment`` /
-``H3ChainToVideo`` / ``H3LoadSession`` / ``H3ShotRenderer`` keep working.
+The session manifest on disk is unchanged by all of this.
+
+.. note::
+   2026-09-20 —— ``H3ScriptBatchRender`` / ``H3ScriptRepairSegment`` /
+   ``H3ChainToVideo`` / ``H3LoadSession`` / ``H3SegmentTimeline`` /
+   ``H3ShotPrompt`` / ``H3ShotsBoard`` / ``H3ShotRenderer`` 已**删除**
+   （全部被本节点取代）。会话目录与 manifest 格式
+   没变，所以旧的 output 目录照旧能读。
 """
 
 from __future__ import annotations
@@ -69,16 +75,22 @@ from . import routes as routes_mod
 from . import session as session_mod
 from . import ref_images as ref_images_mod
 from . import video_io
+from . import wardrobe as wardrobe_mod
 from .common import (
     FPS,
     evict_dead_loaded_models,
     generation_length,
-    guide_length,
     guide_length_up,
     log,
     seconds_to_frames,
 )
-from .engine import free_between_segments
+from .engine import free_between_segments, unload_due, unload_every_int
+# H3_REFINE 类型定义在这里进：Director 的 refine 口与 H3 Refine 节点的输出口
+# 必须是同一个 io.Custom 实例，两边各建一个同名字符串也能跑，但那是两份真相。
+from .refine_nodes import H3Refine
+# 与 refine 同理：Director 的 face_refine 口和 H3 FaceRefine 节点的输出口必须是
+# 同一个 io.Custom 实例。face_refine 模块已被 engine 在模块层导入，这里只是取类型。
+from .face_refine import H3FaceRefine
 from .nodes import (
     H3RenderSegmentNode,
     H3RepairSegmentNode,
@@ -105,80 +117,15 @@ MIN_SEG_FRAMES = 4
 # 单一来源放在 ref_images 模块（对齐 ComfyUI_MiniMaxH3_Director 的约定）。
 MAX_REFERENCE_IMAGES = ref_images_mod.MAX_REFERENCE_IMAGES
 
-# 闪电渲染：步数下拉里的"跟随上游"哨兵值。选它就不碰上游 BasicScheduler 给的
-# sigmas —— 老工作流一个字节都不改。
-FOLLOW_UPSTREAM = "跟随上游 sigmas"
-NO_LORA = "（不加载）"
-SCHEDULER_CHOICES = [
-    FOLLOW_UPSTREAM, "simple", "normal", "karras", "exponential",
-    "sgm_uniform", "ddim_uniform", "beta", "laplace",
-]
-
-
-def _apply_lightning(settings, lightning, lora_name, lora_strength,
-                     render_steps, scheduler, notes):
-    """闪电渲染 + 步数覆盖。
-
-    两点说明为什么放在 Director 里而不是再加一个节点：
-
-    * **LoRA 必须挂在 Director 用的那个 model 上**。上游 LoraLoaderModelOnly
-      已经把 turbo LoRA 打进去了，这里是在它之上再叠一层；叠完必须替换回
-      ``settings["model"]``，否则缓存键看不到 patch 列表，改了强度却不重渲。
-    * **步数 = sigmas 的长度**。改步数不是给采样器传个参数，而是重算一遍
-      sigmas；所以"跟随上游"必须是默认，一改就会让所有段缓存失效
-      （这是对的：4 步和 20 步渲出来的不是同一段片子）。
-
-    返回新的 settings（不改原 dict）。
-    """
-    settings = dict(settings or {})
-    steps = int(render_steps or 0)
-    sched = str(scheduler or FOLLOW_UPSTREAM).strip()
-    name = str(lora_name or NO_LORA).strip()
-
-    if steps > 0 and sched != FOLLOW_UPSTREAM:
-        try:
-            import comfy.samplers
-
-            model = settings.get("model")
-            model_sampling = model.get_model_object("model_sampling")
-            sigmas = comfy.samplers.calculate_sigmas(model_sampling, sched, steps)
-            sigmas = torch.cat([sigmas.cpu(), torch.zeros(1)])
-            settings["sigmas"] = sigmas
-            notes.append("步数覆盖：%s · %d 步（%d 个 sigma）"
-                         % (sched, steps, sigmas.shape[0]))
-            _note_cache_bust(notes, "渲染步数改动")
-        except Exception as exc:
-            notes.append("⚠ 步数覆盖失败（沿用上游 sigmas）：%s" % exc)
-    elif steps > 0:
-        notes.append("⚠ 填了步数 %d 但调度器还是「%s」，没生效 —— 两个都要设。"
-                     % (steps, FOLLOW_UPSTREAM))
-
-    if lightning and name and name != NO_LORA:
-        try:
-            import comfy.sd
-            import folder_paths
-
-            path = folder_paths.get_full_path("loras", name)
-            if not path:
-                notes.append("⚠ 找不到闪电 LoRA：%s" % name)
-                return settings
-            lora = comfy.utils.load_torch_file(path, safe_load=True)
-            model = settings.get("model")
-            new_model, _ = comfy.sd.load_lora_for_models(
-                model, None, lora, float(lora_strength or 1.0), 0.0)
-            if new_model is not None:
-                settings["model"] = new_model
-                notes.append("闪电 LoRA：%s × %.2f（已叠加在上游 LoRA 之上）"
-                             % (name, float(lora_strength or 1.0)))
-                _note_cache_bust(notes, "闪电 LoRA 改动")
-        except Exception as exc:
-            notes.append("⚠ 闪电 LoRA 加载失败（已忽略）：%s" % exc)
-    return settings
-
-
-def _note_cache_bust(notes, what):
-    notes.append("  ↳ %s 会改变缓存键 → 从这一段起全部重渲（包括 resume 打开时）"
-                 % what)
+# 2026-09-26 清理：闪电渲染 / 步数覆盖整套机制已删除。
+#   2026-09-20 起节点上的 lightning / render_steps / scheduler / lightning_lora /
+#   lightning_lora_strength 这五个面板控件被收起，调用点改成硬编码关闭值，
+#   但 `_apply_lightning`（60 行）+ `_note_cache_bust` + 两个哨兵常量
+#   （`FOLLOW_UPSTREAM` / `NO_LORA`）一直留在包里 —— 一行空转的代码却是全包
+#   唯一还能改 sigmas / model 的暗门，读代码的人会以为它有入口。整套删掉。
+#   要恢复这个功能：从 git 历史取回 `_apply_lightning`，并把五个控件加回
+#   `H3DirectorNode.define_schema()` 的**末尾**（widget 顺序即 widgets_values
+#   的对齐顺序，插在中间会让已存工作流的控件整体错位）。
 
 
 def _load_pack_info(raw, asset, settings):
@@ -340,9 +287,12 @@ def _pack_info_block(info):
     return lines
 # H3: VAE ÷16 spatially, then 2×2 patchify → canvas must be a multiple of 32.
 # An odd latent width (e.g. 496px → 31) crashes patchify_video while sampling.
-CANVAS_STRIDE = 32
+# 单一来源同 MAX_REFERENCE_IMAGES：ref_images 模块。以前这里自己又写了一遍
+# ``CANVAS_STRIDE = 32``，两处各改一半就会对不上（2026-09-20 收敛）。
+CANVAS_STRIDE = ref_images_mod.CANVAS_STRIDE
 
 REF_SIZE_MATCH = "match"
+REF_SIZE_MAX = "max"          # 历史选项：显式关闭缩放（不在下拉里，但老工作流存过）
 # match = follow the output canvas; the rest are long-edge presets (px).
 REF_SIZE_OPTIONS = [REF_SIZE_MATCH, "512", "768", "1024", "1536"]
 
@@ -476,13 +426,13 @@ def cleanup_segment_vram(unload_models: bool = False) -> None:
     """Release what a finished segment still holds."""
     gc.collect()
     try:
+        # ★ 卸载（含"是否连内存一起清"的护栏）统一交给 engine.free_between_segments，
+        #   这里只补一段收尾的 gc + soft_empty_cache。
+        #   以前这里自己写了一套 mm.unload_all_models() + cleanup_models()，
+        #   没有内存护栏 —— 链尾那一次卸载同样可能把机器拖进重装死锁。
+        free_between_segments(unload_models)
         import comfy.model_management as mm
 
-        mm.cleanup_models_gc()
-        _evict_dead_loaded_models()
-        if unload_models:
-            mm.unload_all_models()
-            mm.cleanup_models()
         _evict_dead_loaded_models()
         gc.collect()
         mm.soft_empty_cache()
@@ -595,49 +545,158 @@ def _shot_plan(seconds, replay_in=0.0, tail_out=0.0,
     }
 
 
-def _cache_state(sess, manifest, index, settings, prompt, seconds, images,
-                 handoff, previous_key):
-    """Would this segment be a cache hit? None when it cannot be determined."""
+def _rebase_disk_progress(done_indices, done_count, start_index, total):
+    """把**会话全局**段号换算成**本批次**的 1..total 段号。
+
+    ``disk_segments()`` / ``disk_segment_indices()`` 报的是 seg_NN.mp4 里的 NN
+    （会话全局），而面板时间线画的是本批次的分镜（1..total）。追加模式
+    （chain_state 接着一个已有会话）下两者差一个 start_index 偏移：已有 4 段的
+    会话再追加 4 段，全局段号是 5..8，面板上却只有 1..4。直接下发会让前端
+    doneSet 塞进 5/6/7/8 —— 面板上一段都不存在，进度条瞬间 100%、轨道一段都
+    不亮、小马也无段可跑。
+
+    ``start_index == 0``（普通断点渲染）是恒等变换。返回 ``(indices, count)``。
+    """
+    indices = sorted(int(i) for i in (done_indices or []))
+    count = int(done_count or 0)
+    start = int(start_index or 0)
+    total = int(total or 0)
+    if not start:
+        return indices, count
+    return ([i - start for i in indices if start < i <= start + total],
+            max(0, min(total, count - start)))
+
+
+def _why_not_reused(sess, manifest, index, plan, prompt, resolved_seed):
+    """断点续渲：这一段**为什么**不会被复用？返回一句人话，或 None（应当能复用）。
+
+    ★★ 只用**已经记录在 manifest 里的事实**做对账，不重算缓存键（2026-09-20 第 44 轮）。
+       缓存键是 prompt / 参考图 digest / 上一段 key / settings 的哈希，离线复刻不了；
+       猜错会让面板撒谎，比不报更糟。而下面这四项**都是缓存键的成分**，
+       任何一项对不上，键就必然不同 —— 所以结论可靠：只可能漏报，不会误报。
+
+    为什么需要它：渲染节点只在**命中**时打 `-- reusing seg_NN.mp4`，没命中时日志里
+    只有一行普通的 `segment N: ...`。于是「断点渲染没从已有的继续」在日志里完全
+    看不出原因 —— 实测那次是 `ref_image_size` 读到非法值 1，参考图被压成 32×32，
+    参考图 digest 全变 → 键永远对不上。现在这一段会直接把差异列出来。
+    """
     try:
-        segment = {
-            "prompt": prompt,
-            "seconds": seconds,
-            "length": generation_length(seconds_to_frames(seconds)),
-            "handoff": guide_length(seconds_to_frames(handoff)) if handoff else 0,
-            "seed": 0,
-            "images": list(images or []),
-            "videos": [],
-            "video_audios": [],
-            "audios": [],
-        }
-        segment["resolved_seed"] = _resolve_seed(settings, segment, index)
-        key = session_mod.segment_key(settings, segment, segment["handoff"], previous_key)
-        hit = bool(sess.cached(manifest, index, key, needs_tail=bool(segment["handoff"])))
-        return hit, key
-    except Exception as exc:                                     # pragma: no cover
-        log("H3Director: cache prediction failed for segment %d (%s)", index + 1, exc)
-        return None, previous_key
+        path = sess.segment_path(index)
+        if not os.path.exists(path):
+            return "磁盘上没有 %s" % os.path.basename(path)
+        records = (manifest or {}).get("segments") or []
+        if index >= len(records):
+            return "manifest 里没有第 %d 段的记录" % (index + 1)
+        rec = records[index]
+        if not isinstance(rec, dict) or not rec:
+            # 记录位置存在但是空的（手改过 manifest / 老版本残留）——
+            # 当成"没有记录"报，别把 None 当成"段长 None"去跟 277 比。
+            return "manifest 第 %d 段的记录是空的" % (index + 1)
+        if rec.get("recovered"):
+            # 磁盘补齐的记录没有原始键，只能靠"链条是否还完整"判定
+            return None if sess.resume_intact else (
+                "manifest 缺第 %d 段的原始缓存键（靠磁盘补齐），"
+                "而本次已经重渲过更早的段 —— 链条断了，后面的段必须跟着重渲"
+                % (index + 1))
+        diffs = []
+        if rec.get("length") != plan["frames"]:
+            diffs.append("段长 %s → %s 帧" % (rec.get("length"), plan["frames"]))
+        if rec.get("handoff") != plan["tail_frames"]:
+            diffs.append("尾部锚点 %s → %s 帧"
+                         % (rec.get("handoff"), plan["tail_frames"]))
+        # ★ 2026-09-30：修复时主动换过种子的段（``reseeded``）不再按种子对账 ——
+        #   否则「单段修复」在整链重跑时会被判成缓存失效，把刚修好的段又重渲一遍，
+        #   等于修复白做（而且重渲回去的还是同一个坏结果）。
+        if not rec.get("reseeded") and rec.get("seed") != resolved_seed:
+            diffs.append("种子 %s → %s" % (rec.get("seed"), resolved_seed))
+        old_prompt = str(rec.get("prompt") or "")
+        if old_prompt and old_prompt.strip() != str(prompt or "").strip():
+            diffs.append("提示词变了（%d → %d 字符）"
+                         % (len(old_prompt), len(str(prompt or ""))))
+        if diffs:
+            return ("缓存键对不上：" + "；".join(diffs)
+                    + "（参考图内容/尺寸、画布宽高、采样器等变化也会走这条）")
+        return None
+    except Exception as exc:
+        # ★ 不能静默 return None。本函数的约定是「返回 None = 应当能复用」，
+        #   静默兜底等于把"**对账失败**"说成了"**可以复用**" —— 与它
+        #   「只可能漏报、不会误报」的设计目的正好相反，用户会看到一段
+        #   本该重渲的段被当成可复用。
+        log("segment %d: 缓存对账失败（%s）—— 判不出为什么没复用，按不复用处理",
+            index + 1, exc)
+        return None
 
 
-# ---------------------------------------------------------------------------
-# Reference images (borrowed from MiniMaxH3_Director/lib/image_prep.py)
-# ---------------------------------------------------------------------------
+def _repair_reseed(settings, index):
+    """单段修复时给该段换一个种子（LCG 跳变，与 ``subtitle_qc`` 同式）。
+
+    ★ 2026-09-30 为什么必须有它：
+      段种子是 ``_resolve_seed`` 的纯函数 —— ``chain_seed + (index+1)*9973``。
+      同一个 ``chain_seed`` 下，「单段修复」会**逐比特复现**上一次的采样结果，
+      **包括它本来要修的那个瑕疵**。实测：v25sub 的 seg_04 在 37.75–38.25s
+      出现约 0.5s 的人脸拖影花屏（帧 906–918，正落在该段尾部锚点窗内），
+      而修复路径原本传的 ``seed_override=0`` ⇒ 再修一次还是同一张花屏。
+      用户当时唯一的出路是把 ``chain_seed`` 整个换掉 —— 那会**连累全部 5 段**
+      重新抽签（每段都可能抽出新的瑕疵），代价 81 分钟而不是 16 分钟。
+
+      跳变用 ``old * 1103515245 + 12345``（不是加常数）—— 同 ``subtitle_qc``：
+      实测加常数会产生高度相关的样本，乘法跳变去相关更有效。
+      换过的种子由修复节点记进 manifest（``reseeded: true``），
+      于是整链重跑时该段仍被判定为可复用，修复不会白做。
+    """
+    base = _resolve_seed(settings, {"seed": 0}, index)
+    return (base * 1103515245 + 12345) % (1 << 63)
+
+
 def _ref_edge_limit(mode, settings):
     """Long-edge cap for reference images, or None when there is nothing to fit.
 
     ``match`` follows the render canvas (a reference bigger than the output buys
     nothing but VRAM); the presets are plain pixel caps. ``None`` means
     "downscale is off" — the 32px snap below still runs.
+
+    ★★ 非法值必须回落到 ``match``，**绝不能**按"抽出数字"硬解析（2026-09-20 实测）：
+       历史工作流的 ``widgets_values`` 一旦错位（见 skill 坑 49），
+       ``ref_image_size`` 会读到别人的值 ``1`` —— 而旧实现会把 ``str(1)`` 里的
+       数字抽出来当成长边上限，于是 ``max_edge = 1``：
+
+         · 参考图被压成 **32×32**，人物/场景参考等于没有，画质直接崩；
+         · 参考图的 ``digest`` 全变 → **缓存键永远对不上** →
+           「断点渲染」每次都从头重渲，**日志里一条 ``-- reusing`` 都没有**。
+
+       实测对照：09-15 / 09-19 该值为 ``match`` 时缓存能命中（3 段复用）；
+       09-20 全天该值错位成 ``1``，缓存命中数 = 0。
+       所以这里改成**只认声明过的选项**，其余一律回落 ``match`` 并打警告 ——
+       宁可退回默认行为，也不要静默把图压成 1px、把缓存全部作废。
     """
-    text = str(mode or REF_SIZE_MATCH).strip().lower()
+    # 数字形态先归一化：JSON 往返会把 "512" 变成 512.0，布尔 True 会变成 "true"。
+    # 归一化只为了让**合法预设**能被认出来；认不出的照旧回落 match。
+    if isinstance(mode, bool):
+        text = str(mode).lower()
+    elif isinstance(mode, (int, float)) and float(mode).is_integer():
+        text = str(int(mode))
+    else:
+        text = str(mode if mode is not None else REF_SIZE_MATCH).strip().lower()
     if text == REF_SIZE_MATCH:
-        try:
-            return (max(int(settings.get("width") or 0),
-                        int(settings.get("height") or 0)) or None)
-        except (TypeError, ValueError):
-            return None
-    digits = "".join(ch for ch in text if ch.isdigit())
-    return int(digits) if digits else None
+        return _canvas_ref_limit(settings)
+    if text == REF_SIZE_MAX:
+        return None                      # 历史选项：显式关闭缩放
+    if text in [opt.lower() for opt in REF_SIZE_OPTIONS]:
+        return int(text)                 # 512 / 768 / 1024 / 1536
+    log("ref_image_size=%r 不是合法预设 %s —— 已按 %r 处理。"
+        "（继续按旧逻辑抽数字会把它当成 1px 上限：参考图被压成 32×32，"
+        "且缓存键与已渲段对不上，断点渲染会一直从头重渲）",
+        mode, REF_SIZE_OPTIONS, REF_SIZE_MATCH)
+    return _canvas_ref_limit(settings)
+
+
+def _canvas_ref_limit(settings):
+    """``match`` 口径：跟随渲染画布的长边；取不到就返回 None（不缩放）。"""
+    try:
+        return (max(int(settings.get("width") or 0),
+                    int(settings.get("height") or 0)) or None)
+    except (TypeError, ValueError):
+        return None
 
 
 def _fit_ref_image(image, max_edge):
@@ -1084,69 +1143,8 @@ def _shot_bounds(cuts, total_frames, min_gap, max_len):
     return out
 
 
-def _read_frame_at(path, index, fps_hint):
-    """Decode one frame as an RGB ndarray, or None. Seeks to the keyframe."""
-    import av
-
-    try:
-        with av.open(path) as container:
-            stream = next((s for s in container.streams if s.type == "video"), None)
-            if stream is None:
-                return None
-            rate = stream.average_rate
-            fps = float(rate.numerator) / float(rate.denominator) if rate else fps_hint
-            if not fps or fps <= 0:
-                fps = fps_hint
-            target = int(round(float(index) / fps / float(stream.time_base)))
-            container.seek(max(0, target), stream=stream, backward=True,
-                           any_frame=False)
-            for frame in container.decode(stream):
-                return frame.to_ndarray(format="rgb24")
-    except Exception:                                            # pragma: no cover
-        return None
-    return None
 
 
-def _source_preview(path, bounds, fps, max_thumbs=12, thumb_width=150, gap=8):
-    """Contact sheet of each detected shot's head frame (dry-run split check)."""
-    pairs = []
-    for i in range(len(bounds) - 1):
-        start_f = int(bounds[i])
-        # Head frame, nudged in a little so fade-ins do not dominate.
-        pairs.append((i, min(int(bounds[i + 1]) - 1,
-                             start_f + max(0, int((bounds[i + 1] - start_f) * 0.15)))))
-    pairs = pairs[:max_thumbs]
-
-    thumbs = []
-    labels = []
-    for i, frame_index in pairs:
-        arr = _read_frame_at(path, frame_index, fps)
-        if arr is None:
-            continue
-        pil = Image.fromarray(arr)
-        w, h = pil.size
-        if w == 0 or h == 0:
-            continue
-        thumbs.append(pil.resize((thumb_width, int(thumb_width * h / w)),
-                                 Image.Resampling.LANCZOS))
-        labels.append("#%d  %.2fs→%.2fs" % (i + 1, bounds[i] / fps,
-                                            bounds[i + 1] / fps))
-    if not thumbs:
-        return _placeholder_timeline()
-
-    total_w = sum(t.width for t in thumbs) + gap * (len(thumbs) - 1)
-    max_h = max(t.height for t in thumbs)
-    canvas = Image.new("RGB", (total_w, max_h + 30 + 22), color=(25, 25, 30))
-    draw = ImageDraw.Draw(canvas)
-    canvas.paste(Image.new("RGB", (total_w, 30), color=(35, 45, 60)), (0, 0))
-    draw.text((10, 8), "源视频分镜预览 · 共 %d 个镜头（试运行，未渲染）"
-              % (len(bounds) - 1), fill=(140, 220, 160), font=_font(12))
-    x = 0
-    for thumb, label in zip(thumbs, labels):
-        canvas.paste(thumb, (x, 52))
-        draw.text((x + 6, max_h + 34), label, fill=(220, 220, 220), font=_font(12))
-        x += thumb.width + gap
-    return _pil_to_tensor(canvas)
 
 
 def _split_source_video(video, video_path, session_name, sensitivity,
@@ -1333,9 +1331,12 @@ class H3DirectorNode(io.ComfyNode):
                 "rendered. Combine with `dry_run` to preview the cuts first.\n\n"
                 "`chain_state` appends onto an existing session instead of "
                 "starting a new one — that is the unlimited-shot loop.\n\n"
-                "`dry_run` resolves every shot, snaps it onto H3's 17k+5 grid "
-                "and predicts the resume cache, then returns the plan without "
-                "sampling."
+                "`refine` takes an optional H3 Refine node. When it is wired "
+                "every segment is sampled a second time (a denoise<1 schedule) "
+                "before it is decoded, and the handoff tail is cut from that "
+                "refined result — so the next segment anchors on refined frames "
+                "and no quality step lands at a join. Unwired (or wired without "
+                "a sigma schedule) one sample per segment, exactly as before."
             ),
             hidden=[io.Hidden.unique_id],
             inputs=[
@@ -1412,11 +1413,18 @@ class H3DirectorNode(io.ComfyNode):
                     "duration_is_new_content", display_name="duration=新增时长",
                     default=True, optional=True, advanced=True,
                     tooltip="开=JSON 里的 duration 是新增时长；关=直接当生成长度。"),
-                io.Boolean.Input(
-                    "unload_models_after", display_name="每段后卸载模型",
-                    default=False, optional=True, advanced=True,
-                    tooltip="每段渲染完卸载模型并清显存。OOM 时打开；"
-                            "默认关以节省加载时间。"),
+                io.Int.Input(
+                    "unload_every", display_name="每 N 段卸载模型",
+                    default=2, min=0, max=99, step=1, optional=True, advanced=True,
+                    tooltip="每渲染满 N 段卸载一次模型，并清显存。\n"
+                            "0 = 从不卸载；1 = 每段都卸（旧「每段后卸载模型」的行为）；"
+                            "2 = 每两段卸一次（默认）。\n"
+                            "计数器只数真烧了显卡的段，命中磁盘缓存的段不计数；"
+                            "链尾无条件卸一次，给拼接/编码让出显存。\n"
+                            "★ 卸载会把内存里的权重副本一起丢掉，下一段要从磁盘重载"
+                            "（UNet ~20GB + 文本编码器 ~26GB）。内存装不下这套权重时"
+                            "（例如 40GB 内存）务必设 0 —— 实测会在重载时 100% CPU 空转卡死。"
+                            "设为 0 时每段仍做 gc / 死槽清理 / 清显存，只是不丢权重。"),
                 io.Float.Input(
                     "crf", default=14.0, min=0.0, max=51.0, step=1.0, optional=True,
                     advanced=True,
@@ -1425,7 +1433,21 @@ class H3DirectorNode(io.ComfyNode):
                     "stabilize", display_name="亮度稳定", default=0.0, min=0.0,
                     max=1.0, step=0.05, round=False, optional=True,
                     advanced=True,
-                    tooltip="修正多段拼接的亮度漂移；0..1 之间的修正强度。"),
+                    # 2026-09-20：这段说明原本写在 nodes.STABILIZE_TOOLTIP，
+                    # 旧节点下线后成了没人引用的孤儿，Director 只剩一行占位。
+                    # 回收到这里（译中文）：限幅、有效区间、和 drift_arrest 的
+                    # 分工这三件事只有这儿写着，删了就查不到了。
+                    tooltip="把整条成片缓慢偏离自身开场的亮度漂移压平；0 = 关。\n\n"
+                            "多段拼接会一路变暗、掉饱和，但**单看任何一处接缝都看不出来**"
+                            "——漂移按定义就是慢的，所以能干净地分离出来：每通道的逐帧"
+                            "均值做两秒平滑，剩下的就是漂移。校正用的是**增益**（增益不改"
+                            "黑位），目标对齐第 1 段的水平；它来自一条平滑曲线，所以跨接缝"
+                            "连续，稳定化本身不可能在切点引入台阶。\n\n"
+                            "增益限幅 ±25%：唯一和漂移分不清的，是某个镜头因为真实光线变化"
+                            "而确实变暗。真实变化幅度大、留得下来；累积漂移幅度小、被限掉。\n\n"
+                            "0.7–1.0 是有效区间。代价是多一次解码，不烧显卡。"
+                            "**只修颜色** —— 人物/身份漂移要用 H3 Chain Settings 的 "
+                            "drift_arrest，那个作用在生成阶段，不是成片。"),
                 io.Boolean.Input(
                     "build_timeline", display_name="生成时间线", default=True,
                     optional=True, advanced=True,
@@ -1470,18 +1492,59 @@ class H3DirectorNode(io.ComfyNode):
                     min=0, max=9999, optional=True, advanced=True,
                     tooltip="≥1 = 只重渲该段（首尾锚定，不动后续段），适合修一段坏镜头。"
                             "设完后点时间线里对应段块即可触发；跑完自动复位为 0。"),
-                # 选择性渲染：仅重渲指定段，其余段复用磁盘缓存（不重新烧显卡）。
+                # 选择性渲染：只重渲指定段，其余段完全复用磁盘缓存（不重新烧显卡）。
+                # 2026-09-19 起走 H3RepairSegmentNode 的双端锚定，因此可以真正
+                # "任意挑几段"，不必再退化成「从最早选中段渲到结尾」。
                 # 与单段修复互斥：两者同时设时单段修复优先。
                 io.String.Input(
                     "run_segments", display_name="选择渲染段（空=全部）", default="",
                     multiline=False, optional=True, advanced=True,
-                    tooltip="从「最早的选中段」起重渲到结尾，之前的段复用磁盘缓存并"
-                            "照常参与拼接。格式：逗号分隔的段号与区间，如 3 或 1,3,5-7"
-                            "（实际取其中最小的段号作为重渲起点）。留空 = 全部渲染。"
-                            "注意连续分镜首尾锚定耦合：后段开头是前段尾帧的回放，所以"
-                            "重渲第 N 段必然带着其后所有段一起重渲，只渲孤立段号会让"
-                            "后续段复用陈旧缓存、接缝跳变。"
-                            "（与单段修复 repair_segment 的两段锚定不同。）"),
+                    tooltip="只重渲这些段，其余段原样复用磁盘缓存并照常参与拼接。"
+                            "格式：逗号分隔的段号与区间，如 3 或 1,3,5-7。留空 = 全部渲染。"
+                            "每一段都用首尾双端锚定（段首钉上一段的 handoff、段尾钉住"
+                            "下一段已在用的那一帧），所以未选中的段一个都不用动，"
+                            "不会出现接缝跳变。"
+                            "前提：该会话已整条渲过一次（磁盘上要有相邻段的产物）。"
+                            "（与单段修复 repair_segment 是同一条通道，只是支持多段。）"),
+                # 二采精修：外接可选节点（借鉴 ComfyUI_MiniMaxH3_Director 的
+                # refine 口）。不接 = 一采即成片，与加这个口之前完全一样。
+                # ★ 必须挂在**列表末尾**：已存工作流按 slot 下标存连线，插在
+                #   中间会把既有连线整体带偏一格。
+                H3Refine.Input(
+                    "refine", display_name="二采精修", optional=True,
+                    tooltip="接「H3 Refine（二采精修）」节点的 refine 输出。"
+                            "接上后每一段在一采之后、解码之前再采一遍（噪声表由"
+                            "那个节点的 sigmas 口给），成片与段间锚点都来自二采"
+                            "结果，所以接缝不会出现画质跳变。\n"
+                            "不接 = 不二采，行为与以前一致。"),
+                # 剧本来源 / 源视频路径：execute 一直读这两个参数，但 2026-09-20
+                # 收敛节点集时把它们从 schema 里删掉了，于是 mode 恒为
+                # 「分镜JSON」—— 源视频自动切分那整条链路（PySceneDetect 切镜头）
+                # 连同 video 输入口一起变成了永远进不去的死代码。这里补回控件。
+                # 同样挂在末尾，理由同上（widget 顺序 = 已存工作流的值顺序）。
+                io.Combo.Input(
+                    "source", display_name="剧本来源", options=SOURCE_OPTIONS,
+                    default=SOURCE_JSON, optional=True,
+                    tooltip="分镜JSON = 直接消费 shots_json（Ref2VA-Auto 兼容载荷）。\n"
+                            "源视频自动切分 = 接一个源视频到 video（或在下面填绝对路径），"
+                            "用 PySceneDetect 找硬切点，每个镜头渲一段。\n"
+                            "没装 scenedetect 时退化成按时长均分。"),
+                io.String.Input(
+                    "video_path", display_name="源视频路径", default="",
+                    multiline=False, optional=True, advanced=True,
+                    tooltip="「源视频自动切分」模式下使用：源视频的绝对路径。"
+                            "接了 video 输入口就不需要填。"),
+                # 脸部修复：外接可选节点，与 refine 同一个契约。接上但 sigmas 口
+                # 空着 = 不修脸。同样挂在末尾（widget 顺序 = 已存工作流的值顺序）。
+                H3FaceRefine.Input(
+                    "face_refine", display_name="脸部修复", optional=True,
+                    tooltip="接「H3 FaceRefine（脸部修复）」节点的 face_refine 输出。"
+                            "接上后每段解码成片会逐帧检测并跟踪人脸，裁成特写画布重采"
+                            "一次再贴回；段首/段尾会把修脸结果淡回原图，避免接缝处"
+                            "「脸突然变清楚」的跳变。\n"
+                            "★ 那个节点自己不接 sigmas = 关闭修脸。\n"
+                            "★ 检测不到脸的段原样放过，不报错也不改画面。\n"
+                            "需要 ultralytics + models/ultralytics/bbox/ 下的 YOLO 权重。"),
             ],
             outputs=[
                 io.String.Output(
@@ -1505,10 +1568,11 @@ class H3DirectorNode(io.ComfyNode):
                 fallback_prompt="保持画面内容与镜头运动连贯", chain_state=None,
                 session_name="", max_shots=0,
                 handoff_seconds=1.625, resume=True, duration_is_new_content=True,
-                unload_models_after=False, crf=14.0, stabilize=0.0,
+                unload_every=2, crf=14.0, stabilize=0.0,
                 build_timeline=True, export_segments=False, ref_images=None,
                 ref_image_size=REF_SIZE_MATCH, pack_info="",
-                ref_classify="", repair_segment=0, run_segments=""):
+                ref_classify="", repair_segment=0, run_segments="",
+                refine=None, face_refine=None):
         mode = _source_mode(source)
         node_id = _node_id(cls)
 
@@ -1571,7 +1635,37 @@ class H3DirectorNode(io.ComfyNode):
         # The session name is a director decision, not a graph-topology one:
         # H3RenderSegmentNode reads settings["session_name"] when chain_state is
         # None, so the widget only takes effect if it lands here.
+        # ★ 上下游会话名对账（2026-09-26）：包里有**两个**同名控件 ——
+        #   H3 Chain Settings 的 session_name，与 H3 分镜提示词 PACK 的 session_name。
+        #   真正生效的是 PACK 那一个：解析器把名字写进 shots_json，Director 从
+        #   JSON 里读（`_session_name_from` 的 fallback 参数恒为空，因为 H3Director
+        #   自己不暴露 session_name 控件）。实测三个名字互不相同
+        #   （Chain Settings=h3_3070_5shot_v2、PACK 控件=…_v10_iter5、
+        #   实际落盘=…_v10_iter6）却全程静默 —— 用户会以为改 Chain Settings 就能
+        #   换会话，结果断点续渲照样接在 PACK 那个目录上。分歧必须说出来。
+        _declared_session = str((settings or {}).get("session_name") or "").strip()
         settings = dict(settings, session_name=session_mod.sanitize(sess_name))
+        session_name_note = ""
+        if (_declared_session
+                and session_mod.sanitize(_declared_session) != settings["session_name"]):
+            session_name_note = (
+                "会话名不一致：H3 Chain Settings 写的是「%s」，本次实际使用「%s」"
+                "（取自 PACK 头部 Project / 分镜 JSON 的 session_name）。"
+                "要以 Chain Settings 为准，请改 PACK 头部的 Project。"
+                % (_declared_session, settings["session_name"]))
+            log("%s", session_name_note)
+        # 二采精修（外接 H3 Refine）。只在**接了并且给了噪声表**时才并进
+        # settings —— 不并的话 segment_key 的 payload 与旧版字节一致，既有会话
+        # 不会因为多了这个功能而全量重渲；并了之后改任何二采参数都会正确重渲。
+        # 二采发生在每段一采之后、解码之前，所以段间锚点与成片同源（见
+        # engine.render_segment）——接缝不会出现画质跳变。
+        if isinstance(refine, dict) and refine.get("sigmas") is not None:
+            settings = dict(settings, refine=refine)
+        # 同 refine 的规则：只在「真的接了且给了 sigmas」时才并进 settings。
+        # 没接 / 接了没给噪声表 -> settings 里没有 face_refine 这个键，
+        # apply_face_refine 直接原样返回，缓存键也一字不变。
+        if isinstance(face_refine, dict) and face_refine.get("sigmas") is not None:
+            settings = dict(settings, face_refine=face_refine)
 
         # PACK 模块的数据源。接了「H3 分镜提示词 PACK」的 pack_info 就用它的
         # （那是真从 PACK 文本里解析出来的）；没接就退化成一个只带段数的壳，
@@ -1593,18 +1687,13 @@ class H3DirectorNode(io.ComfyNode):
         # 连续接满时两者取图结果完全一致，缓存键不受影响。
         raw_slots = ref_images_mod.collect_slots(ref_images)
         warnings = []
+        if session_name_note:
+            warnings.append(session_name_note)
         if len(raw_slots) > MAX_REFERENCE_IMAGES:
             # collect_slots 已经按槽号裁到 9 了，这里只是兜底提示。
             warnings.append("参考图接了 %d 张，超过 H3 上限 %d 张，多余的会被忽略"
                             % (len(raw_slots), MAX_REFERENCE_IMAGES))
         pool_labels = _pool_labels(raw_slots, ref_classify)
-        # 闪电渲染 / 步数覆盖：必须参考图预处理之后、渲染之前改 settings，
-        # 改完的 model / sigmas 才会进每一段的缓存键。
-        # 当前版本已收起这些面板控件（节点上不再有 lightning/render_steps/
-        # scheduler/lightning_lora/lightning_lora_strength 这几个 widget），
-        # 所以这里直接传关闭状态：保持与未改动时行为完全一致。
-        settings = _apply_lightning(
-            settings, False, NO_LORA, 1.0, 0, FOLLOW_UPSTREAM, warnings)
         ref_pool, ref_rows = _prepare_ref_images(
             raw_slots, ref_image_size, settings, labels=pool_labels)
         # ref_pool 现在是 dict，必须遍历 values()；写成 `for t in ref_pool`
@@ -1629,7 +1718,19 @@ class H3DirectorNode(io.ComfyNode):
         # 物理上必然要求 N 之后所有段一起重渲。实际重渲区间因此是
         # [最早选中段, 结尾]，而不是字面上的那几个孤立段号 —— 否则后面的段
         # 会复用基于旧第 N 段的陈旧缓存，接缝直接跳变。
-        run_from = min(run_set) if run_mode else None
+        # (run_from 已废弃：2026-09-19 起「选择渲染段」走双端锚定，逐段只渲选中段，
+        #  不再需要「最早选中段」这个下界。接线仍在，只是不再参与判定。)
+
+        # ★ 开工先自报口径。这一行是用户**唯一**能确认「开关到底生效没有」的依据：
+        #   unload_every 是可选 widget，老工作流不带这个键时会静默落到 schema 默认值，
+        #   日志里不写出来就只能靠猜 —— 2026-09-19 正因缺这一行白查了一整轮。
+        #   同时把每段判决也打出来（见 H3RenderSegmentNode.execute），
+        #   于是日志里能直接数出「留卸留卸」的节奏。
+        _every_n = unload_every_int(unload_every)
+        log("unload_every=%d（%s）；本次共 %d 段", _every_n,
+            "从不卸载" if _every_n <= 0
+            else ("每段都卸" if _every_n == 1 else "每 %d 段卸一次" % _every_n),
+            total)
 
         # 先按磁盘 reconcile 一下，磁盘上已渲好的段数随 plan 一起广播出去。
         # 不带 done_count 的话前端在收到 plan 事件时只能把 doneSet 清零，
@@ -1654,6 +1755,13 @@ class H3DirectorNode(io.ComfyNode):
         # 「plan 广播」两条路算出来的「已渲 X/Y」会不一致，进度条跳变。
         done_indices = sess.disk_segment_indices()
 
+        # ★★ 段号口径换算：上面两个都是**会话全局**段号（seg_NN.mp4 里的 NN），
+        #    而面板的时间线画的是**本批次**的分镜（1..total）。追加模式
+        #    （chain_state 接着一个已有会话）下两者差一个 start_index 的偏移。
+        #    换算逻辑见 _rebase_disk_progress（抽成纯函数以便单元测试）。
+        done_indices, done_count = _rebase_disk_progress(
+            done_indices, done_count, start_index, total)
+
         # 时间线模块：先广播一次"要渲几段、每段多长"，前端把格子铺好，
         # 之后每段开始/结束再各广播一次，当前段高亮 + 小马起跑。
         routes_mod.emit_progress(
@@ -1664,62 +1772,103 @@ class H3DirectorNode(io.ComfyNode):
                        "duration": s.get("duration"),
                        "ref_images": s.get("ref_images") or []}
                       for i, s in enumerate(shots)])
-        previous_key = chain["key"] if chain else None
 
-        # ---- 单段修复模式：跳过整条循环，只重渲 repair_segment 这一段 ----
-        # 复用 H3RepairSegmentNode 的"首尾锚定"逻辑，写回同一会话的 seg_NN.mp4
-        # 并更新 manifest，再走下方统一的拼接/时间线/报告收尾。0 或越界=整条渲染。
+        # ---- 修复 / 选择性重渲模式：跳过整条循环，只重渲指定段 ----
+        # 两个入口共用同一条通道：
+        #   repair_segment = N     只修第 N 段（老行为）
+        #   run_segments = "1,3"   只重渲第 1、3 段（2026-09-19 起，任意挑几段）
+        # 都走 H3RepairSegmentNode 的**首尾双端锚定**：段首钉住上一段的 handoff，
+        # 段尾钉住下一段已经在用的那一帧。所以没被选中的段一个都不用动，也就不存在
+        # 「重渲第 N 段必然连累其后所有段」的接缝问题 —— 这正是不再退化成
+        # 「从最早选中段渲到结尾」的依据（老口径见 git 历史与 README 的说明）。
+        # 互斥：两者同时设时单段修复优先。越界/空 = 走下方整条渲染。
         repair_mode = bool(repair_segment) and 1 <= int(repair_segment) <= len(shots)
         if repair_mode:
-            ridx = int(repair_segment) - 1
-            rshot = shots[ridx]
-            r_override = _shot_ref_images(rshot, ref_pool, warnings)
-            r_prompt, r_seconds, r_images = _script_segment(
-                asset, rshot, ref_images_override=r_override)
-            r_from_pool = bool(r_override) and all(id(t) in pool_ids for t in r_override)
-            r_images, r_details = _prepare_ref_images(
-                r_images, ref_image_size, settings,
-                labels=None if r_from_pool else
-                ["分镜%d·图%d" % (ridx + 1, k + 1) for k in range(len(r_images))])
-            # 修复需要已存在的会话：续接模式直接有 chain_state，否则从磁盘读 manifest
-            if chain is None:
-                _sess = session_mod.Session(settings["session_name"])
-                # 按磁盘补齐：manifest 可能少记了已经渲好的段，不补齐的话
-                # 「重渲第 3 段」会因为只有 1 条记录而报越界。
-                _man = _sess.reconcile(_sess.load())
-                if not _man:
-                    raise FileNotFoundError(
-                        "单段修复需要先整条渲染一次：会话 %s 在磁盘上找不到 manifest。" % _sess.name)
-                chain = {"session": _sess.name, "dir": _sess.dir,
-                         "segments": _man["segments"], "sess_obj": _sess,
-                         "index": len(_man["segments"]) - 1, "key": None}
-            r_replay, r_tail = _shot_windows(rshot, ridx, total, handoff_seconds)
-            r_plan = _shot_plan(r_seconds, r_replay, r_tail,
-                                duration_is_new_content)
-            routes_mod.emit_progress(
-                node_id, event="segment_start", index=ridx + 1, total=total,
-                shot_id=rshot.get("id") or ("S%02d" % (ridx + 1)),
-                frames=r_plan["frames"], gen_seconds=r_plan["gen_seconds"],
-                task=_infer_task(r_images), refs=len(r_images), session=sess_name)
-            _rep_video, rep_chain, _rep_summary = H3RepairSegmentNode.execute(
-                settings, sess_name, int(repair_segment), r_prompt, r_seconds,
-                r_tail, 0, True,
-                images=_images_autogrow(r_images), chain_state=chain_state)
-            routes_mod.emit_progress(
-                node_id, event="segment_done", index=ridx + 1, total=total,
-                shot_id=rshot.get("id") or ("S%02d" % (ridx + 1)),
-                frames=r_plan["frames"], elapsed=0, session=sess_name)
-            chain = rep_chain
-            rows = [{
-                "no": ridx + 1, "new_seconds": r_plan["new_seconds"],
-                "requested_frames": r_plan["requested_frames"],
-                "frames": r_plan["frames"],
-                "handoff_frames": r_plan["handoff_frames"],
-                "cumulative": r_plan["new_seconds"], "elapsed": 0.0,
-                "task": _infer_task(r_images), "refs": len(r_images),
-                "status": "已修复",
-            }]
-            cumulative = r_plan["new_seconds"]
+            repair_indices = [int(repair_segment) - 1]
+        elif run_mode:
+            repair_indices = sorted(i - 1 for i in run_set)
+        else:
+            repair_indices = None
+
+        if repair_indices is not None:
+            rows = []
+            handoff_overrides = []
+            if run_mode:
+                log("选择性重渲：第 %s 段（共 %d 段）—— 逐段双端锚定，"
+                    "未选中的段原样复用磁盘缓存",
+                    ",".join(str(i + 1) for i in repair_indices), len(repair_indices))
+            for ridx in repair_indices:
+                rshot = shots[ridx]
+                r_override = _shot_ref_images(rshot, ref_pool, warnings)
+                r_prompt, r_seconds, r_images = _script_segment(
+                    asset, rshot, ref_images_override=r_override)
+                r_prompt, r_wnotes = wardrobe_mod.process_prompt(r_prompt)
+                for note in r_wnotes:
+                    log("wardrobe[S%02d]: %s", ridx + 1, note)
+                r_from_pool = bool(r_override) and all(id(t) in pool_ids for t in r_override)
+                r_images, r_details = _prepare_ref_images(
+                    r_images, ref_image_size, settings,
+                    labels=None if r_from_pool else
+                    ["分镜%d·图%d" % (ridx + 1, k + 1) for k in range(len(r_images))])
+                # 修复需要已存在的会话：续接模式直接有 chain_state，否则从磁盘读 manifest
+                if chain is None:
+                    _sess = session_mod.Session(settings["session_name"])
+                    # 按磁盘补齐：manifest 可能少记了已经渲好的段，不补齐的话
+                    # 「重渲第 3 段」会因为只有 1 条记录而报越界。
+                    _man = _sess.reconcile(_sess.load())
+                    if not _man:
+                        raise FileNotFoundError(
+                            "单段修复需要先整条渲染一次：会话 %s 在磁盘上找不到 manifest。" % _sess.name)
+                    chain = {"session": _sess.name, "dir": _sess.dir,
+                             "segments": _man["segments"], "sess_obj": _sess,
+                             "index": len(_man["segments"]) - 1, "key": None}
+                r_replay, r_tail = _shot_windows(rshot, ridx, total, handoff_seconds)
+                r_plan = _shot_plan(r_seconds, r_replay, r_tail,
+                                    duration_is_new_content)
+                routes_mod.emit_progress(
+                    node_id, event="segment_start", index=ridx + 1, total=total,
+                    shot_id=rshot.get("id") or ("S%02d" % (ridx + 1)),
+                    frames=r_plan["frames"], gen_seconds=r_plan["gen_seconds"],
+                    task=_infer_task(r_images), refs=len(r_images), session=sess_name)
+                # ★ 传 r_plan["gen_seconds"]（= 新增 + 回放），不是 r_seconds。
+                #   修复节点内部按 ``generation_length(seconds_to_frames(seconds))``
+                #   定段长；传 r_seconds（只含新增）会让修复段比正常渲染**少一整个
+                #   回放窗（39 帧）**，而拼接仍按 39 帧裁 —— 等于吃掉 39 帧正片，
+                #   而且这一段的内部时间轴与剧本写的时间码整体错位。
+                #   正常路径传的就是 plan["gen_seconds"]（见下方渲染调用），
+                #   两条路径必须同口径。
+                # ★ 2026-09-30：修复必须换种子，否则逐比特复现上一次（含要修的瑕疵）。
+                #   理由与取式见 `_repair_reseed`。
+                _rep_seed = _repair_reseed(settings, ridx)
+                log("修复第 %d 段：换种子 %d → %d（否则会复现同一结果）",
+                    ridx + 1, _resolve_seed(settings, {"seed": 0}, ridx), _rep_seed)
+                _rep_video, rep_chain, _rep_summary = H3RepairSegmentNode.execute(
+                    settings, sess_name, ridx + 1, r_prompt, r_plan["gen_seconds"],
+                    r_tail, _rep_seed, True,
+                    images=_images_autogrow(r_images), chain_state=chain_state)
+                routes_mod.emit_progress(
+                    node_id, event="segment_done", index=ridx + 1, total=total,
+                    shot_id=rshot.get("id") or ("S%02d" % (ridx + 1)),
+                    frames=r_plan["frames"], elapsed=0, session=sess_name)
+                chain = rep_chain
+                rows.append({
+                    "no": ridx + 1, "new_seconds": r_plan["new_seconds"],
+                    "requested_frames": r_plan["requested_frames"],
+                    "frames": r_plan["frames"],
+                    "handoff_frames": r_plan["handoff_frames"],
+                    "cumulative": r_plan["new_seconds"], "elapsed": 0.0,
+                    "task": _infer_task(r_images), "refs": len(r_images),
+                    "status": "已修复",
+                })
+            # 累计列要的是**整条片子**的总长，不是只渲的那几段的长度
+            # （以前这一列恒为 0.00：上面算完又被后面的 `cumulative = 0.0` 冲掉了）。
+            # 按全部分镜重算一遍，纯算术，不碰显卡。
+            cumulative = 0.0
+            for _i, _shot in enumerate(shots):
+                _p, _sec, _img = _script_segment(asset, _shot)
+                _rp, _tl = _shot_windows(_shot, _i, total, handoff_seconds)
+                cumulative += _shot_plan(_sec, _rp, _tl,
+                                         duration_is_new_content)["new_seconds"]
             handoff_overrides = []
 
         header = [
@@ -1748,9 +1897,11 @@ class H3DirectorNode(io.ComfyNode):
                                                 if duration_is_new_content
                                                 else "生成长度"))
         if run_mode:
+            # 2026-09-19 起「选择渲染段」是真的只渲选中段（逐段双端锚定），
+            # 不再是「从最早选中段渲到结尾」——文案必须跟着改，否则报告自相矛盾。
             header.append(
-                "选择渲染 第 %d 段起重渲到结尾（勾选 %s）· 之前各段复用磁盘缓存"
-                % (run_from, ",".join(str(i) for i in sorted(run_set))))
+                "选择渲染 只重渲第 %s 段（双端锚定）· 其余 %d 段原样复用磁盘缓存"
+                % (",".join(str(i) for i in sorted(run_set)), total - len(run_set)))
         # 回放帧必须和实际生成用同一个方向：向上对齐。用 guide_length（向下）
         # 会把 1.6s(38 帧) 显示成 22 帧(0.917s)，跟报告正文里的 39 帧对不上。
         header.append("回放   %.3fs → %d 帧" % (float(handoff_seconds),
@@ -1761,18 +1912,47 @@ class H3DirectorNode(io.ComfyNode):
                           % (len(ref_pool), ref_image_size,
                              _ref_edge_limit(ref_image_size, settings) or "不限",
                              " · 已缩放 %d 张" % resized if resized else " · 无需缩放"))
+        # 二采进报告：它改变的是成片本身，报告里不说就等于让用户去猜画质从哪来。
+        if isinstance(settings.get("refine"), dict):
+            _ref = settings["refine"]
+            header.append("二采   %d 遍 · %s · %s"
+                          % (int(_ref.get("passes") or 1),
+                             "跟随一采模型" if _ref.get("model") is None else "二采模型",
+                             _ref.get("seed_mode") or "跟随一采"))
+        # 修脸同样进报告：它改的是成片像素，而且「检测到脸才修」—— 报告里不说，
+        # 用户看到一部分段被修了、一部分没修，只会以为是 bug。
+        if isinstance(settings.get("face_refine"), dict):
+            _fr = settings["face_refine"]
+            header.append("修脸   %s · %s · 阈值 %.2f · %s"
+                          % (_fr.get("detector") or "?",
+                             _fr.get("paste_region") or "face_only",
+                             float(_fr.get("confidence") or 0.0),
+                             "接缝淡出" if str(_fr.get("seam_fade")) != "关闭"
+                             else "整段修（接缝可能跳）"))
 
-        cumulative = 0.0
-        handoff_overrides = []
+        # 修复 / 选择性重渲上方已经把 rows / cumulative / handoff_overrides 填好了，
+        # 这里不要再把它们重置成 0（以前单段修复的累计列因此恒为 0.00）。
+        if repair_indices is None:
+            cumulative = 0.0
+            handoff_overrides = []
+        # ★ 本次整条渲染里，有几段是**复用磁盘缓存**、几段是**真烧了显卡**
+        #   （2026-09-20 第 44 轮）。以前只有日志里零星的 `-- reusing` 能看出来，
+        #   面板完全不知道 —— 用户报「断点渲染没从已有的继续渲染」时，
+    #   没有任何一处能回答"到底复用了没有"。现在随 finish 事件一起下发。
+        reused_count = 0
+        rendered_count = 0
         pbar = comfy.utils.ProgressBar(total, node_id=node_id)
 
         for index, shot in enumerate(shots):
-            if repair_mode:
-                break   # 单段修复已在上方面板处理完，跳过整条循环
+            if repair_indices is not None:
+                break   # 修复 / 选择性重渲已在上面逐段处理完，跳过整条循环
             shot_no = start_index + index + 1
             override = _shot_ref_images(shot, ref_pool, warnings)
             prompt, seconds, images = _script_segment(
                 asset, shot, ref_images_override=override)
+            prompt, wnotes = wardrobe_mod.process_prompt(prompt)
+            for note in wnotes:
+                log("wardrobe[S%02d]: %s", shot_no, note)
             from_pool = bool(override) and all(id(t) in pool_ids for t in override)
             images, details = _prepare_ref_images(
                 images, ref_image_size, settings,
@@ -1820,40 +2000,27 @@ class H3DirectorNode(io.ComfyNode):
                 warnings.append("分镜 %d 用了 %d 张参考图，H3 只认前 %d 张"
                                 % (index + 1, len(images), MAX_REFERENCE_IMAGES))
 
-            if False:  # dry_run widget removed; preview-only path disabled
-                hit, previous_key = _cache_state(
-                    sess, manifest, start_index + index, settings, prompt, seconds,
-                    images, plan["tail_out"], previous_key)
-                status = "待定" if hit is None else ("缓存复用" if hit else "将渲染")
-                # 先数再删。原来写成 `del images` 之后还 `len(images)`，
-                # 任何 dry_run 都会在这一行 UnboundLocalError ——也就是说
-                # 「试运行」这个开关从来没真的跑通过，而单段重渲正是靠
-                # dry_run 让 Director 只吐 shots_json 不烧显卡的。
-                ref_count = len(images)
-                del images
-                rows.append({
-                    "no": start_index + index + 1,
-                    "new_seconds": plan["new_seconds"],
-                    "requested_frames": plan["requested_frames"],
-                    "frames": plan["frames"],
-                    "handoff_frames": plan["handoff_frames"],
-                    "cumulative": cumulative,
-                    "elapsed": 0.0,
-                    "task": task,
-                    "refs": ref_count,
-                    "status": status,
-                })
-                pbar.update(index + 1)
-                continue
 
-            # A5 选择性渲染：从 run_from 起重渲（resume=False，忽略缓存），
-            # 之前的段走缓存复用（resume=True，命中则复用磁盘视频并照常衔接）。
-            # 区间用 >= run_from 而不是「段号是否在集合里」——因为后段回放前段尾帧，
-            # 只渲孤立段号会让后续段复用陈旧缓存、接缝跳变。
-            # 之前段若磁盘无缓存（首次整条渲染），会自然回落为渲染。
-            selected = (not run_mode) or ((index + 1) >= run_from)
-            resume_eff = bool(resume) if not run_mode else (not selected)
+            # 2026-09-19：run_mode（选择渲染段）已经在上方走**双端锚定**逐段处理完，
+            # 走到这里时 repair_indices 必为 None —— 也就是只剩下“整条渲染”这一种
+            # 情况，所以 resume_eff 直接按整条渲染取值。
+            # 以前这里是「从最早选中段起重渲、之前复用缓存」的旧口径（selected /
+            # run_from），那段逻辑会让 "1,3" 退化成 1→结尾，现已废弃
+            # （见 repair_indices 分支的注释）。
+            resume_eff = bool(resume)
             started = time.time()
+            # ★ 断点续渲的"为什么没复用"要说清楚（2026-09-20 第 44 轮）。
+            #   渲染节点内部才知道缓存到底命中没有，而它只在**命中**时打
+            #   `-- reusing seg_NN.mp4`；没命中时日志里只有一行普通的
+            #   `segment N: ...`，用户完全看不出"为什么这一段没被复用"。
+            #   这里在开渲之前，用**已经记录在 manifest 里的事实**做一次结构化对账：
+            #   段长 / 回放帧 / 种子 / 提示词，任何一项与本次规划不同，就说明
+            #   入参变了、缓存键必然不同。**只报已证实的差异，不猜哈希。**
+            _resume_note = _why_not_reused(
+                sess, manifest, start_index + index, plan, prompt,
+                _resolve_seed(settings, {"seed": 0}, start_index + index))
+            if _resume_note:
+                log("segment %d: 本次不复用 —— %s", index + 1, _resume_note)
             # 不再每段推 send_progress_text —— 跟面板里的 setPony 段起始文案
             # 完全重复，去掉这一行后节点标题下方只剩 ProgressBar 百分比条，
             # 面板里的「第 N/M 段 · S0X · N 帧 · task · 参考图 N 张」更全。
@@ -1864,19 +2031,31 @@ class H3DirectorNode(io.ComfyNode):
                 node_id, event="segment_start", index=index + 1, total=total,
                 shot_id=shot.get("id") or ("S%02d" % (index + 1)),
                 frames=plan["frames"], gen_seconds=plan["gen_seconds"],
-                task=task, refs=len(images), session=sess_name)
+                task=task, refs=len(images), session=sess_name,
+                resume_note=_resume_note or "")
             # 第 5 个参数是**尾部锚点**的长度（渲完从结果里切多长给下一段），
             # 不是生成时长 —— 生成时长是第 4 个参数，已经把 replay_in 加进去了。
             # 以前这里传的是回放长度，于是首段被要求"切一条 1.6s 的尾巴"却没有
             # 对应的额外素材，末段则被判成不留锚点。
+            routes_mod.set_phase(node_id, "条件编码 → 采样 → AV 解码 → 质检",
+                                 index=index + 1, total=total)
             output = H3RenderSegmentNode.execute(
                 settings, resume_eff, prompt, plan["gen_seconds"],
                 plan["tail_out"], 0,
-                bool(unload_models_after), chain_state=chain,
+                unload_every, chain_state=chain,
                 images=_images_autogrow(images),
             )
             last_video_path = output[0]
             chain = output[1]
+            # ★ 如实统计这一段是"复用"还是"重渲"（2026-09-20 第 44 轮）。
+            #   渲染节点把结果放在 chain["reused"] 里（它内部才知道）。
+            #   没有这个键（老版本 / 单节点串联）时按"重渲"计 —— 宁可少报复用，
+            #   也不要谎报"复用了"然后用户去核对时发现画面变了。
+            if chain.get("reused") is True:
+                reused_count += 1
+                log("segment %d: 复用磁盘缓存（未烧显卡）", index + 1)
+            else:
+                rendered_count += 1
             if hasattr(last_video_path, "get_stream_source"):
                 src = last_video_path.get_stream_source()
                 if isinstance(src, str):
@@ -1884,8 +2063,12 @@ class H3DirectorNode(io.ComfyNode):
             # Drop the reference cycle so the next segment rebuilds anchors, then
             # sweep whatever the sampler left behind (Comfy leaves dead
             # LoadedModel slots around after every H3 segment).
-            free_between_segments(bool(unload_models_after))
-            cleanup_segment_vram(bool(unload_models_after))
+            # ★ 卸载模型这件事**已经不在这里**：它由上面那次 H3RenderSegmentNode.execute
+            #   内部按「每 N 段卸载一次」判定并执行（计数器挂在 chain_state 上，两条路径
+            #   同一套语义）。这里只做不需要卸模型的那半截卫生工作，避免重复卸载
+            #   ——以前两处都按同一个布尔卸，等于卸两遍。
+            free_between_segments(False)
+            cleanup_segment_vram(False)
             rows.append({
                 "no": start_index + index + 1,
                 "new_seconds": plan["new_seconds"],
@@ -1896,7 +2079,7 @@ class H3DirectorNode(io.ComfyNode):
                 "elapsed": time.time() - started,
                 "task": task,
                 "refs": len(images),
-                "status": ("缓存复用" if (run_mode and not selected) else "完成"),
+                "status": "完成",
             })
             routes_mod.emit_progress(
                 node_id, event="segment_done", index=index + 1, total=total,
@@ -1905,6 +2088,17 @@ class H3DirectorNode(io.ComfyNode):
                 session=sess_name)
             pbar.update(index + 1)
 
+        # 链尾释放：unload_every>0 时，整条链渲完无条件卸一次模型。
+        # 这一条是旧行为的保留项 —— 以前每段都卸，末段自然也卸，而末段之后紧接着
+        # 就是拼接 / 编码，显存留给它更稳。unload_every=0（从不卸载）时连这里也不卸。
+        if unload_due(1, unload_every, is_last=True):
+            log("H3Director: 链尾释放 —— 卸载模型并清显存（unload_every=%d）",
+                unload_every_int(unload_every))
+            free_between_segments(True)
+            cleanup_segment_vram(True)
+        else:
+            log("H3Director: 链尾不释放 —— unload_every=0，模型交给 ComfyUI 自行回收")
+
         if handoff_overrides:
             uniq = sorted({round(v, 3) for _, v in handoff_overrides})
             warnings.append(
@@ -1912,30 +2106,26 @@ class H3DirectorNode(io.ComfyNode):
                 % (len(handoff_overrides),
                    " / ".join("%.3fs" % v for v in uniq), float(handoff_seconds)))
 
-        # 2b. Dry run: hand back the plan and touch nothing -------------------
-        # dry_run widget removed; this preview-only return path is disabled.
-        if False:
-            timeline_img = _placeholder_timeline()
-            if split_meta is not None:
-                try:
-                    timeline_img = _source_preview(
-                        split_meta["path"], split_meta["bounds"], split_meta["fps"])
-                except Exception as exc:                         # pragma: no cover
-                    log("H3Director: split preview failed (%s)", exc)
-            report = _format_report(rows, header + _pack_info_block(info),
-                             warnings, ref_rows)
-            _phase_text(cls, "%s：%d 个分镜已解析" % (_PHASE_LABELS["finish"], total))
-            return io.NodeOutput(
-                _json_dumps(asset), chain, VideoFromFile(""), timeline_img,
-                "试运行：%d 个分镜已解析，未渲染任何帧。" % total,
-                report,
-                _json_dumps(info),
-            )
-
         # 3. Join into one cut (same H3ChainToVideo helper) --------------------
         _phase_text(cls, _PHASE_LABELS["join"])
         video_out = VideoFromFile("")
         if chain is not None and chain.get("segments"):
+            # ★ 2026-09-28 P2 修复：repair/resume 写回 manifest 时
+            #   session.reconcile() 因 .tail 被 cleanup 删除只能写 handoff=0，
+            #   _join_parts 就不裁 39 帧回放 → 每道接缝重复 39 帧。
+            #   join 前用 shots_info 权威 handoff_seconds 回填。
+            for _rec in chain["segments"]:
+                _ri = int(_rec.get("index", -1))
+                if int(_rec.get("handoff") or 0) > 0 or _ri < 0 or _ri >= len(shots):
+                    continue
+                try:
+                    _sec = float(shots[_ri].get("handoff_seconds") or 0.0)
+                except (TypeError, ValueError):
+                    _sec = 0.0
+                if _sec > 0.5:
+                    _rec["handoff"] = generation_length(seconds_to_frames(_sec))
+                    log("P2 handoff-stamp: seg %d handoff 0 -> %d frames (shots=%.3fs)",
+                        _ri + 1, _rec["handoff"], _sec)
             out_path = os.path.join(chain["dir"], "%s.mp4" % chain["session"])
             try:
                 joined_path, _frames = video_io.join(
@@ -1986,12 +2176,21 @@ class H3DirectorNode(io.ComfyNode):
 
         if chain:
             header.append("结果   %s" % _summarize_chain(chain))
+        # 断点续渲到底复用了没有 —— 放进报告，别再让人去翻日志（第 44 轮）
+        header.append("缓存   复用 %d 段 / 重渲 %d 段（共 %d 段）"
+                      % (reused_count, rendered_count, total))
+        if resume and reused_count == 0 and total > 1:
+            header.append("注意   本次一段都没复用。若磁盘上本来就有已渲段，"
+                          "往上翻 `本次不复用 —— …` 那几行，那里写了每一段"
+                          "缓存键对不上的具体差异。")
 
         report = _format_report(rows, header + _pack_info_block(info),
                              warnings, ref_rows)
         _phase_text(cls, "%s：%s" % (_PHASE_LABELS["finish"], progress))
+        routes_mod.set_phase(node_id, None)
         routes_mod.emit_progress(
-            node_id, event="finish", total=total, session=sess_name)
+            node_id, event="finish", total=total, session=sess_name,
+            reused_count=reused_count, rendered_count=rendered_count)
         return io.NodeOutput(
             _json_dumps(asset), chain, video_out, timeline_img, progress, report,
             _json_dumps(info),

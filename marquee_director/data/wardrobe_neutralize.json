@@ -1,0 +1,65 @@
+{
+  "_comment": [
+    "剧本专属的「冲突说法」词条。这些是通用规则（wardrobe.DEFAULT_NEUTRALIZE_RULES）",
+    "覆盖不到的、本剧本特有的整句写法。",
+    "★ 换剧本时：旧条目只是匹配不到、自动跳过（不报错、不影响渲染）；",
+    "  新剧本的说法往这里加即可，**不需要改任何 Python 代码**。",
+    "★ 写词条的三条规矩：",
+    "  1. 删断言，不补描述 —— 补「她穿挂颈缎裙」等于让模型再发挥一次。",
+    "  2. 替换文本必须结构中立（不点名领子/前襟/腰带；参考服装有没有前襟取决于图）。",
+    "  3. find 尽量写完整短语，别写裸词（裸 collar 会误伤取景样板句）。"
+  ],
+  "exact": [
+    {
+      "find": "collar loose, leaning down to kiss him",
+      "repl": "leaning down to kiss him",
+      "note": "删 collar loose（断言有领子）"
+    },
+    {
+      "find": "holding the garment she had just taken off, her collar open",
+      "repl": "holding the garment she had just taken off, the garment not yet fastened",
+      "note": "collar open → 中性说法 not yet fastened"
+    },
+    {
+      "find": "leg line, bare feet and open collar all in frame",
+      "repl": "leg line, bare feet and shoulders all in frame",
+      "note": "删 open collar"
+    },
+    {
+      "find": "climbs on to the collar, which she lowers her chin to straighten",
+      "repl": "climbs on to her shoulders, which she lowers her chin to settle",
+      "note": "删 collar；straighten → settle"
+    },
+    {
+      "find": "as she finishes the collar and raises her eyes",
+      "repl": "as she finishes settling the garment and raises her eyes",
+      "note": "删 collar"
+    },
+    {
+      "find": "puts the clothes she just removed back on one piece at a time",
+      "repl": "puts the clothes she just removed back on in one continuous motion",
+      "note": "one piece at a time → in one continuous motion"
+    },
+    {
+      "find": "bends to pick the last garment from the floor and straightens to tie it",
+      "repl": "bends to pick the garment from the floor and straightens, drawing it up over her hips",
+      "note": "删 last（多件套）与 tie it（系带）"
+    },
+    {
+      "find": "it lingers a moment at the waist as the cloth closes,",
+      "repl": "it lingers a moment at her waist,",
+      "note": "删 the cloth closes（腰带/系合）"
+    },
+    {
+      "find": "as she lifts a leg to arrange the garment and bends to smooth it",
+      "repl": "as she draws the garment up over her hips and smooths it",
+      "note": "删 lifts a leg to arrange（穿脱动作）"
+    },
+    {
+      "find": "for every inch the cloth closes the camera gives an inch back",
+      "repl": "for every inch the garment settles the camera gives an inch back",
+      "note": "closes → settles（去系合义）"
+    }
+  ],
+  "regex": []
+}

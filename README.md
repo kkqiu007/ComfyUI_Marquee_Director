@@ -9,6 +9,50 @@ Pack name: `ComfyUI_Marquee_Director`
 
 Chain any number of MiniMax H3 renders into **one unbroken take**.
 
+> **⚠ 2026-09-20 — 节点集已收敛到 `H3 Director` 一体化链路。**
+> 本文档下面的 A/B 两种接线（`H3 Render Segment` 一镜一节点、`H3 Chain to Video`
+> 拼接、`H3 Load Session` 续接、`H3 Repair Segment` 单段修复、`H3 Segment Timeline`
+> 时间线）描述的是**旧范式**。现行注册的节点共七个：
+>
+> | 节点 | 作用 |
+> | --- | --- |
+> | `H3 Chain Settings` | 模型 / 采样器 / 画布 / 种子 / 会话名，打包一次 |
+> | `H3 Prompt Pack Parser` | 分镜提示词 PACK → 分镜 JSON |
+> | `H3 Director` | 剧本 → 分段渲染 → 时间线 → 成片，一个节点全包 |
+> | `H3 Refine` | 二采精修（可选外接，见下） |
+> | `H3 FaceRefine` | 脸部修复（可选外接，见下） |
+> | `MinimaxH3SaveJson` | 分镜 JSON 存档 |
+> | `MinimaxH3LoadJson` | 存档读回 |
+>
+> `H3 Refine` 借鉴 `ComfyUI_MiniMaxH3_Director` 的 `refine` 外接形态：接到
+> `H3 Director` 的 `refine` 口才生效，不接就是原来的一采成片。二采发生在每段
+> **一采之后、解码之前**，段间锚点因此也来自二采结果 —— 接缝不会出现画质跳变。
+>
+> 同样借鉴来的还有 `H3 Chain Settings` 上的 **逐 step 重绘掩码**（`seam_remask`，
+> advanced）。默认**关**：整段采样用同一张 `noise_mask`；打开后回放区的重绘余量
+> 按「下一步 σ / 当前步 σ」逐步收紧，采样末期把前缀锁回上一段的真实尾帧，而
+> 接缝那几个 token 全程不低于 `seam_redraw`。默认关是刻意的 —— 它改变成片本身，
+> 开着会让既有会话重渲一次，这不该由一次升级替你决定。
+>
+> `H3 FaceRefine` 借鉴 `ComfyUI_MiniMaxH3_Director` 的 `face_refine`（那又改编自
+> `ComfyUI-H3-FaceRefine`，MIT, Carasibana）。接到 `H3 Director` 的 `face_refine`
+> 口才生效，**且那个节点自己必须接 `sigmas`** —— 不接噪声表就等于关。链路是：
+> 解码成片 → 逐帧检测跟踪人脸 → 仿射裁出特写画布 → 注入 AV latent 视频流 →
+> 低 denoise 重采 → 解码 → 逆变换贴回 → 接缝处淡回原图。
+>
+> ★ **接缝淡出是这里唯一需要自己想的地方。** 修脸改的是**像素**，而段间锚点是
+> **latent**：下一段开头钉的是上一段未修脸的采样尾帧。整段照直修，接缝就是
+> 「上一段没修过的脸 → 这一段修过的脸」的一记跳变，脸会在每个接口处呼吸一下。
+> 所以段首/段尾各 N 帧要把修脸结果 lerp 回未修原图。原版 N 固定 12 帧（它的
+> 上下文窗口是 22 帧），这里改成**跟随本段回放帧数**（默认 1.625s ≈ 39 帧）——
+> Marquee 的段首是整段回放并钉死在 latent 里，12 帧盖不住，接缝照样跳。
+>
+> 依赖：`ultralytics` + `ComfyUI/models/ultralytics/bbox/` 下的 YOLO 权重
+> （本机已装 `face_yolov8m.pt`）。**检测不到脸的段原样放过**，不报错也不改画面。
+>
+> 被取代的旧节点已删除，只服务于它们的样例工作流与开发脚本一并移除。
+> 现行样例工作流：`workflows/h3_director_unlimited_storyboard.json`。
+
 Each segment opens on an exact replay of the last ~1.6 seconds of the segment before
 it, so the joins are invisible — not "similar framing", the same frames. Write a prompt
 per shot, wire the references, hit Run once.
@@ -62,7 +106,7 @@ bigger card.
 * Drop the megapixel budget on **ResolutionSelector**. `0.3` MP (736×416 in 16:9) is the
   next step down and roughly a third less to compute.
 * Raise `chunks` / `head_chunks` to 6 or 8. Overhead rises, output does not change.
-* Turn on `unload_models_after` on **only** the segment where it OOMs — see
+* Turn `unload_every` down to `1` (unload after every segment) — see
   [the knobs that matter](#the-knobs-that-matter).
 
 ---
@@ -131,41 +175,18 @@ rather than an unexplained empty dropdown.
 
 ### 3. Open a workflow
 
-Two examples ship in `workflows/`. They are the same chaining engine wired two
-different ways — start with the first, move to the second when your shot count
-grows past three or four.
+One example ships in `workflows/`: the panel-driven director workflow, described below.
+
+> **The earlier hand-wired example is gone.** `workflows/h3_continuous.json` — one
+> **H3 Render Segment** node per shot, wired in a line — referenced the retired node
+> set and was removed along with it. **H3 Director** does that job in one node, so the
+> example to copy is the director workflow.
 
 ---
 
-#### A — `workflows/h3_continuous.json` · runs as-is
+#### A — `workflows/h3_director_unlimited_storyboard.json` · panel-driven, needs setup
 
-Drag it onto the canvas. A finished worked example: a singer alone in a
-spotlight, one continuous ~21-second take in three shots.
-
-| On the canvas | What it is |
-| --- | --- |
-| **A — the chain** (purple) | A finished worked example that runs as-is. |
-| **B — repair** (bypassed) | Re-render one bad shot without disturbing the rest. Ships switched off, below the chain, sharing the same models and settings. |
-| **Models** / **Start here** / **Repair** notes | Download links, the storage tree, and how to drive each half. |
-
-**It runs as it opens.** Copy the two files in `example_inputs/` into `ComfyUI/input/`
-and hit Run — nothing else needs setting. About 27 minutes on a 12 GB card with the
-turbo LoRA on, and the same engine has been measured on the 8 GB reference card at
-**5 min 34 s for one 11.5 s shot** and **25 min 38 s for a four-shot, 41-second take**
-(see [It runs on 8 GB](#it-runs-on-8-gb)). Read its three prompts side by side
-afterwards; that is where the method is.
-
-To make it yours, edit in place: rewrite the prompts, swap the `Load Image` nodes, and
-add or delete **H3 Render Segment** nodes to change the shot count. There is no separate
-blank template — a worked example you edit beats an empty one you have to fill.
-
-**Needs:** this pack, plus ComfyUI's own nodes. Nothing else.
-
----
-
-#### B — `workflows/h3_director_unlimited_storyboard.json` · panel-driven, needs setup
-
-Same chain, but you do not hand-wire one **H3 Render Segment** per shot. You write
+You do not hand-wire one **H3 Render Segment** per shot. You write
 the script, the **H3 Director** panel parses it into a storyboard, and the chain
 renders from that. This is the one to copy once you are doing real multi-shot work.
 
@@ -288,8 +309,8 @@ On 8 GB specifically, wire in `MiniMaxChunkFeedForward` and `MiniMaxLowVRAMAtten
 see [The two nodes that make it fit](#the-two-nodes-that-make-it-fit). They cap the
 activation peak, which is the part 8 GB actually runs out of.
 
-If you hit out-of-memory partway through a long chain, turn on `unload_models_after` on
-the single shot where it happens.
+If you hit out-of-memory partway through a long chain, drop `unload_every` to `1` so the
+models are released after every segment instead of every two.
 
 ---
 
@@ -306,7 +327,7 @@ the single shot where it happens.
 | `handoff_mode` | Settings, advanced | `latent` (default) slices the handoff out of the sampled latent — no VAE, exact anchor, faster. `pixel` is the old decode/re-encode route; use it only to change resolution mid-session. |
 | `stabilize` | Chain to Video, advanced | 1.0 flattens the take's slow colour drift away from its own opening. Costs no GPU. **Leave it on.** |
 | `drift_arrest` | Settings, advanced | Experimental, ships at 0. Steers the latent but overshoots the picture; no measured benefit. [Why](docs/how-it-works.md#drift_arrest). |
-| `unload_models_after` | Render Segment, advanced | Unload models after this segment. OOM-only — turn it on for just the segment where you actually OOM. |
+| `unload_every` | Render Segment / Director / Script Batch Render, advanced | Unload the models after every N rendered segments. `0` = never, `1` = every segment (the old `unload_models_after=true`), **`2` = every two segments (default)**. Unloading forces a full reload of the UNet and text encoder from disk, which dominates runtime on a small box, so `2` halves that cost while still bounding the peak. Only segments that actually rendered count — segments reused from disk cache do not, since they never loaded anything. The end of a chain always unloads once (unless `0`) to leave VRAM to the join/encode step. |
 
 **Set `handoff_seconds` to about a fifth of `seconds`.** That is the one rule. The
 1.625 s default is right for 8-second shots and wrong for short ones — on a 4-second
@@ -430,6 +451,24 @@ Two details worth knowing:
 * `seg_NN.tail.mp4` is deliberately **not** rewritten. It is what segment N+1 actually
   opens on, and the repair was pinned to it.
 
+**Rendering an arbitrary set of segments (Director).** Set `run_segments` — or the
+director panel's **选择渲染段** field — to a list such as `1,3` or `1,3,5-7` and only
+those segments are re-rendered; every other segment is reused from disk untouched.
+
+Each selected segment goes through the same double-ended pinning described above, which
+is what makes an *arbitrary* set safe: because both ends are pinned, re-rendering
+segment 1 does not invalidate segment 2's cache, so there is no seam drift.
+
+> **Changed in 2026-09-19.** `run_segments` used to degrade to "re-render from the
+> lowest selected segment to the end" — `1,3` on a four-shot chain re-rendered 1, 2, 3
+> and 4. That was a consequence of the causal coupling, not a policy: segment N+1 opens
+> by replaying segment N's tail, so re-rendering N without pinning makes N+1's cached
+> opening stale. Double-ended pinning removes the coupling, so the list is now taken at
+> face value.
+>
+> Prerequisite: the session must already have been rendered once, so the neighbouring
+> segments' handoff clips are on disk.
+
 Leave `pin_ending` on. Turn it off only for the last segment, or when you mean to
 re-render everything after this one — the node will tell you what that invalidated.
 
@@ -482,15 +521,55 @@ images are in each folder's `refs/`.
 | Node | Does |
 | --- | --- |
 | **H3 Chain Settings** | Models, sampler, canvas, seed and session name in one bundle. Every other node here takes it. |
-| **H3 Render Segment** | One shot, in and out: prompt, images → `<Picture n>`, videos → `<Video n>`, audio → `<Audio n>`, length, handoff — and it renders right there. Optional `model` input takes this shot on a LoRA of its own. Outputs its own `video` the moment it finishes, plus a `chain_state` that wires into the next H3 Render Segment to continue the take. |
-| **H3 Chain to Video** | Joins a chain's segments into one cut, dropping each replayed opening. `stabilize` also flattens the chain's slow colour drift, on the CPU. |
-| **H3 Repair Segment** | Re-renders one segment pinned at both ends. |
-| **H3 Load Session** | Picks up a session already on disk, to re-join, repair, or extend with more H3 Render Segment nodes, without re-rendering what is done. |
+| **H3 Director** | The one node most workflows use: a script (`shots_json`) plus reference media in, a finished timeline and a single continuous cut out — render, seam, export and report all in a single pass. `refine` and `face_refine` are optional inputs; leave them out and the Director renders exactly as it always did. |
+| **H3 Prompt Pack Parser** | Turns a PACK script into `shots_json`, validating it as it goes. |
+| **H3 Script Translate** | Chinese script → one English version, with three fallbacks (self-check → re-translate → salvage) so a failed call never silently drops a line. |
+| **H3 Refine** | Optional second sample pass. Wire `sigmas` (a `denoise` < 1 schedule) and its `refine` output into the Director. |
+| **H3 FaceRefine** | Optional face pass: tracks and crops each face, re-samples it, stitches it back, and fades the join so the seam does not step. **Quality self-check** is on by default — see below. |
+| **MinimaxH3SaveJson** | Writes the storyboard to `output/h3_continuous/<session>/storyboard.json`. |
+| **MinimaxH3LoadJson** | Reads a storyboard back. |
 
-There is no separate "chain" node: the chain is however many **H3 Render Segment**
-nodes you wire in a row. Each one is its own execution, so its `video` output — and
-anything hanging off it, like a Preview Video node — is available the instant that
-segment is done, independent of how many more are still to render.
+> `H3 Chain to Video`, `H3 Load Session`, `H3 Shot Board`, `H3 Shot Renderer`,
+> `H3 Segment Timeline`, `H3 Shot Prompt`, `H3 Script Batch Render` and
+> `H3 Script Repair Segment` were removed on 2026-09-20 — the Director replaced
+> all of them. `H3 Render Segment` and `H3 Repair Segment` still exist as classes
+> and are called by the Director internally, but are not registered as nodes.
+
+### Face quality self-check
+
+H3 renders a face as a smear whenever the head is a small fraction of the frame —
+a property of head-size-in-frame, not of resolution, so it survives 720p and up.
+`H3 FaceRefine` fixes that by cropping the face to fill the canvas and re-sampling
+it. The trap is that nothing in that chain looks at the result: `denoise` goes up
+one notch, the face turns to wax, and the pipeline carries on regardless.
+
+**质量自检** (Quality self-check, default **off** in the node, on from the panel)
+closes that loop. After each pass it measures the result against the *same frame
+before the pass* — deliberately not against your reference image, because the job
+is to make this face clearer and more like itself, not to turn it into someone
+else's:
+
+| Measure | Catches | Needs |
+| --- | --- | --- |
+| High-frequency energy, before vs after | the face was smoothed into wax | — |
+| ArcFace cosine (InsightFace) | the face became a *different* person | `insightface` |
+| Adjacent-frame cosine | the face is boiling frame to frame | `insightface` |
+
+A failed pass is retried with a fresh seed (multiplicative jump — adding a
+constant yields highly correlated samples) and progressively lower `denoise`,
+up to the retry cap. If every attempt fails, the **best** attempt is kept, not the
+last, and the run report says which attempt won and why.
+
+If `insightface` is missing the check degrades to the pixel measures rather than
+failing — it still catches the wax-face case, it just cannot see identity drift.
+ArcFace runs on CPU on purpose: it shares `onnxruntime` with ComfyUI, and a
+second CUDA session on the same GPU either fights for VRAM or **silently falls
+back to CPU**, turning a few seconds of measurement into minutes with no error.
+
+**Adaptive denoise** (on by default) picks the strength from how large the face
+actually is. A small face has no detail worth keeping and needs a near-full
+repaint; a large close-up already has real detail and the same strength would
+rewrite it into someone slightly wrong. One global value cannot serve both.
 
 The chain calls ComfyUI's own `MiniMaxH3ReferenceToVideo`, `MiniMaxH3AddGuide` and
 `SamplerCustomAdvanced` rather than reimplementing them, so a ComfyUI update carries
@@ -626,9 +705,45 @@ ComfyUI's startup console for an import error from `ComfyUI_Marquee_Director`.
 **Everything re-renders every run.** Something in the fingerprint moved — most often a
 seed widget set to randomize somewhere upstream, or a resolution change.
 
-**Out of memory partway through a long chain.** Turn on `unload_models_after` (advanced)
-on the segment where it happens. It costs a full model reload before the next segment
-starts, so use it only there, not on every segment.
+**Out of memory partway through a long chain.** Drop `unload_every` (advanced) to `1` so
+the models are released after every segment instead of every two. It costs a full model
+reload before each segment starts, so go back to `2` once the chain fits. `0` disables
+unloading altogether.
+
+> **Can't tell whether it took effect?** Every run now announces the policy once at the
+> top (`unload_every=2 (every 2 segments); N segments in this run`) and logs a verdict
+> after every segment — `未到点 -> 保留模型（距上次卸载 1 段）` or
+> `到点 -> 卸载模型、清显存（计数器归零）`. Read those lines before concluding the
+> switch is broken: with the default `2`, **nothing is unloaded after the first
+> segment**, which is exactly the intended behaviour, not a failure.
+
+> **⚠️ Unloading drops the RAM-resident copy of the weights too.** `unload_every` frees
+> **both** VRAM and RAM: `unload_all_models()` moves the model off the GPU, and
+> `cleanup_models()` + `gc` releases the weights from RAM, so the next segment re-reads
+> them from disk. This pack's weights are roughly 49 GB (UNet ~20 GB + text encoder
+> ~26 GB). On a box with 40 GB of RAM that reload does not fit, and a run was observed
+> to **spin at 100% CPU with zero disk I/O for 15+ minutes** and never recover.
+>
+> Because of that the node has a **RAM guard**: before dropping the weights it measures
+> free physical memory and the size of what is resident. If the weights cannot be read
+> back, it frees VRAM only, keeps the weights in RAM, and logs
+> `⚠ 跳过本次内存清理：…` — the chain keeps going instead of hanging. So `unload_every`
+> now means "free as much as is safe, then carry on with the remaining segments".
+>
+> ComfyUI 0.36 already moves weights between VRAM and RAM on its own (`DynamicVRAM
+> support detected and enabled`), so on a small box `0` is both safer and faster: the
+> per-segment hygiene — `gc`, dead-slot eviction, `soft_empty_cache` — still runs every
+> segment, it simply never throws the weights away.
+>
+> If you do want periodic unloading (for example a machine with 64 GB+ of RAM), raise it
+> gradually and watch the reload, not the VRAM number.
+
+> **Renamed in 2026-09-19.** This used to be the boolean `unload_models_after` (on = every
+> segment, off = never). It is now the integer `unload_every`: `1` is exactly the old
+> "on" and `0` exactly the old "off", so old workflows keep their behaviour; the new
+> default is `2`. The bundled templates were then normalised to `2` as well — including
+> the ones that stored `false` — so every shipped example unloads after two segments.
+> Workflows you authored yourself were left untouched.
 
 **A segment errors and the run stops.** Everything already finished is on disk and in
 the manifest — written after every segment, not just at the end — so fixing the problem
@@ -642,7 +757,7 @@ and re-queueing resumes from the segment that failed.
 anchor beats `ref_videos`, where the 39-frame handoff number comes from, what colour
 drift does over a long chain and what `stabilize` does about it. Every number in it was
 measured, and the scripts that measured it are in `tools/` — `check_joins.py`,
-`face_drift.py`, `latent_drift.py` and `bench_chain.py`.
+`face_drift.py` and `latent_drift.py`.
 
 The handoff itself is frame arithmetic on a latent, which is the kind of thing that is
 silently three frames wrong for a month. `tools/test_latent_handoff.py` asserts the
@@ -652,10 +767,9 @@ slice lands where it should across every legal shape, and needs no GPU and no mo
 python tools/test_latent_handoff.py --comfy /path/to/ComfyUI
 ```
 
-`tools/build_workflows.py` regenerates the shipped workflow from a running ComfyUI's
-`/object_info`, so widget order and socket names cannot drift away from the nodes.
-`adopt_workflow.py` pulls a hand-rearranged workflow back into the repo, and
-`append_repair.py` adds the repair half to it.
+`tools/check_workflow.py` validates every workflow in `workflows/` against a
+running ComfyUI's `/object_info`, so widget order and socket names cannot drift
+away from the nodes. Use `--fix` to append widgets a saved workflow is missing.
 
 ---
 
@@ -683,7 +797,7 @@ written up in [how it works](docs/how-it-works.md).
 The drift work came later, out of asking why a chain that joins perfectly can still
 end up somewhere else. Everything in that section was measured on a 12 GB RTX 3060 at
 480×864 — five six-shot chains rendered for the comparison, plus three earlier ones
-re-measured. `tools/bench_chain.py` reproduces it.
+re-measured.
 
 The **8 GB figures** in [It runs on 8 GB](#it-runs-on-8-gb) and
 [How long it takes](#how-long-it-takes) are separate, and are this repository's own

@@ -431,7 +431,8 @@
         "match",
         "latent",
         0.05,
-        0.1
+        0.1,
+        false
       ],
       "widgets_values_named": {
         "width": 864,
@@ -441,7 +442,8 @@
         "ref_image_size": "match",
         "handoff_mode": "latent",
         "drift_arrest": 0.05,
-        "seam_redraw": 0.1
+        "seam_redraw": 0.1,
+        "seam_remask": false
       },
       "color": "#3f5159",
       "bgcolor": "#222d33"
@@ -1822,7 +1824,7 @@
         1.625,
         true,
         true,
-        false,
+        2,
         14,
         0,
         true,
@@ -1830,6 +1832,8 @@
         "match",
         "[{\"slot\":1,\"kind\":\"角色\",\"name\":\"王总（S1·男）\"},{\"slot\":2,\"kind\":\"角色\",\"name\":\"张三（S2·女律师）\"},{\"slot\":3,\"kind\":\"场景\",\"name\":\"古代卧房·夜\"},{\"slot\":4,\"kind\":\"场景\",\"name\":\"路人甲（古装男·krea2_identity_edit）\"},{\"slot\":5,\"kind\":\"\",\"name\":\"\"}]",
         0,
+        "",
+        "分镜JSON",
         ""
       ],
       "widgets_values_named": {
@@ -1843,7 +1847,7 @@
         "handoff_seconds": 1.625,
         "resume": true,
         "duration_is_new_content": true,
-        "unload_models_after": false,
+        "unload_every": 2,
         "crf": 14,
         "stabilize": 0,
         "build_timeline": true,
@@ -1852,7 +1856,9 @@
         "ref_classify": "[{\"slot\":1,\"kind\":\"角色\",\"name\":\"王总（S1·男）\"},{\"slot\":2,\"kind\":\"角色\",\"name\":\"张三（S2·女律师）\"},{\"slot\":3,\"kind\":\"场景\",\"name\":\"古代卧房·夜\"},{\"slot\":4,\"kind\":\"场景\",\"name\":\"路人甲（古装男·krea2_identity_edit）\"},{\"slot\":5,\"kind\":\"\",\"name\":\"\"}]",
         "repair_segment": 0,
         "run_segments": "",
-        "h3_director_panels": ""
+        "h3_director_panels": "",
+        "source": "分镜JSON",
+        "video_path": ""
       },
       "color": "#a1309b",
       "bgcolor": "#38172f"

@@ -1,12 +1,15 @@
 # -*- coding: utf-8 -*-
-"""MiniMax H3 分镜提示词 → shots_json。
+"""MiniMax H3 分镜提示词 PACK → shots_json。
 
-按 ``minimax-h3-shot-segment_en_SKILL.md``（**英文单版**）解析：一个 txt 里
-只有英文版六段，段标题 ``########## S01 / 10s / EN ##########``、接续段
-``########## S02 / 10s+1.6=11.6 / EN ##########``，结尾 ``END OF PROMPTS``；
-没有 PACK 头部，也没有 ``[1] 中文版`` / ``[2] 英文版`` 分块。
+按 ``minimax-h3-shot-segment`` SKILL（**英文单版**，2026-09-20 版）解析：
 
-旧的双语 PACK（头部 + 两版分块）**仍然能解析**，向后兼容。
+* 交付形态（§5）＝ PACK 头部 + ``ENGLISH VERSION`` 分区 + 英文版六段 +
+  ``END OF PACK``；段标题 ``########## S01 / 11s / EN ##########``、接续段
+  ``########## S02 / 11s+1.6=12.6 / EN ##########``。
+* 输出**固定英文**：段标题标记 ``EN``，除 ``<d>[Chinese] 原文</d>`` 台词块外
+  零中文字符（§1.3），STYLE / DELIVERY / MUSIC 三个 block 全链逐字复用（§4）。
+* 也吃整段式分镜脚本（``[Shot N]`` 一路写到片尾）并沿镜头边界自动拆段，
+  但那是**近似**：按 §0.2 仍应交付分段 PACK。
 
 设计要点
 --------
@@ -16,8 +19,14 @@
 * **逐镜解析**：段里出现的 ``<Picture N>`` 编号写进 ``shot["ref_images"]``，
   由 Director 从「参考图覆盖」槽位里按号取图。
 * **提示词层规范化**：六段字段补全并按官方顺序拼回、no-text 首句自动补、
-  接续段自动补 1.6 秒回放句、配乐按 1.5 判据自动套 MUSIC block（不默认
+  接续段自动补 1.6 秒回放句、配乐按 §1.5 判据自动套 MUSIC block（不默认
   N/A）、任务模式（t2v/i2v/fl2v/r2v/v2v/rv2v）自动推断。
+
+读入是宽容的
+------------
+旧的双语 PACK（``[1] 中文版`` / ``[2] 英文版``）照样能吃，**只取英文版那一侧**；
+``language`` 控件只在读这类旧文件时才有意义。中文源脚本会被照原样解析并按
+§1.3 报出来 —— 节点不翻译（翻译不是节点该干的事，见 SKILL §5）。
 
 Borrowed from ComfyUI_MiniMaxH3_Director
 ----------------------------------------
@@ -41,12 +50,13 @@ LANG_OPTIONS = ["auto", "中文版", "英文版"]
 ISSUE_OPTIONS = ["warn", "error"]
 
 PACK_TOOLTIP = (
-    "粘贴整份英文版分镜提示词（只要英文六段，形如\n"
-    "########## S01 / 10s / EN ##########\n"
-    "########## S02 / 10s+1.6=11.6 / EN ##########\n"
-    "结尾 END OF PROMPTS）。旧的「===== 头部 + [1] 中文版 / [2] 英文版」"
-    "双语 PACK 也照样吃。留空则原样转发 shots_json —— 一个节点同时吃"
-    "「手写 JSON」和「分镜提示词」两条路线。"
+    "粘贴整份英文单版 PACK（SKILL §5）：PACK 头部 + ENGLISH VERSION 分区 +\n"
+    "########## S01 / 11s / EN ##########\n"
+    "########## S02 / 11s+1.6=12.6 / EN ##########\n"
+    "结尾 END OF PACK。整段式分镜脚本（[Shot 1] At 00:00.000 一路写到片尾）\n"
+    "也吃，节点沿镜头边界自动拆段；旧的双语 PACK（[1] 中文版 / [2] 英文版）\n"
+    "同样能解析，只取英文那一侧。留空则原样转发 shots_json —— 一个节点同时\n"
+    "吃「手写 JSON」和「分镜提示词」两条路线。"
 )
 
 # 会话名算法搬到 common 了 —— PACK 解析器、Director、/h3/pack_preview
@@ -106,13 +116,16 @@ def _ref_slots_of_json(raw):
 def _looks_like_pack(text) -> bool:
     """粗判一段文本是不是分镜 PACK（而不是被 widget 错位塞进来的普通控件值）。
 
-    认两种形态：段标题 ``########## S01 / 10s / EN ##########``，或镜内标记
-    ``[Shot 1]``。用于 ``pack_override`` 的健壮性守卫 —— 见 ``execute`` 里的注释。
+    认三种形态：段标题 ``########## S01 / 11s / EN ##########``、无斜杠段头
+    ``########## S01 ##########``（2026-09-30 起解析层支持，守卫必须同口径，
+    否则实时编辑器覆盖会被静默忽略），或镜内标记 ``[Shot 1]``。
+    用于 ``pack_override`` 的健壮性守卫 —— 见 ``execute`` 里的注释。
     """
     s = str(text or "")
     if not s:
         return False
     return bool(re.search(r"#{3,}\s*S?\d+[A-Za-z]?\s*/", s)
+                or re.search(r"#{3,}\s*S\d+[A-Za-z]?\s*#{3,}", s)
                 or re.search(r"\[\s*Shot\s*\d+\s*\]", s, re.I))
 
 
@@ -125,10 +138,13 @@ class H3PromptPackParser(io.ComfyNode):
             node_id="H3PromptPackParser",
             display_name="H3 分镜提示词 PACK",
             category=CATEGORY,
-            description="把规范格式的 H3 英文版分镜提示词解析成 shots_json，直接接 "
-                        "H3 Director 的 shots_json 入口。自动做六段字段规范化、"
-                        "no-text 首句补全、1.6 秒回放句补全、配乐 MUSIC block "
-                        "自动判定、任务模式推断、<Picture N> 逐镜参考图解析。"
+            description="把 SKILL 规范格式的 H3 分镜提示词 PACK 解析成 shots_json，"
+                        "直接接 H3 Director 的 shots_json 入口。按 minimax-h3-"
+                        "shot-segment（英文单版）规范化：六段字段补全、no-text "
+                        "首句补全、1.6 秒回放句补全、配乐 MUSIC block 自动判定、"
+                        "任务模式推断、<Picture N> 逐镜参考图解析，并校验 §1.3 "
+                        "（台词块外零中文）、§1.4（回放区/尾窗无切点无台词）、"
+                        "§6（交付前检查）。整段式分镜脚本沿镜头边界自动拆段。"
                         "pack_text 留空时原样转发已接入的 shots_json。",
             inputs=[
                 # force_input：PACK 是几百行的长文本，走独立的多行文本框
@@ -145,19 +161,22 @@ class H3PromptPackParser(io.ComfyNode):
                 io.Combo.Input(
                     "language", display_name="取哪一版",
                     options=LANG_OPTIONS, default="auto", optional=True,
-                    tooltip="只对旧的「双语 PACK」生效（英文单版本来就只有英文）。"
-                            "auto = 英文版优先（官方六段字段是英文，H3 也吃英文）；"
-                            "也可以强制取中文版或英文版。"),
+                    tooltip="只对**旧的双语 PACK**（[1] 中文版 / [2] 英文版）"
+                            "有意义 —— 决定读哪一侧。auto = 英文版优先。"
+                            "输出侧一律按英文单版规范化（段标题 EN、EN 逗号、"
+                            "EN 的 no-text / DELIVERY / MUSIC block）；被指定"
+                            "读中文侧时节点不翻译，会由解析报告按 §1.3 报出来。"),
                 io.Float.Input(
-                    "default_duration", display_name="缺省段长（秒）", default=10.0,
+                    "default_duration", display_name="缺省段长（秒）", default=11.0,
                     min=0.25, max=15.0, step=0.25, round=False, optional=True,
-                    tooltip="段标题没写时长（如「10s+1.6=11.6」）时用这个值。"),
+                    tooltip="段标题没写时长（如「11s+1.6=12.6」）时用这个值。"
+                            "SKILL §0.1 的单段新增上限就是 11s，所以缺省给 11。"),
                 io.Boolean.Input(
                     "auto_fix", display_name="自动修正", default=True,
                     optional=True, advanced=True,
                     tooltip="补全 no-text 首句、接续段的 1.6 秒回放句；命中配乐"
                             "判据时把 N/A 换成 MUSIC block。修过的项会在 report "
-                            "里单列。"),
+                            "里单列（与 issues 分开显示）。"),
                 io.String.Input(
                     "session_name", display_name="会话名", default="",
                     multiline=False, optional=True, advanced=True,
@@ -195,16 +214,17 @@ class H3PromptPackParser(io.ComfyNode):
 
     @classmethod
     def execute(cls, pack_text=None, shots_json=None, language="auto",
-                default_duration=10.0, auto_fix=True, session_name="",
+                default_duration=11.0, auto_fix=True, session_name="",
                 on_issue="warn", pack_override=None) -> io.NodeOutput:
         # 前端「实时编辑器」写入的覆盖优先：非空就以它代替外侧 pack_text 解析。
         # ★ 健壮性守卫：ComfyUI 的 widgets_values 是按 widget **位置**对齐的。
-        #   pack_override 是后加到本 schema 的（插在 session_name 与 on_issue 之间），
-        #   在它之前保存的工作流只有 5 个 widget 值，加载时位置整体错位 —— 会把
-        #   on_issue 的 "warn" 塞进 pack_override。若照单全收，execute 就拿 "warn"
-        #   去解析，整条链直接报「没有解析到任何分镜」。所以这里只接受「看起来像
-        #   PACK」的覆盖值（含段标题 ########## S01 或镜内标记 [Shot N]），其余
-        #   一律忽略、退回 pack_text。
+        #   pack_override 是后加到本 schema 的；在它之前保存的工作流只有前几个
+        #   widget 值，加载时位置整体错位 —— 会把 on_issue 的 "warn" 塞进
+        #   pack_override。若照单全收，execute 就拿 "warn" 去解析，整条链直接报
+        #   「没有解析到任何分镜」。所以这里只接受「看起来像 PACK」的覆盖值
+        #   （含段标题 ########## S01 或镜内标记 [Shot N]），其余一律忽略、
+        #   退回 pack_text。（见 schema 里 pack_override 的注释：它必须留在
+        #   最后，新增 widget 一律追加在末尾。）
         override = str(pack_override or "").strip()
         if override and not _looks_like_pack(override):
             override = ""
@@ -237,7 +257,7 @@ class H3PromptPackParser(io.ComfyNode):
         # ---- Parse ---------------------------------------------------------
         segments, meta, issues = pp.parse_pack(
             text, language=language,
-            default_duration=float(default_duration or 10.0),
+            default_duration=float(default_duration or 11.0),
             auto_fix=bool(auto_fix))
         if not segments:
             raise ValueError("H3 分镜提示词 PACK：没有解析到任何分镜。%s"
@@ -249,7 +269,15 @@ class H3PromptPackParser(io.ComfyNode):
         # parse_pack 只在正文上跑配乐判据，并把结果放进 meta（见 prompt_pack）
         music_hit = tuple(meta.pop("music_hit", ()) or ())
 
-        report = pp.format_report(segments, meta, issues, music_hit=music_hit)
+        # 收集自动修复条目（成功日志，不进 issues）—— 上报给面板单列，免得
+        # 用户误以为"已自动补 no-text 首句"是 bug。必须在 format_report 之前。
+        fixes = []
+        for seg in segments:
+            for fix in (seg.get("fixes") or ()):
+                fixes.append("%s：%s" % (seg["id"], fix))
+
+        report = pp.format_report(segments, meta, issues, music_hit=music_hit,
+                                  fixes=fixes)
         slot_line = _ref_slot_line(segments)
         if slot_line:
             report += "\n" + slot_line + "\n"
@@ -261,6 +289,7 @@ class H3PromptPackParser(io.ComfyNode):
         info = pp.pack_info_json(segments, meta, {
             "session_name": name,
             "issues": list(issues),
+            "fixes": fixes,
             "music_hit": list(music_hit),
         })
         payload = json.dumps(board, ensure_ascii=False, indent=2)

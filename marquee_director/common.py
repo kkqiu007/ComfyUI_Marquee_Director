@@ -6,11 +6,22 @@ ComfyUI update carries straight through instead of silently diverging.
 """
 
 import logging
+import os
 
 import torch
 
 FPS = 24
 AUDIO_LATENT_FPS = 40
+
+# 二采精修（H3 Refine）的种子来源与采样器哨兵值。放在 common 是因为它们被
+# 三方共用：refine_nodes 出控件、engine 消费、session 算缓存键 —— 写三份字面量
+# 迟早有一处拼错，而拼错的后果是缓存键静默失效（每次都全量重渲）。
+REFINE_FOLLOW_SAMPLER = "跟随一采采样器"
+REFINE_SEED_FOLLOW = "跟随一采"
+REFINE_SEED_OFFSET = "一采+1"
+REFINE_SEED_INDEPENDENT = "独立种子"
+REFINE_SEED_MODES = [REFINE_SEED_FOLLOW, REFINE_SEED_OFFSET,
+                     REFINE_SEED_INDEPENDENT]
 
 try:
     from comfy_extras.nodes_minimax_h3 import (  # noqa: F401
@@ -172,6 +183,15 @@ def guide_length(frames):
     ``MiniMaxH3AddGuide`` truncates guide clips to 17k+5 internally. Doing it here
     too means the handoff length we record in the manifest is the length actually
     anchored, so the join arithmetic and the anchor agree to the frame.
+
+    ⚠ **渲染/回放路径不要用这个函数** —— 用 ``guide_length_up``。
+      它描述的是「把超出容量的片段交出去时，AddGuide 会砍到多少」，
+      是**预测**而不是**选择**。我们自己定回放长度时必须向上取：
+      规范写的 1.6s = 38 帧，向下取是 **22 帧（0.917s）**，回放窗凭空少一半，
+      而下一段的 ``_shot_plan`` 按向上取算的是 39 帧 —— 两边差 17 帧
+      （正好一个网格步长），多出来的回放会被留在成片里（接缝处动作原地打结）。
+      实测 2026-09-27：``nodes._segment_from_widgets`` 曾用本函数记 handoff，
+      每道接缝多 17 帧。
     """
     frames = int(round(frames))
     if frames < 5:
@@ -290,3 +310,38 @@ def evict_dead_loaded_models() -> int:
         except Exception:
             continue
     return evicted
+
+
+def free_ram_bytes():
+    """当前可用物理内存（字节）。取不到就返回 None，让调用方自己决定。
+
+    只用标准库：Windows 走 ``GlobalMemoryStatusEx``，Linux 走 ``/proc/meminfo``
+    的 ``MemAvailable``。刻意不引 psutil —— 那是可选依赖，不能为一个护栏
+    给整包加硬依赖。
+    """
+    try:
+        if os.name == "nt":
+            import ctypes
+
+            class _MS(ctypes.Structure):
+                _fields_ = [("dwLength", ctypes.c_ulong),
+                            ("dwMemoryLoad", ctypes.c_ulong),
+                            ("ullTotalPhys", ctypes.c_ulonglong),
+                            ("ullAvailPhys", ctypes.c_ulonglong),
+                            ("ullTotalPageFile", ctypes.c_ulonglong),
+                            ("ullAvailPageFile", ctypes.c_ulonglong),
+                            ("ullTotalVirtual", ctypes.c_ulonglong),
+                            ("ullAvailVirtual", ctypes.c_ulonglong),
+                            ("ullAvailExtendedVirtual", ctypes.c_ulonglong)]
+
+            st = _MS()
+            st.dwLength = ctypes.sizeof(_MS)
+            ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(st))
+            return int(st.ullAvailPhys)
+        with open("/proc/meminfo", encoding="utf-8") as fh:
+            for line in fh:
+                if line.startswith("MemAvailable:"):
+                    return int(line.split()[1]) * 1024
+    except Exception:
+        return None
+    return None

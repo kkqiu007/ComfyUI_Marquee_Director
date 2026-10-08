@@ -6,10 +6,18 @@ __pycache__/
 *.py[cod]
 *.egg-info/
 
-# Local-only working files.
-# These two are personal setups: they load private/merged checkpoints and input
-# images that are not published, so they would not run for anyone else.
-# Kept on disk for the author, deliberately not committed.
+# Ad-hoc backup copies. This package has accumulated enough of these
+# (*.bak_*, *.backup, *.disabled, and whole backup trees like
+# web/js.bak_*/) that they were being loaded by import sweeps and served
+# as web extensions alongside the live files. Commit a change, don't
+# clone the file next to it.
+*.bak
+*.bak_*
+*.backup
+*.disabled
+
+# Retired with the old node set. Left here so a personal copy that was never
+# committed stays ignored if one is ever restored to workflows/.
 workflows/h3_continuous_local_prompt.json
 demo_8shots_workflow.json
 

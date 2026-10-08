@@ -1,13 +1,22 @@
-"""The five nodes.
+"""The current nodes.
 
     H3 Chain Settings   ->  models, sampler, canvas and seed, bundled once
-    H3 Render Segment   ->  one shot: prompt, references and length IN, its rendered
-                            video and a chain_state OUT that the next segment's node
-                            wires into -- the chain is the graph, not a hidden loop
-    H3 Chain to Video   ->  joins a chain_state's segments into one cut
-    H3 Repair Segment   ->  re-renders one segment without disturbing its neighbours
-    H3 Load Session     ->  re-join an earlier session, or extend it with more
-                            H3 Render Segment nodes, without re-rendering what is done
+    H3 Director         ->  the whole chain in one node: script -> render ->
+                            timeline -> one cut (see ``director.py``)
+
+``H3 Render Segment`` / ``H3 Repair Segment`` are **not registered** as standalone
+nodes any more: ``H3Director`` calls their ``execute()`` directly as internal
+engine, so the classes stay, but the old "wire one node per shot" paradigm they
+belonged to is gone. The retired nodes (``H3 Script Batch Render``,
+``H3 Script Repair Segment``, ``H3 Chain to Video``, ``H3 Load Session``,
+``H3 Segment Timeline``, ``H3 Shot Prompt``, ``H3 Shots Board``,
+``H3 Shot Renderer``) were deleted on 2026-09-20 --
+all of them are superseded by ``H3Director``.
+
+``MinimaxH3LoadJson`` was **not** deleted -- it is still registered, and it is
+the read side of ``MinimaxH3SaveJson``. (The note in ``get_node_list`` used to
+list it among the deleted ones; that was wrong and made the registry look one
+node smaller than it is.)
 
 Every H3 Render Segment is its own node execution, so its ``video`` output populates
 -- and can feed a Preview Video node, or anything else -- the moment that one segment
@@ -24,14 +33,13 @@ import comfy.utils
 from comfy_api.input_impl import VideoFromFile
 from comfy_api.latest import ComfyExtension, io
 
-from . import board_nodes
-from . import prompt_nodes
 from . import session as session_mod
 from . import video_io
+from . import subtitle_qc
 from .common import (
     FPS,
     generation_length,
-    guide_length,
+    guide_length_up,
     log,
     ordered_autogrow,
     seconds_to_frames,
@@ -47,26 +55,15 @@ from .engine import (
     push_preview,
     render_segment,
     take_tail,
+    unload_due,
+    unload_every_int,
 )
+from . import wardrobe as wardrobe_mod
 
 CATEGORY = "ComfyUI_Marquee_Director"
-
-STABILIZE_TOOLTIP = (
-    "Flatten the finished cut's slow drift away from its own opening. 0 is off.\n\n"
-    "Chained takes slide steadily darker and less saturated without any one join "
-    "showing it. That trend is slow by definition, so it separates cleanly: each "
-    "channel's per-frame mean is smoothed over two seconds, and what is left is "
-    "the drift. The correction is a gain aimed at segment 1's level -- gains keep "
-    "black black -- and because the curve it comes from is smooth it is continuous "
-    "across every join, so stabilising cannot introduce a step at a cut.\n\n"
-    "Gains are bounded at +/-25%, because the one thing this cannot tell apart "
-    "from drift is a shot that is genuinely darker after a real lighting change. "
-    "Real changes are large and survive the bound; accumulated drift is small and "
-    "does not.\n\n"
-    "0.7-1.0 is the useful range. It costs one extra decoding pass and no GPU. "
-    "This fixes colour only -- for identity drift use drift_arrest on H3 Chain "
-    "Settings, which acts on the generation rather than on the finished file."
-)
+# 2026-09-20 清理：STABILIZE_TOOLTIP 是旧节点下线后遗留的（全包零引用），
+# 但它记的东西没处可查 —— 已回收进 director.py 的 stabilize 控件 tooltip
+# （译成中文，与其余控件一致），不是删掉。
 
 DRIFT_ARREST_TOOLTIP = (
     "Pull each handoff's colour and exposure back toward SEGMENT 1's before pinning "
@@ -108,6 +105,19 @@ SEAM_REDRAW_TOOLTIP = (
     "改动会进缓存键，相关段会重渲。"
 )
 
+SEAM_REMASK_TOOLTIP = (
+    "逐 step 重绘掩码（借鉴 ComfyUI_MiniMaxH3_Director 的 _PrefixRemask）。\n\n"
+    "关（默认）：整个采样过程用同一张 noise_mask —— 第 1 步和最后 1 步对回放区的"
+    "重绘余量完全相同。\n\n"
+    "开：每一步按「下一步 σ / 当前步 σ」缩放回放区的重绘余量。采样前期噪声大，"
+    "前缀允许重写（此时硬锁反而会与噪声打架）；后期收敛，前缀整体锁回写好的"
+    "上一段尾帧。接缝那几个 token 由上面的「接缝重绘」兜底，全程不低于它。\n\n"
+    "★ 默认关是刻意的：它改变的是成片本身，开着会让既有会话的所有段重渲一次，"
+    "这不该由一次升级替你决定。新会话想追求更稳的接缝可以打开。\n\n"
+    "仅在 handoff_mode='latent' 且本段确实有上一段锚点时生效（首段没有锚点）。\n\n"
+    "形状判断失败会自动回退静态掩码并在日志里留一行，不会把画面画坏。"
+)
+
 
 def _anchor_from_disk(sess, index, handoff_mode):
     """The anchor segment ``index`` hands to ``index+1``, read back off disk.
@@ -132,7 +142,7 @@ def _handoff_anchor_frames(segment):
 
     ★ segment 里**根本没有 handoff_seconds 这个键** ——
       _segment_from_widgets 生成的是已经算成帧数的 "handoff"
-      （= guide_length(seconds_to_frames(handoff_seconds))），磁盘补齐的记录
+      （= guide_length_up(seconds_to_frames(handoff_seconds))），磁盘补齐的记录
       （Session.reconcile）也只有 "handoff"。以前代码直接
       ``segment.get("handoff_seconds")`` 恒为 None，一进 tail 缺失的兜底分支
       就 TypeError: float() argument must be ... not 'NoneType'。
@@ -141,12 +151,16 @@ def _handoff_anchor_frames(segment):
     取值顺序：现成的帧数 → handoff_seconds → 默认网格值 1.625s（39 帧）。
     用 ``if not frames`` 而不是 ``is None``：补回的记录在 tail 缺失时会写
     handoff=0，0 帧锚等于没锚，必须一并走默认值。
+
+    ★ 兜底算帧也用 **guide_length_up**：这里切出来的锚要喂给下一段的回放，
+      而下一段的回放帧数是 _shot_plan 按**向上**对齐算的（1.6s → 39 帧）。
+      用 guide_length（向下，1.6s → 22 帧）会少 17 帧，接缝直接错位。
     """
     frames = segment.get("handoff")
     if not frames:
         secs = segment.get("handoff_seconds")
-        frames = (guide_length(seconds_to_frames(secs)) if secs
-                  else guide_length(seconds_to_frames(1.625)))
+        frames = guide_length_up(seconds_to_frames(secs) if secs
+                                 else seconds_to_frames(1.625))
     return int(frames)
 
 H3Settings = io.Custom("H3_SETTINGS")
@@ -199,7 +213,11 @@ class H3ChainSettingsNode(io.ComfyNode):
                             "no matter how many segment nodes are wired into it -- the "
                             "first segment (the one with chain_state unconnected) reads it "
                             "from here; every segment after that inherits the session "
-                            "object it already resolved, off the chain_state wire."),
+                            "object it already resolved, off the chain_state wire.\n\n"
+                            "★ 接 H3 Director 时这一项**不生效**：Director 的会话名一律取自"
+                            "分镜 JSON 的 session_name（H3 分镜提示词 PACK 会把它写成 PACK "
+                            "头部的 Project）。要换会话目录，改 PACK 头部的 Project，"
+                            "别改这里 —— 两边不一致时日志与运行报告里会明确告警。"),
                 io.Combo.Input("ref_image_size", options=["match", "max"], default="match",
                                tooltip="'match' scales reference images to the generation's "
                                        "pixel area; 'max' uses a 2048px short edge for the "
@@ -216,6 +234,9 @@ class H3ChainSettingsNode(io.ComfyNode):
                 io.Float.Input("seam_redraw", default=0.10, min=0.0, max=0.95,
                                step=0.05, round=False, advanced=True,
                                tooltip=SEAM_REDRAW_TOOLTIP),
+                # 逐 step 重绘掩码。同样挂**末尾**（本节点全 required 段）。
+                io.Boolean.Input("seam_remask", default=False, advanced=True,
+                                 tooltip=SEAM_REMASK_TOOLTIP),
             ],
             outputs=[H3Settings.Output(display_name="settings")],
         )
@@ -223,7 +244,7 @@ class H3ChainSettingsNode(io.ComfyNode):
     @classmethod
     def execute(cls, model, clip, vae, audio_vae, sampler, sigmas, width, height,
                 chain_seed, session_name, ref_image_size, handoff_mode="latent",
-                drift_arrest=0.0, seam_redraw=0.10) -> io.NodeOutput:
+                drift_arrest=0.0, seam_redraw=0.10, seam_remask=False) -> io.NodeOutput:
         return io.NodeOutput({
             "model": model, "clip": clip, "vae": vae, "audio_vae": audio_vae,
             "sampler": sampler, "sigmas": sigmas,
@@ -231,6 +252,7 @@ class H3ChainSettingsNode(io.ComfyNode):
             "session_name": session_name, "ref_image_size": ref_image_size,
             "handoff_mode": handoff_mode, "drift_arrest": float(drift_arrest),
             "seam_redraw": float(seam_redraw),
+            "seam_remask": bool(seam_remask),
         })
 
 
@@ -338,7 +360,18 @@ def _segment_schema():
 def _segment_from_widgets(prompt, seconds, handoff_seconds, seed_override,
                           images=None, videos=None, video_audios=None, audios=None):
     length = generation_length(seconds_to_frames(seconds))
-    handoff = guide_length(seconds_to_frames(handoff_seconds))
+    # ★ 回放帧必须**向上**对齐到 17k+5，与 director._shot_plan 里
+    #   ``replay_frames = guide_length_up(...)`` 完全同一口径。
+    #
+    #   以前这里用的是 guide_length（**向下**）：1.6s = 38 帧向下取是 **22 帧**
+    #   （0.917s），而下一段的 _shot_plan 按向上取算的是 **39 帧**（1.625s）。
+    #   于是每道接缝都多出 39 − 22 = **17 帧**（正好一个网格步长）的回放画面
+    #   被留在成片里 —— 这就是「叠加 17k+5 帧」的来源：前一段只切了 22 帧，
+    #   后一段开头却真真切切回放了 39 帧，多出来的 17 帧是上一段结尾的重播。
+    #   实测症状：接缝处一顿一顿、动作原地打结。
+    #
+    #   方向必须与 _shot_plan 一致，否则 tail 的帧数与下一段 replay 的帧数对不上。
+    handoff = guide_length_up(seconds_to_frames(handoff_seconds))
     if handoff >= length:
         raise ValueError(
             "handoff_seconds (%.2fs -> %d frames) must be shorter than the segment "
@@ -364,6 +397,30 @@ def _with_model(settings, model):
     if model is None:
         return settings
     return dict(settings, model=model)
+
+
+def _with_wardrobe_fixes(prompt):
+    """渲染前的服装兜底：先**转换冲突词**，再**补锚定**。两件事都内建。
+
+    具体逻辑已抽到 ``wardrobe.process_prompt``，这里只做日志包装，保持两端
+    （H3RenderSegmentNode / H3RepairSegmentNode）的调用方式不变。
+
+    ★ 为什么必须内建：以前靠离线脚本补，换一次剧本就漏一次（2026-09-19
+      段 1 就是漏了才渲出自造服装）。内建后**任何**输入路径
+      （PACK / 分镜 JSON / 手填提示词）都自动生效。
+    """
+    if not prompt or not isinstance(prompt, str):
+        return prompt
+
+    try:
+        new, notes = wardrobe_mod.process_prompt(prompt)
+    except Exception as exc:                                  # pragma: no cover
+        log("wardrobe: 兜底跳过（%s）", exc)
+        return prompt
+
+    for note in notes:
+        log("wardrobe: %s", note)
+    return new
 
 
 CHAIN_STATE_TOOLTIP = (
@@ -426,12 +483,14 @@ class H3RenderSegmentNode(io.ComfyNode):
                                          "an earlier segment's prompt still invalidates this "
                                          "one even with resume on."),
                 *_segment_schema(),
-                io.Boolean.Input("unload_models_after", default=False, advanced=True,
-                                 tooltip="Unload models after this segment renders, before the "
-                                         "next one starts. OOM-only: it forces a full reload "
-                                         "of the UNet and text encoder from disk, which "
-                                         "dominates runtime on a small box. Turn it on for "
-                                         "just the segment where you actually OOM."),
+                io.Int.Input("unload_every", default=2, min=0, max=99, step=1,
+                             advanced=True,
+                             tooltip="每渲染满 N 段卸载一次模型（卸载会强制从磁盘重载 "
+                                     "UNet 与文本编码器，加载时间在 8G 卡上占大头）。\n"
+                                     "0 = 从不卸载；1 = 每段都卸（旧行为）；2 = 每两段卸一次（默认）。\n"
+                                     "计数器挂在 chain_state 上，所以一串 Render Segment 节点与 "
+                                     "Director 内部循环走的是同一套语义；命中磁盘缓存的段不计数。\n"
+                                     "链尾无条件卸一次，给后面的拼接/编码让出显存。"),
             ],
             outputs=[io.Video.Output(display_name="video"),
                      H3Chain.Output(display_name="chain_state"),
@@ -440,12 +499,15 @@ class H3RenderSegmentNode(io.ComfyNode):
 
     @classmethod
     def execute(cls, settings, resume, prompt, seconds, handoff_seconds,
-                seed_override, unload_models_after, chain_state=None, model=None,
+                seed_override, unload_every, chain_state=None, model=None,
                 images=None, videos=None, video_audios=None,
                 audios=None) -> io.NodeOutput:
         # Before segment_key: model_digest reads settings["model"], so swapping it
         # here is what makes changing a shot's LoRA invalidate that shot's cache.
         settings = _with_model(settings, model)
+        # 服装锚定兜底：必须在算 segment_key **之前**改 prompt，
+        # 否则锚定进不了缓存键，改了文案也不会重渲（实测会一直吃旧缓存）。
+        prompt = _with_wardrobe_fixes(prompt)
         segment = _segment_from_widgets(prompt, seconds, handoff_seconds, seed_override,
                                         images, videos, video_audios, audios)
         handoff = segment["handoff"]
@@ -472,8 +534,36 @@ class H3RenderSegmentNode(io.ComfyNode):
         # 那些段才会被判定为命中而不是重渲。resume 关闭时完全不碰。
         if resume:
             manifest = sess.reconcile(manifest)
+            # ★ 防字幕质检换过的种子要**从 manifest 领回来**：segment_key 含种子，
+            #   不领回的话本次解析出的永远是原始种子，key 对不上，已通过质检的段
+            #   每次队列都被判为失效、白白重烧（2026-09-30）。
+            _recs = (manifest or {}).get("segments") or []
+            if index < len(_recs):
+                _rec = _recs[index] or {}
+                if _rec.get("seed_qc") and _rec.get("seed"):
+                    segment["resolved_seed"] = int(_rec["seed"])
+                    key = session_mod.segment_key(settings, segment, handoff, previous_key)
 
-        if resume and sess.cached(manifest, index, key, needs_tail=bool(handoff)):
+        # 防字幕质检的两个状态量：缓存命中分支不进质检循环，但下面的 record
+        # 组装两个分支共用 —— 必须在分支之前初始化（否则复用段一进来就
+        # UnboundLocalError，2026-09-30 实证）。
+        #
+        # ★ qc_retries 与 _exhausted 必须在**同一处**初始化。分开写在 else 分支里
+        #   会漏：record 组装读的是这两个名字，任何一个只在渲染分支赋值，命中
+        #   磁盘缓存的段就会 UnboundLocalError —— 而 resume 命中恰恰是断点续渲
+        #   最常见的路径，等于「续渲必崩」。
+        qc_retries = 0
+        _exhausted = False
+        # ★ 1002 层三：上次字幕质检耗尽仍烧字的段（manifest subtitle_qc=exhausted）
+        #   **不允许静默复用** —— v25 实证：QC 重渲途中队列被取消时，烧字段留在
+        #   盘上且 manifest 带标，下一次续渲会不扫描直接拿去拼成片。命中即强制
+        #   重走质检循环（成功后新记录会覆盖掉 exhausted 标）。
+        _seg_recs = (manifest or {}).get("segments") or []
+        _qc_flag = ((_seg_recs[index].get("subtitle_qc") or _seg_recs[index].get("qc")) if index < len(_seg_recs) else None)
+        if _qc_flag == "exhausted":
+            log("segment %d: ⚠ 上次字幕质检耗尽仍烧字 —— 不复用旧文件，强制重渲",
+                index + 1)
+        if resume and _qc_flag != "exhausted" and sess.cached(manifest, index, key, needs_tail=bool(handoff)):
             log("%s -- reusing %s", describe(segment, index, anchor is not None),
                 os.path.basename(sess.segment_path(index)))
             rendered_length = video_io.frame_count(sess.segment_path(index))
@@ -483,15 +573,64 @@ class H3RenderSegmentNode(io.ComfyNode):
             # A reused segment still gets a thumbnail, so a resumed run visibly walks
             # through what it is keeping instead of appearing to stall.
             preview_frame = video_io.last_frame(sess.segment_path(index))
+            rendered_now = False
         else:
             log("%s", describe(segment, index, anchor is not None))
             # 这一段是真的要烧显卡了 —— 它后面靠"磁盘上有文件"判定命中的段
             # 全部作废，否则会出现新旧尾巴接不上的片子。
             sess.note_render()
-            images_out, audio_out, samples = render_segment(
-                settings, segment, start_anchor=anchor)
-            rendered_length = int(images_out.shape[0])
-            video_io.save_clip(sess.segment_path(index), images_out, audio_out)
+            # ★ 防字幕质检（2026-09-30，通用兜底层）：每次渲完（**含最后一次**）
+            #   立刻 OCR 扫底部字幕带，烧了字就换种子重渲**本段**，上限
+            #   MARQUEE_SUBTITLE_QC（默认 3）次。重试次数用尽仍烧字时大声记录、
+            #   manifest 打标 —— 静默放行等于把已知缺陷藏进成片（S02 三种子
+            #   连烧的教训）。提示词层的逐句禁令只能降概率，这里才是确定性
+            #   保证 —— 与剧本语言/内容无关，换任何脚本都自动生效。
+            _last_hits = []
+            _orig_prompt = segment["prompt"]
+            for _attempt in range(subtitle_qc.max_attempts() + 1):
+                images_out, audio_out, samples = render_segment(
+                    settings, segment, start_anchor=anchor)
+                rendered_length = int(images_out.shape[0])
+                # exact_audio: also drop a float-PCM sidecar next to the mp4. The join
+                # reads that instead of decoding the mp4's AAC back, which is what kept
+                # the soundtrack from being encoded twice on its way to the finished
+                # film. Same reason the handoff tails below already ask for it.
+                video_io.save_clip(sess.segment_path(index), images_out, audio_out,
+                                   exact_audio=True)
+                _hits = subtitle_qc.scan(sess.segment_path(index))
+                if not _hits:
+                    if qc_retries:
+                        log("segment %d: 防字幕质检通过（第 %d 次重渲后）",
+                            index + 1, qc_retries)
+                    break
+                _last_hits = _hits
+                if _attempt >= subtitle_qc.max_attempts():
+                    _exhausted = True
+                    log("segment %d: ⚠⚠ 防字幕质检重试 %d 次仍烧字 %s —— 已按上限交付，"
+                        "manifest 记 subtitle_qc=exhausted，请人工复核该段",
+                        index + 1, subtitle_qc.max_attempts(), _hits)
+                    break
+                _old = int(segment["resolved_seed"])
+                # ★ LCG 跳变而非加常数：S02 实测 +104729 的三个样本高度相关
+                #   （同一句连烧三次），乘法跳变去相关更有效。
+                segment["resolved_seed"] = (_old * 1103515245 + 12345) % (1 << 63)
+                # ★ 种子 + 措辞双变化：对该段近乎确定的烧字（提示词诱发），
+                #   只换种子去相关不够 —— 每次重渲追加一条更重的禁令。
+                #   record 用**原提示词**（下面循环后恢复），缓存契约不破。
+                _variant = subtitle_qc.retry_variant(qc_retries + 1)
+                if _variant:
+                    segment["prompt"] = _orig_prompt + "\n" + _variant
+                qc_retries = _attempt + 1
+                log("segment %d: ⚠ 防字幕质检发现烧字 %s —— 种子 %d → %d 重渲（%d/%d）",
+                    index + 1, _hits, _old, segment["resolved_seed"],
+                    qc_retries, subtitle_qc.max_attempts())
+            if qc_retries:
+                # 种子被质检换过：key 必须跟着重算，manifest 记录才能与磁盘一致，
+                # 下次 resume 才能命中缓存（种子领回逻辑见上面 cached() 之前）。
+                # record 写**原提示词**（重试追加的强化禁令只作用于渲染调用），
+                # 缓存键 = 原提示词 + 最终权重种子，续渲可复现。
+                segment["prompt"] = _orig_prompt
+                key = session_mod.segment_key(settings, segment, handoff, previous_key)
 
             # Both forms of the handoff go to disk whatever mode rendered it, so the
             # session can be resumed, repaired or extended in either mode later.
@@ -499,8 +638,11 @@ class H3RenderSegmentNode(io.ComfyNode):
             lat_tail = latent_tail(samples, handoff)
             signature = latent_signature(samples)
             if pixel_tail is not None:
+                # master_audio=False: this file is not an excerpt, it is the
+                # conditioning signal the next segment renders against. Bringing
+                # it to delivery level would move the condition itself.
                 video_io.save_clip(sess.tail_path(index), pixel_tail[0], pixel_tail[1],
-                                   exact_audio=True)
+                                   exact_audio=True, master_audio=False)
                 # Saved uncorrected, deliberately: the file on disk is what this
                 # segment actually ended on, which is what the repair node has to pin
                 # against. Drift correction is applied when the anchor is consumed.
@@ -513,7 +655,36 @@ class H3RenderSegmentNode(io.ComfyNode):
                 new_anchor = None
             preview_frame = images_out[-1].clone()
             del images_out, audio_out, samples, pixel_tail, lat_tail
-            free_between_segments(unload_models_after)
+            rendered_now = True
+
+        # ---- 「每 N 段卸载一次模型」（2026-09-19 起取代布尔 unload_models_after） ----
+        # 计数器挂在 chain_state 上，于是**一串 Render Segment 节点**与 Director 内部
+        # 的循环走的是同一套语义：累计真渲满 unload_every 段才卸一次。
+        # 命中磁盘缓存的段根本没加载过模型，不推进计数器（否则缓存段会把配额吃掉，
+        # 真正的连续重渲之间反而不会释放）。
+        # 判定放在两个分支之后，缓存命中路径也顺带做一次 gc + 死槽清理 —— 以前这条
+        # 路径完全不清理，只有 Director 在外面补一刀，单独串节点时是漏的。
+        since_unload = int((chain_state or {}).get("since_unload") or 0)
+        if rendered_now:
+            since_unload += 1
+        do_unload = unload_due(since_unload, unload_every)
+        if do_unload:
+            since_unload = 0
+        free_between_segments(do_unload)
+        # ★ 两个分支都要出声。以前只在「真的卸了」时打日志，于是段间毫无动静，
+        #   根本分不清是「策略在攒着还没到点」还是「这个开关压根没生效」——
+        #   2026-09-19 就是被这一点误导，白查了一轮。
+        #   现在每段都留一行判决，日志里直接能数出节奏。
+        every_n = unload_every_int(unload_every)
+        if do_unload:
+            log("segment %d: unload_every=%d 到点 -> 卸载模型、清显存（计数器归零）",
+                index + 1, every_n)
+        elif every_n > 0:
+            log("segment %d: unload_every=%d 未到点 -> 保留模型（距上次卸载 %d 段）",
+                index + 1, every_n, since_unload)
+        else:
+            log("segment %d: unload_every=%d（<=0）-> 从不卸载，模型常驻显存",
+                index + 1, every_n)
 
         # Segment 1 seeds the reference and then it rides the chain unchanged: it is
         # the only shot rendered from the prompt and the reference image alone, with
@@ -542,6 +713,11 @@ class H3RenderSegmentNode(io.ComfyNode):
             "seconds": round(rendered_length / float(FPS), 3),
             "seed": segment["resolved_seed"], "prompt": segment["prompt"],
             "file": os.path.basename(sess.segment_path(index)),
+            # 防字幕质检换过种子时打标（seed_qc）：续渲时据此把种子领回来，
+            # 缓存键才能对上（见上面 reconcile 处的领回逻辑）。
+            **({"seed_qc": True} if qc_retries else {}),
+            # 重试次数用尽仍烧字：明写进 manifest，复核/重渲有据可查
+            **({"subtitle_qc": "exhausted"} if _exhausted else {}),
             # Kept so a resumed run can still measure how far it has drifted without
             # decoding every segment it is reusing.
             "signature": session_mod.signature_to_record(signature),
@@ -559,7 +735,16 @@ class H3RenderSegmentNode(io.ComfyNode):
 
         chain = {"session": sess.name, "dir": sess.dir, "segments": records,
                  "sess_obj": sess, "anchor": new_anchor, "index": index, "key": key,
-                 "reference": reference}
+                 "reference": reference,
+                 # ★ 这一段是**复用磁盘缓存**还是**真烧了显卡**（2026-09-20 第 44 轮）。
+                 #   渲染节点内部已经知道（rendered_now），但以前只有日志能看出来，
+                 #   上游（Director / 前端时间线）无从得知 —— 于是「断点渲染到底
+                 #   复用了哪些段」只能靠翻日志。多带一个键，调用方就能如实显示。
+                 #   新增键向后兼容：chain 的其它消费方只读自己认识的键。
+                 "reused": not rendered_now,
+                 # 「每 N 段卸载一次」的计数器，随链传递（不落盘：manifest 里没有它，
+                 # 一次新 queue 从 0 起算正是我们要的语义）。
+                 "since_unload": since_unload}
         summary = _summarize(chain)
         log("%s", summary.replace("\n", " | "))
         return io.NodeOutput(VideoFromFile(sess.segment_path(index)), chain, summary)
@@ -687,12 +872,18 @@ def _script_segment(asset, shot, include_global_prompt=True,
 
 
 def _safe_script_handoff(seconds, requested, is_last):
-    """Never hand off a guide as long as the shot itself (short shots are valid)."""
+    """Never hand off a guide as long as the shot itself (short shots are valid).
+
+    ★ 判据用的帧数与 ``_segment_from_widgets`` / ``_shot_plan`` 保持同一口径
+      （guide_length_up，向上对齐 17k+5）。用向下对齐会让 1.6s(38 帧) 被
+      误判成 22 帧 —— 于是「1.0s 的段 + 1.0s 的锚」这种明显过长的组合会被
+      放行，而实际渲染时锚是 39 帧、比整段还长。
+    """
     if is_last:
         return 0.0
     requested = max(0.0, float(requested))
     length = generation_length(seconds_to_frames(seconds))
-    handoff = guide_length(seconds_to_frames(requested))
+    handoff = guide_length_up(seconds_to_frames(requested))
     return requested if handoff < length else 0.0
 
 
@@ -707,202 +898,6 @@ def _settings_for_script(settings, asset):
         if value >= 32:
             effective[key] = value
     return effective
-
-
-class H3ScriptBatchRenderNode(io.ComfyNode):
-    @classmethod
-    def define_schema(cls):
-        return io.Schema(
-            node_id="H3ScriptBatchRender",
-            display_name="H3 Script Batch Render (Unlimited Shots)",
-            category=CATEGORY,
-            description=(
-                "Renders every row in a Ref2VA Auto 分镜资产结果JSON as one H3 continuous "
-                "session.  The number of shots comes from shots_info, not from fixed graph "
-                "nodes.  Each completed shot is checkpointed, so resume reuses it after an "
-                "interrupt and only continues with changed/downstream shots."
-            ),
-            inputs=[
-                H3Settings.Input("settings"),
-                io.String.Input("shots_json", display_name="分镜资产结果JSON", force_input=True),
-                io.Boolean.Input("resume", default=True),
-                io.Float.Input("handoff_seconds", default=1.625, min=0.0, max=4.0,
-                               step=0.125, round=False, advanced=True),
-                io.Int.Input("max_shots", display_name="最多渲染分镜（0=全部）", default=0,
-                             min=0, max=9999),
-                io.Boolean.Input("unload_models_after", default=False, advanced=True),
-                H3Chain.Input(
-                    "chain_state", optional=True,
-                    tooltip="续接已完成的会话：把「H3 Load Session」的 chain 接进来，"
-                            "本次的 shots_info 会渲染成该会话的第 N+1、N+2… 段，"
-                            "而不是新建会话——这就是无限分镜的追加模式。"
-                            "留空则从第一段开始新建会话。"),
-                io.Boolean.Input(
-                    "duration_is_new_content", default=True, advanced=True,
-                    tooltip="分镜时长口径。开：JSON 里的 duration 是「新增时长」，"
-                            "渲染时自动 +handoff_seconds 作为生成长度"
-                            "（新增 10s + 1.6s 回放 = 生成 11.6s），成片总时长等于各段新增之和。"
-                            "关：duration 直接当生成长度用。"),
-                io.Autogrow.Input(
-                    "ref_images", optional=True,
-                    tooltip="可选：用同一组参考图覆盖 shots_json 里的所有分镜参考图。"
-                            "不连时，H3 Script Batch Render 按 JSON 原样加载图片；"
-                            "连入后，所有分镜都使用这组 <Picture 1..9>。",
-                    template=io.Autogrow.TemplatePrefix(
-                        input=io.Image.Input("ref_image", optional=True),
-                        prefix="ref_image_", min=0, max=9)),
-            ],
-            outputs=[
-                io.Video.Output(display_name="最后分镜视频"),
-                H3Chain.Output(display_name="chain"),
-                io.String.Output(display_name="summary"),
-            ],
-        )
-
-    @classmethod
-    def execute(cls, settings, shots_json, resume=True, handoff_seconds=1.625,
-                max_shots=0, unload_models_after=False, chain_state=None,
-                duration_is_new_content=True, ref_images=None):
-        asset = _script_asset(shots_json)
-        shots = [shot for shot in asset.get("shots_info") or [] if isinstance(shot, dict)]
-        limit = int(max_shots or 0)
-        if limit > 0:
-            shots = shots[:limit]
-        if not shots:
-            raise ValueError("没有可渲染的分镜。")
-        settings = _settings_for_script(settings, asset)
-        ref_override = [t for _, t in ordered_autogrow(ref_images)] if ref_images else None
-        state = chain_state
-        last_video = None
-        for index, shot in enumerate(shots):
-            prompt, seconds, images = _script_segment(
-                asset, shot, ref_images_override=ref_override)
-            handoff = _safe_script_handoff(seconds, handoff_seconds, index == len(shots) - 1)
-            if duration_is_new_content and handoff:
-                # duration in the board is the NEW running time; the replayed opening is
-                # extra material to generate, not screen time.
-                seconds = min(seconds + float(handoff_seconds), 15.0)
-            output = H3RenderSegmentNode.execute(
-                settings, bool(resume), prompt, seconds, handoff, 0,
-                bool(unload_models_after), chain_state=state,
-                images=_images_autogrow(images),
-            )
-            last_video, state = output[0], output[1]
-        return io.NodeOutput(last_video, state, _summarize(state))
-
-
-class H3ScriptRepairSegmentNode(io.ComfyNode):
-    @classmethod
-    def define_schema(cls):
-        return io.Schema(
-            node_id="H3ScriptRepairSegment",
-            display_name="H3 Script Repair Segment",
-            category=CATEGORY,
-            description=(
-                "Repairs one segment from the same Ref2VA Auto JSON.  It automatically "
-                "restores that shot's prompt and ordered references, then pins both joins "
-                "when the repaired shot is not the final one."
-            ),
-            inputs=[
-                H3Settings.Input("settings"),
-                io.String.Input("session_name", default="my_chain"),
-                io.String.Input("shots_json", display_name="分镜资产结果JSON", force_input=True),
-                io.Int.Input("segment_number", default=1, min=1, max=9999),
-                io.Float.Input("handoff_seconds", default=1.625, min=0.0, max=4.0,
-                               step=0.125, round=False, advanced=True),
-                io.Boolean.Input("pin_ending", default=True),
-                io.Boolean.Input(
-                    "duration_is_new_content", default=True, advanced=True,
-                    tooltip="与「H3 Script Batch Render」保持同一口径：开=JSON 的 duration "
-                            "是新增时长，本段按 duration+handoff 生成，长度才对得上原段，"
-                            "pin_ending 才不会因替换段太短而报错。"),
-                H3Chain.Input(
-                    "chain_state", optional=True,
-                    tooltip="把「H3 Script Batch Render」的 chain 接进来：既保证它在本次队列里"
-                            "先跑完（会话 manifest 一定存在），也允许对刚渲染完、manifest 还没"
-                            "落盘的会话直接修复。不接也能修复磁盘上已存在的会话。"),
-                io.Autogrow.Input(
-                    "ref_images", optional=True,
-                    tooltip="可选：覆盖本段分镜的参考图。与 H3 Script Batch Render 的 "
-                            "ref_images 行为一致。",
-                    template=io.Autogrow.TemplatePrefix(
-                        input=io.Image.Input("ref_image", optional=True),
-                        prefix="ref_image_", min=0, max=9)),
-            ],
-            outputs=[
-                io.Video.Output(display_name="video"),
-                H3Chain.Output(display_name="chain"),
-                io.String.Output(display_name="summary"),
-            ],
-        )
-
-    @classmethod
-    def execute(cls, settings, session_name, shots_json, segment_number=1,
-                handoff_seconds=1.625, pin_ending=True, duration_is_new_content=True,
-                chain_state=None, ref_images=None):
-        asset = _script_asset(shots_json)
-        settings = _settings_for_script(settings, asset)
-        shots = [shot for shot in asset.get("shots_info") or [] if isinstance(shot, dict)]
-        index = int(segment_number) - 1
-        if index < 0 or index >= len(shots):
-            raise ValueError("分镜号 %d 超出 JSON 的 %d 个分镜。" % (segment_number, len(shots)))
-        ref_override = [t for _, t in ordered_autogrow(ref_images)] if ref_images else None
-        prompt, seconds, images = _script_segment(
-            asset, shots[index], ref_images_override=ref_override)
-        handoff = _safe_script_handoff(seconds, handoff_seconds, index == len(shots) - 1)
-        if duration_is_new_content and handoff:
-            seconds = min(seconds + float(handoff_seconds), 15.0)
-        return H3RepairSegmentNode.execute(
-            settings, session_name, int(segment_number), prompt, seconds, handoff, 0,
-            bool(pin_ending), images=_images_autogrow(images), chain_state=chain_state,
-        )
-
-
-# ---------------------------------------------------------------------------
-# join
-# ---------------------------------------------------------------------------
-class H3ChainToVideoNode(io.ComfyNode):
-    @classmethod
-    def define_schema(cls):
-        return io.Schema(
-            node_id="H3ChainToVideo",
-            display_name="H3 Chain to Video",
-            category=CATEGORY,
-            description="Joins a session's segments into one cut, dropping each segment's "
-                        "replayed opening so the motion does not stutter once per join.",
-            inputs=[
-                H3Chain.Input("chain"),
-                io.Float.Input("crf", default=14.0, min=0.0, max=51.0, step=1.0, advanced=True,
-                               tooltip="Quality of the joined file. Lower is better and "
-                                       "bigger; 0 is lossless."),
-                io.Float.Input("stabilize", default=0.0, min=0.0, max=1.0, step=0.05,
-                               round=False, advanced=True, tooltip=STABILIZE_TOOLTIP),
-            ],
-            outputs=[io.Video.Output(display_name="video"),
-                     io.String.Output(display_name="path")],
-        )
-
-    @classmethod
-    def execute(cls, chain, crf, stabilize=0.0) -> io.NodeOutput:
-        records = chain["segments"]
-        if not records:
-            raise ValueError("this chain has no rendered segments")
-        parts = []
-        for index, record in enumerate(records):
-            path = os.path.join(chain["dir"], record["file"])
-            if not os.path.exists(path):
-                raise FileNotFoundError(
-                    "segment %d is missing from the session (%s). Re-queue the chain to "
-                    "render it." % (index + 1, path))
-            skip = 0 if index == 0 else int(records[index - 1]["handoff"])
-            parts.append((path, skip))
-
-        out_path = os.path.join(chain["dir"], "%s.mp4" % chain["session"])
-        out_path, frames = video_io.join(parts, out_path, crf=crf,
-                                         stabilize=stabilize)
-        log("joined %d segments -> %d frames (%.2fs) -> %s",
-            len(parts), frames, frames / float(FPS), out_path)
-        return io.NodeOutput(VideoFromFile(out_path), out_path)
 
 
 # ---------------------------------------------------------------------------
@@ -952,6 +947,8 @@ class H3RepairSegmentNode(io.ComfyNode):
                 videos=None, video_audios=None, audios=None,
                 chain_state=None) -> io.NodeOutput:
         settings = _with_model(settings, model)
+        # 与整条渲染同一条兜底：单段修复也要带锚定，否则修出来照样是错的服装。
+        prompt = _with_wardrobe_fixes(prompt)
         segment = _segment_from_widgets(prompt, seconds, handoff_seconds, seed_override,
                                         images, videos, video_audios, audios)
         sess = session_mod.Session(session_name)
@@ -1081,9 +1078,19 @@ class H3RepairSegmentNode(io.ComfyNode):
 
         target = sess.segment_path(index)
         if os.path.exists(target):
-            shutil.copyfile(target,
-                            os.path.join(sess.dir, "seg_%02d.replaced.mp4" % (index + 1)))
-        video_io.save_clip(target, images_out, audio_out)
+            # Back the sidecar up with the mp4, not just the mp4. The join reads
+            # the WAV sidecar whenever one exists, so replacing a segment without
+            # replacing its sidecar would splice the *previous* take's audio into
+            # the film -- and keep a stale file around to do it again.
+            for src in (target, video_io._wav_path(target)):
+                if os.path.exists(src):
+                    shutil.copyfile(src, os.path.join(
+                        sess.dir, "seg_%02d.replaced%s"
+                        % (index + 1, os.path.splitext(src)[1])))
+        # exact_audio=True: a repaired segment must leave a sidecar in step with
+        # its own mp4, for the reason above. master_audio stays on -- it is a
+        # deliverable segment, exactly like one the render node wrote.
+        video_io.save_clip(target, images_out, audio_out, exact_audio=True)
         length = int(images_out.shape[0])
 
         # The handoff clip is NOT rewritten while the ending is pinned: the file on disk
@@ -1098,7 +1105,10 @@ class H3RepairSegmentNode(io.ComfyNode):
                 records[index]["handoff"] = handoff
             tail = take_tail(images_out, audio_out, handoff)
             if tail is not None:
-                video_io.save_clip(sess.tail_path(index), tail[0], tail[1], exact_audio=True)
+                # master_audio=False for the same reason as the render node's
+                # tail: it is a condition, not a deliverable.
+                video_io.save_clip(sess.tail_path(index), tail[0], tail[1],
+                                   exact_audio=True, master_audio=False)
                 video_io.save_latent_tail(sess.tail_path(index),
                                           latent_tail(samples, handoff))
             log("pin_ending was off: segment %d's ending has moved, so segments %d..%d no "
@@ -1115,6 +1125,10 @@ class H3RepairSegmentNode(io.ComfyNode):
             "prompt": resolved["prompt"],
             "repaired": True,
             "ending_pinned": end_anchor is not None,
+            # ★ 2026-09-30：``seed_override`` 非 0 ⇒ 这次修复是**换了种子**重渲的
+            #   （由 director 的修复路径传入）。打标后 `_seed_diff_reason` 不再
+            #   按种子对账，整链重跑时该段保持复用，修复不会白做。
+            **({"reseeded": True} if seed_override else {}),
         })
         sess.save(records, extra={k: v for k, v in manifest.items()
                                   if k not in ("version", "session", "segments")})
@@ -1125,94 +1139,36 @@ class H3RepairSegmentNode(io.ComfyNode):
         return io.NodeOutput(VideoFromFile(target), chain, summary)
 
 
-# ---------------------------------------------------------------------------
-# load an existing session
-# ---------------------------------------------------------------------------
-class H3LoadSessionNode(io.ComfyNode):
-    @classmethod
-    def define_schema(cls):
-        return io.Schema(
-            node_id="H3LoadSession",
-            display_name="H3 Load Session",
-            category=CATEGORY,
-            description="Pick up a session already on disk -- to re-join it, feed the repair "
-                        "workflow, or extend it -- without re-rendering anything.\n\n"
-                        "Its chain output wires into H3 Chain to Video / H3 Repair Segment "
-                        "as before, and now also into another H3 Render Segment's "
-                        "chain_state, to render more shots onto the end of a session that "
-                        "was already finished.",
-            inputs=[
-                io.String.Input("session_name", default="my_chain", multiline=False),
-                io.Combo.Input("handoff_mode", options=["latent", "pixel"],
-                               default="latent", advanced=True,
-                               tooltip="Which form of the last segment's handoff to load, "
-                                       "for extending the session with more H3 Render "
-                                       "Segment nodes. Match the chain that will consume "
-                                       "it. Falls back to 'pixel' if the session has no "
-                                       "latent tail."),
-            ],
-            outputs=[H3Chain.Output(display_name="chain"),
-                     io.String.Output(display_name="summary")],
-        )
-
-    @classmethod
-    def fingerprint_inputs(cls, session_name, handoff_mode="latent"):
-        # The folder changes underneath the graph, so never trust a cached result.
-        sess = session_mod.Session(session_name)
-        try:
-            return "%s:%s" % (os.path.getmtime(sess.manifest_path), handoff_mode)
-        except OSError:
-            return "missing"
-
-    @classmethod
-    def execute(cls, session_name, handoff_mode="latent") -> io.NodeOutput:
-        sess = session_mod.Session(session_name)
-        manifest = sess.load()
-        # 按磁盘补齐缺失的段记录，否则"最后一段"会取到 manifest 里那条旧的，
-        # 续接就从第 2 段接起，把磁盘上已经渲好的 2..4 又覆盖一遍。
-        manifest = sess.reconcile(manifest)
-        if not manifest:
-            raise FileNotFoundError("no manifest in %s" % sess.dir)
-        records = manifest["segments"]
-        last = records[-1]
-        anchor = None
-        # 有没有东西可续接，看尾巴文件在不在（补齐的记录没有 handoff 字段），
-        # 这比问记录里的 handoff 更接近事实。
-        if os.path.exists(sess.tail_path(last["index"])):
-            anchor = _anchor_from_disk(sess, last["index"], handoff_mode)
-        chain = {"session": sess.name, "dir": sess.dir, "segments": records,
-                 "sess_obj": sess, "anchor": anchor, "index": last["index"],
-                 "key": last["key"],
-                 # Segment 1's signature, not the last one's. Extending a session has
-                 # to keep measuring drift against the same shot the original chain
-                 # did, or the new segments would treat an already-drifted ending as
-                 # the reference and lock the drift in instead of correcting it.
-                 "reference": session_mod.signature_from_record(records[0])}
-        return io.NodeOutput(chain, _summarize(chain))
-
-
 class MarqueeDirectorExtension(ComfyExtension):
     async def get_node_list(self):
-        from .h3_segment_timeline_node import H3SegmentTimelineNode
         # Imported lazily: `director` pulls symbols back out of this module, so a
         # module-level import would be circular.
         from . import director
         from . import json_io_nodes
         from . import pack_nodes
+        from . import refine_nodes
+        from . import face_refine
+        from . import translate_nodes
+        # ★ 2026-09-20 旧节点下线。注册表只留现行链路：
+        #     H3 Chain Settings  →  H3 Prompt Pack Parser  →  H3 Director
+        #     （+ MinimaxH3SaveJson 存档）
+        #   H3 Refine（二采精修）/ H3 FaceRefine（脸部修复）都是**可选外接**：
+        #   不接到 Director 的 refine / face_refine 口就不参与渲染，注册它们
+        #   不会改变任何既有链路的行为。
+        #   被删的：H3ScriptBatchRender / H3ScriptRepairSegment / H3ChainToVideo /
+        #   H3LoadSession / H3SegmentTimeline / H3ShotPrompt / H3ShotsBoard /
+        #   H3ShotRenderer —— 全部被 H3Director 取代。
+        #   （MinimaxH3LoadJson 没删，它是 SaveJson 的读回侧，仍在用。）
+        #   H3RenderSegment / H3RepairSegment 的**类**保留（H3Director 内部直接
+        #   调它们的 execute()），但不再注册成独立节点。
         return [
             H3ChainSettingsNode,
-            H3RenderSegmentNode,
-            H3ScriptBatchRenderNode,
-            H3ScriptRepairSegmentNode,
-            H3ChainToVideoNode,
-            H3RepairSegmentNode,
-            H3LoadSessionNode,
-            H3SegmentTimelineNode,
-        ] + prompt_nodes.register_with_extension(self) \
-            + board_nodes.register_with_extension(self) \
-            + director.register_with_extension(self) \
+        ] + director.register_with_extension(self) \
             + pack_nodes.register_with_extension(self) \
-            + json_io_nodes.register_with_extension(self)
+            + translate_nodes.register_with_extension(self) \
+            + json_io_nodes.register_with_extension(self) \
+            + refine_nodes.register_with_extension(self) \
+            + face_refine.register_with_extension(self)
 
 
 # ---------------------------------------------------------------------------

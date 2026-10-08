@@ -19,9 +19,59 @@ import torch
 from comfy_api.input_impl import VideoFromComponents, VideoFromFile
 from comfy_api.util import VideoCodec, VideoComponents, VideoContainer
 
+from . import audio_master
 from .common import FPS
 
 SEGMENT_CRF = 10.0
+
+# ---------------------------------------------------------------------------
+# 接缝音频焊接（2026-09-29，吸收 ComfyUI-H3-Multishot v2.7 的 40 ms seam weld）
+# ---------------------------------------------------------------------------
+#: 每侧淡出/淡入宽度（毫秒）。默认 20 + 20 = 40 ms 总过渡，与 H3-Multishot 的
+#: seam weld 同宽；设 0（或 MARQUEE_SEAM_WELD_MS=0）关闭。
+SEAM_WELD_MS = float(os.environ.get("MARQUEE_SEAM_WELD_MS", "20") or 20)
+
+
+def _weld_seam_fades(pieces, rate):
+    """在相邻段的接缝上做**原位**余弦微淡入淡出，杀掉硬拼接的咔哒声。
+
+    H3-Multishot 的原版是 40 ms 等功率交叉淡化（overlap-add，音频总长缩短一个
+    焊宽）。这里的接缝音频是按帧**精确**对齐的（``_join_audio`` 的结构性承诺：
+    音频哪怕跑长一点，误差也会跨接缝累积），不能缩短，所以改成两侧各
+    ``SEAM_WELD_MS`` 的原位淡出/淡入 —— 总过渡宽度相同，总长一个采样都不动。
+
+    段尾 1.6 s 无台词的设计让接缝基本落在呼吸/配乐里；这里处理的是配乐与
+    环境声在拼接点的波形相位不连续 —— 那是每道接缝一声「咔」的来源。
+    """
+    if SEAM_WELD_MS <= 0 or len(pieces) < 2:
+        return pieces
+    width = int(round(rate * SEAM_WELD_MS / 1000.0))
+    if width <= 0:
+        return pieces
+    welded = 0
+    for i, piece in enumerate(pieces):
+        if piece is None or not getattr(piece, "is_floating_point", lambda: True)():
+            continue
+        n = piece.shape[-1]
+        # 一侧焊宽最多吃掉本段的 1/4：极短段不被淡成静音。
+        w_cap = max(0, n // 4)
+        w_in = min(width, w_cap) if i != 0 else 0              # 非首段：开头淡入
+        w_out = min(width, w_cap) if i != len(pieces) - 1 else 0  # 非末段：结尾淡出
+        if w_in:
+            t = torch.arange(w_in, dtype=piece.dtype)
+            piece[..., :w_in] = piece[..., :w_in] * (
+                0.5 - 0.5 * torch.cos(math.pi * (t + 1) / (w_in + 1)))
+            welded += 1
+        if w_out:
+            t = torch.arange(w_out, dtype=piece.dtype)
+            piece[..., n - w_out:] = piece[..., n - w_out:] * (
+                0.5 - 0.5 * torch.cos(math.pi * (w_out - t) / (w_out + 1)))
+            welded += 1
+    if welded:
+        logging.info("[H3 Continuous] join audio: seam weld on %d join(s) "
+                     "(%.0f ms cosine fade per side)",
+                     sum(1 for _ in pieces[1:]), SEAM_WELD_MS)
+    return pieces
 
 
 def latent_path(path):
@@ -68,9 +118,55 @@ def load_latent_tail(path):
             "audio_latent": payload["audio"].float() if "audio" in payload else None}
 
 
-def save_clip(path, images, audio, fps=FPS, crf=SEGMENT_CRF, exact_audio=False):
-    """Write a clip. ``exact_audio`` adds a sidecar WAV -- see ``_wav_path``."""
+def _master_audio(audio):
+    """Return ``audio`` brought to delivery level, or the input if that fails.
+
+    The soundtrack is mastered **here**, at save time, and not only at the join.
+    The finished film is not the reason -- the join handles that either way. The
+    reason is the single segment: segments are reviewed one at a time, and a raw
+    one measures 7-8 LU below delivery level, which is exactly what reads as
+    thin and weak on its own. See ``audio_master.master_segment``.
+
+    Never mutates its input. The caller's ``audio`` stays the raw signal, and
+    that matters: ``take_tail`` cuts the handoff from it, and the handoff is the
+    next segment's conditioning input rather than an excerpt for listening.
+    """
+    if not audio_master.ENABLED or not isinstance(audio, dict):
+        return audio
+    waveform = audio.get("waveform")
+    rate = int(audio.get("sample_rate") or 0)
+    if waveform is None or rate <= 0 or not hasattr(waveform, "ndim"):
+        return audio
+    try:
+        mastered = _master_tensor(waveform, rate, audio_master.master_segment)
+    except Exception as exc:
+        # A finished render is worth more than a loud one: anything unexpected
+        # leaves the soundtrack exactly as the model produced it.
+        logging.warning("[H3 Continuous] segment mastering skipped (%s: %s)",
+                        type(exc).__name__, exc)
+        return audio
+    if mastered is waveform:          # _master_tensor declines rather than raise
+        return audio
+    out = dict(audio)
+    out["waveform"] = mastered
+    return out
+
+
+def save_clip(path, images, audio, fps=FPS, crf=SEGMENT_CRF, exact_audio=False,
+              master_audio=True):
+    """Write a clip.
+
+    ``exact_audio`` adds a sidecar WAV -- see ``_wav_path``.
+
+    ``master_audio`` brings the soundtrack to delivery level *before* the mux, so
+    the mp4 and the sidecar carry the same signal and a single segment is already
+    listenable when it is opened on its own. Pass ``False`` for a handoff tail:
+    that file is the next segment's conditioning input, not an excerpt, and
+    mastering it would move the condition.
+    """
     os.makedirs(os.path.dirname(path), exist_ok=True)
+    if audio is not None and master_audio:
+        audio = _master_audio(audio)
     components = VideoComponents(images=images, audio=audio, frame_rate=Fraction(fps))
     tmp = path + ".tmp.mp4"
     VideoFromComponents(components).save_to(
@@ -356,12 +452,12 @@ def resolve_join_points(parts, fps=FPS):
         if seam_diff is not None:
             # 只记录，不判定。段内本来就有硬切（实测段内 p99 可达 0.18，比接缝
             # 还大），拿"段内中位数"当基线必然误报 —— 判定要放到能看全段帧间差
-            # 分布的地方做（tools/h3_qc.py 用段内 p99 比）。
+            # 分布的地方做（tools/check_joins.py 用接缝前后局部窗口的中位数比）。
             note = {"segment": idx + 1, "skip_frames": skip,
                     "seam_diff": round(seam_diff, 5),
                     "inner_median": round(inner_base or 0.0, 5)}
             logging.info("[H3 Continuous] 段%d 接缝差异 %.4f（段内中位数 %.4f，"
-                         "注意段内硬切天然更大，判定请看 h3_qc）",
+                         "注意段内硬切天然更大，判定请看 tools/check_joins.py）",
                          idx + 1, seam_diff, inner_base or 0.0)
             notes.append(note)
         aligned.append((path, skip))
@@ -413,17 +509,76 @@ def join(parts, out_path, fps=FPS, crf=14.0, stabilize=0.0):
     return out_path, frames.total
 
 
+def _master_tensor(waveform, rate, entry, **kwargs):
+    """Run one of ``audio_master``'s numpy entry points on a ComfyUI waveform.
+
+    Takes and returns (batch, channels, samples) -- or (channels, samples), which
+    some callers hand over. Returns the input **untouched** if the shapes do not
+    line up, and raises only what the caller should see, so the caller can decide
+    how loudly to complain.
+    """
+    batched = waveform.ndim == 3
+    signal = waveform[0] if batched else waveform
+    out = entry(signal.detach().cpu().numpy(), rate, **kwargs)
+    if np.shape(out) != tuple(signal.shape):
+        return waveform
+    out = torch.from_numpy(np.ascontiguousarray(out))
+    return out.unsqueeze(0) if batched else out
+
+
+def _is_mastered_tensor(waveform, rate):
+    """True when a ComfyUI waveform already sits at the delivery target.
+
+    Same shape handling as ``_master_tensor``, and deliberately total: an
+    unmeasurable signal answers *no*, so the caller masters it. That is the safe
+    direction -- the cost of mastering twice is a little shaping, the cost of not
+    mastering is a segment 8 LU down in the finished film.
+    """
+    try:
+        batched = waveform.ndim == 3
+        signal = waveform[0] if batched else waveform
+        return audio_master.is_mastered(signal.detach().cpu().numpy(), rate)
+    except Exception:
+        return False
+
+
 def _join_audio(parts, fps):
     """Concatenate the soundtracks, each cut to exactly its own kept frames.
 
     Every part is trimmed or padded to its video length before it is appended.
     Letting audio run even a fraction long is how a chain drifts: the error is not
     corrected at the next join, it accumulates across all of them.
+
+    Two things happen here beyond concatenation, both of them structural rather
+    than cosmetic -- see ``audio_master`` for the measurements behind them:
+
+    * Each segment is read from its **WAV sidecar** when one exists. The segment
+      mp4 carries AAC, and reading that back means the soundtrack is encoded
+      twice on its way to the finished film (once per segment, once for the
+      join). The sidecars are already written for handoff tails; writing them for
+      segments too removes one whole generation.
+    * Each segment is loudness-matched **before** it is appended. H3 renders every
+      segment in its own pass and the per-segment normaliser in ComfyUI never
+      fires on this model, so the segments arrive 7.8 LU apart. A single gain over
+      the joined track cannot repair that; it only moves the whole film.
+    * Segments that are *already* at the target are left alone. They reach that
+      state by being mastered in ``save_clip`` when they were written, which is
+      what makes a single segment listenable before the film exists; re-shaping
+      them here would spend their headroom a second time. ``is_mastered`` is the
+      test, so a segment written by an older build -- still raw -- is still fixed.
     """
     rate = None
     pieces = []
+    from_sidecar = 0
     for path, skip in parts:
-        clip_audio = read_audio(path)
+        # Prefer the float-PCM sidecar: reading the mp4 means a second AAC
+        # generation on the way to the finished film.
+        sidecar = _wav_path(path)
+        clip_audio = read_audio(sidecar) if os.path.exists(sidecar) else None
+        if clip_audio is not None:
+            from_sidecar += 1
+        else:
+            clip_audio = read_audio(path)
         kept = max(0, frame_count(path) - skip)
         want_seconds = kept / float(fps)
         if clip_audio is None:
@@ -448,15 +603,62 @@ def _join_audio(parts, fps):
     if rate is None:
         return None
 
+    logging.info("[H3 Continuous] join audio: %d/%d segment(s) from WAV sidecar "
+                 "(no second AAC generation), %d from mp4",
+                 from_sidecar, len(parts), len(parts) - from_sidecar)
+
     channels = next((p.shape[1] for p, _ in pieces if p is not None), 1)
     filled = []
+    matched = 0
     for piece, seconds in pieces:
         if piece is None:
             # A segment with no audio track still occupies time in the cut.
-            filled.append(torch.zeros(1, channels, int(round(seconds * rate))))
-        else:
-            filled.append(piece)
-    return {"waveform": torch.cat(filled, dim=-1), "sample_rate": rate}
+            piece = torch.zeros(1, channels, int(round(seconds * rate)))
+        if audio_master.ENABLED:
+            try:
+                # Segments are mastered when they are saved, so most of them are
+                # already at the target by the time they get here and re-shaping
+                # them would only spend their headroom a second time. The guard
+                # is what lets both passes coexist: a segment an older build
+                # wrote is still raw and gets fixed, a current one is left alone.
+                if _is_mastered_tensor(piece, rate):
+                    matched += 1
+                else:
+                    piece = _master_tensor(piece, rate, audio_master.master_segment)
+            except Exception as exc:
+                logging.warning("[H3 Continuous] segment mastering skipped (%s: %s)",
+                                type(exc).__name__, exc)
+        filled.append(piece)
+    # 接缝焊接：相邻段交界处的原位微淡入淡出（长度不变，只杀拼接咔哒声）。
+    filled = _weld_seam_fades(filled, rate)
+    waveform = torch.cat(filled, dim=-1)
+
+    if audio_master.ENABLED and matched:
+        logging.info("[H3 Continuous] join audio: %d/%d segment(s) already at "
+                     "delivery level (mastered when saved), %d matched here",
+                     matched, len(pieces), len(pieces) - matched)
+
+    # Last stop before the muxer, and the only point where the finished
+    # soundtrack exists as one signal. The high-pass is skipped because the
+    # per-segment pass already did it (two 2nd-order sections at the same corner
+    # are a 4th-order high-pass, whose step overshoot measurably *raises* the
+    # true peak), the tone shaping is skipped because the per-segment pass
+    # already applied it (applying a 2.5 dB shelf and a 3.5 dB dip twice makes a
+    # 5 dB shelf and a 7 dB dip), and the pre-limiter is skipped because the
+    # segments are already mastered -- applying it again cost 3.6 dB of headroom
+    # for nothing.
+    if audio_master.ENABLED:
+        try:
+            waveform = _master_tensor(waveform, rate, audio_master.master,
+                                      hp_hz=None, pre_limit=False,
+                                      shape_tone=False)
+        except Exception as exc:
+            # Losing a finished render to an audio polish step would be a bad
+            # trade, so anything unexpected leaves the mix exactly as it was.
+            logging.warning("[H3 Continuous] audio mastering skipped (%s: %s)",
+                            type(exc).__name__, exc)
+
+    return {"waveform": waveform, "sample_rate": rate}
 
 
 def last_frame(path):

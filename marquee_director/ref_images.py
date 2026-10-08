@@ -41,9 +41,10 @@ MAX_REFERENCE_IMAGES = 9
 CANVAS_STRIDE = 32
 
 # 节点输入侧的键名前缀（Autogrow TemplatePrefix）。
+# ★ 这是**唯一**的前缀。以前这里还有个 REF_IMAGE_KEY_PREFIX = "reference_image_"
+#   —— 不仅全包零引用，值还和实际用的 "ref_image_" 对不上（routes.py 与
+#   Autogrow 都是 ref_image_），留着只会误导。2026-09-20 删。
 AUTOGROW_PREFIX = "ref_image_"
-# 下游 / 文案里用的语义前缀（与参照包保持一致）。
-REF_IMAGE_KEY_PREFIX = "reference_image_"
 
 
 def slot_label(index: int) -> str:
@@ -188,50 +189,10 @@ def resolve_shot_refs(shot, slots, warnings=None, loader=None) -> list:
     return picks
 
 
-def plan_long_edge(height: int, width: int, max_px) -> tuple:
-    """算出"只缩不放 + 对齐 32"之后的目标尺寸。纯算术，可离线测。
-
-    返回 ``(new_h, new_w, changed)``。``max_px`` 为 ``None``/0 时只做对齐。
-    """
-    height, width = int(height), int(width)
-    scale = 1.0
-    if max_px:
-        limit = int(max_px)
-        longest = max(height, width)
-        if longest > limit:
-            scale = float(limit) / float(longest)
-
-    def snap(value: int) -> int:
-        if scale == 1.0:
-            snapped = int(round(value / CANVAS_STRIDE) * CANVAS_STRIDE)
-        else:
-            snapped = int(round(value * scale / CANVAS_STRIDE) * CANVAS_STRIDE)
-        return max(CANVAS_STRIDE, snapped)
-
-    new_h, new_w = snap(height), snap(width)
-    return new_h, new_w, (new_h != height or new_w != width)
-
-
-def limit_ref_image_dict(images: dict, max_px, fit=None) -> tuple:
-    """对稀疏槽位字典逐张做长边缩放（只缩不放 + 对齐 32）。
-
-    ``fit`` 是真正干活的缩放函数，签名 ``(tensor, max_px) -> (tensor, changed,
-    orig_wh, new_wh)``，由 ``director._fit_ref_image`` 提供（它要用
-    ``comfy.utils.common_upscale``，本模块不能依赖）。不传就原样返回 ——
-    这样本模块在没有 torch/comfy 的环境里也能 import 和被测试。
-    """
-    if not images:
-        return images, 0
-    if fit is None:
-        return images, 0
-    changed = 0
-    out: dict = {}
-    for slot, tensor in images.items():
-        fitted, did_change = fit(tensor, max_px)[:2]
-        if did_change:
-            changed += 1
-        out[slot] = fitted
-    return out, changed
+# 2026-09-20 清理：plan_long_edge / limit_ref_image_dict 全包零引用，且
+# plan_long_edge 的「只缩不放 + 对齐 32」逻辑与 director._fit_ref_image 逐行重复
+# （连 CANVAS_STRIDE 都各存一份）。真正的实现在 director._fit_ref_image ——
+# 那边要用 comfy.utils.common_upscale，本模块不依赖 torch/comfy，搬不过来。
 
 
 def slot_labels(slots, ref_classify) -> dict:

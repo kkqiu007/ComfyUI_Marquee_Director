@@ -13,19 +13,87 @@ PACK 头部（项目 / 模式 / 总时长 / 段数 / 画幅）、参考图分类
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
+import threading
 import time
 
 from aiohttp import web
 
 from . import prompt_pack as pp
-from .common import safe_session_name
+from .common import log, safe_session_name
 
-# 不再硬编码任何输出根。输出目录一律跟 folder_paths.get_output_directory()，
-# 用户换实例/换配置都能自动对上。保留这个常量只是为了让老引用不炸。
-EXTRA_OUTPUT_ROOTS = []
+# 输出目录一律跟 folder_paths.get_output_directory()，不硬编码任何输出根。
+# （2026-09-20 清理：这里的 EXTRA_OUTPUT_ROOTS = [] 是「怕老引用炸」留下的空壳，
+#   实测全包零引用 —— 老引用早就没了。）
+
+
+# ---------------------------------------------------------------------------
+# 缓存层
+# ---------------------------------------------------------------------------
+# 面板不是「点一次解析一次」，而是**一直在问**：PACK 文本框每敲一下就发一次
+# /h3/pack_preview（前端 debounce 1200ms）、改语言标签再发一次、点刷新再发一次，
+# 时间线/参考图/功能规划三个版块共用同一份结果。而 _pack_preview 一次要跑
+# **两遍**全量解析（en 侧给 Director 渲染用、zh 侧给编辑器对照用）—— 实测一份
+# 6 段 PACK 单侧 18ms，两侧 36ms，外加 shot_script_segment_ranges 与
+# lang_section_available。文本没变时这些全是白烧的 CPU。
+#
+# 所以按「内容哈希」缓存：同一个 PACK 文本 + 同一个会话名 → 同一个结果。
+# 键里必须带 session_name —— 它参与 safe_session_name()，同名不同值会算出
+# 不同会话，漏掉就会串目录。
+#
+# ★ 为什么用「复制后再返回」而不是直接返回缓存对象：返回的 dict 会被
+#   web.json_response 序列化，调用方（_pack_rebuild 等）也可能就地改。共享
+#   同一个 dict 的话，一次调用方的误改会污染后续所有命中。深拷贝在这里比重新
+#   解析便宜两个数量级。
+_PREVIEW_CACHE_MAX = 32
+_preview_cache = {}          # key -> (stamp, result)
+_preview_lock = threading.Lock()
+
+
+def _content_key(*parts) -> str:
+    """内容寻址的缓存键。空值也参与哈希（None 与 "" 必须是不同的键）。"""
+    h = hashlib.sha1()
+    for p in parts:
+        h.update(b"\x00")
+        h.update(str(p if p is not None else "\x00None").encode("utf-8", "replace"))
+    return h.hexdigest()
+
+
+def _cache_get(store, key):
+    with _preview_lock:
+        hit = store.get(key)
+        if hit is None:
+            return None
+        store[key] = hit          # 重新插入 → LRU 顺序（dict 保序）
+        return hit[1]
+
+
+def _cache_put(store, key, value, maxsize=_PREVIEW_CACHE_MAX):
+    with _preview_lock:
+        store[key] = (time.time(), value)
+        while len(store) > maxsize:
+            store.pop(next(iter(store)))     # 丢最久未用的
+
+
+def _cached_preview(text: str, session_name: str = "") -> dict:
+    """/h3/pack_preview 的带缓存版本。键 = PACK 全文 + 会话名。
+
+    缓存里存的是 **JSON 字符串**，返回时再 ``json.loads`` 还原成一份新对象。
+    为什么不直接存 dict：返回值会被 web.json_response 序列化，也可能被调用方
+    就地修改；共享同一个 dict 的话，一次误改会污染后续所有命中（表现为"改了
+    PACK 面板却还是旧内容"，且再也刷不掉）。一次序列化往返比重新解析便宜两个
+    数量级（实测命中路径 <1ms，而单侧解析就要 18ms）。
+    """
+    key = _content_key(text, session_name)
+    hit = _cache_get(_preview_cache, key)
+    if hit is not None:
+        return json.loads(hit)              # 防调用方就地改坏缓存
+    result = _pack_preview(text, session_name)
+    _cache_put(_preview_cache, key, json.dumps(result))
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -36,12 +104,26 @@ def _pack_preview(text: str, session_name: str = "") -> dict:
     # 中文版给前端「六段实时编辑」面板做对照源 / 编辑目标。两段按 index 对齐。
     en_segments, en_meta, issues = pp.parse_pack(text or "", language="en")
     zh_segments, _, _ = pp.parse_pack(text or "", language="zh")
-    header = pp.pack_header(en_meta)
+    # 传 en_segments：无 PACK 头部的输入（[Shot N] 布局）靠它反推段数/总时长
+    header = pp.pack_header(en_meta, en_segments)
+    # ★ 整段式 [Shot N] 脚本**没有** ########## 段标题 —— 前端「分镜时间线」
+    #   靠段标题定位原文块（h3LocateSegRange），在这类稿子上一个段都切不出来：
+    #   编辑器只能显示后端兜底拼的内容，且 doWrite 会因 fromFallback 拒绝写回
+    #   （表现：时间线上改了提示词，什么都没发生）。
+    #   所以把每段在**原文里的行区间**一起下发，前端拿它当兜底定位。
+    #   分段 PACK（########## 形式）用不到，给 None。
+    pack_ranges = []
+    if str((en_meta or {}).get("layout") or "") == pp.SHOT_SCRIPT_LAYOUT:
+        try:
+            pack_ranges = pp.shot_script_segment_ranges(text or "")
+        except Exception:                                     # pragma: no cover
+            pack_ranges = []
     segs = []
     for idx, seg in enumerate(en_segments):
         fields = seg.get("fields") or {}
         body = str(fields.get("detailed_description") or "")
         zh_fields = (zh_segments[idx].get("fields") or {}) if idx < len(zh_segments) else {}
+        rng = pack_ranges[idx] if idx < len(pack_ranges) else None
         # 末段不要求无台词尾巴，其余每段最后 1.6s 必须没有新台词
         tail_clean = bool(re.search(
             r"(?i)no\s+new\s+(?:spoken\s+word|dialogue|line)", body[-400:]))
@@ -66,6 +148,10 @@ def _pack_preview(text: str, session_name: str = "") -> dict:
             # 每段真正进模型的正文：subject_definitions 也会拼进首段提示词，
             # 所以取详细描述 + 角色定义拼合后的全文更贴近渲染实际。
             "prompt": body,
+            # ★ 该段在**原文**里的行区间 [start, end)（整段式 [Shot N] 脚本才有；
+            #   分段 PACK 为 None）。前端 h3LocateSegRange 的兜底定位用它 ——
+            #   没有它，[Shot N] 稿子上的分镜提示词编辑器既切不出内容也写不回去。
+            "pack_range": [int(rng[0]), int(rng[1])] if rng else None,
         })
         # ★ 第 30 轮：整段正文为空是**致命**的（渲染出来全是默认运镜），
         #   但以前面板一个字都不报 —— 用户只看到空提示词框，分不清是
@@ -82,11 +168,26 @@ def _pack_preview(text: str, session_name: str = "") -> dict:
                 % seg["id"]]
     total_new = sum(s["new_seconds"] for s in segs)
     total_gen = sum(s["gen_seconds"] for s in segs)
+    # 节点自动修过的项（不是问题，是成功日志）—— 前端要单独显示，别混进 issues。
+    fixes = []
+    for seg in en_segments:
+        for fix in (seg.get("fixes") or ()):
+            fixes.append("%s：%s" % (seg["id"], fix))
     declared = None
     try:
         declared = int(str(header.get("segments") or "").strip())
     except (TypeError, ValueError):
         declared = None
+    # ★ 面板拿到的永远是**源文**（①-A 的文本框），而 ①-B 真正吃的是上游
+    #   「剧本英译」节点算出来的英文单版。两者语言不同是设计使然，不是故障 ——
+    #   但报告里得说清楚，否则用户会以为英译没生效。
+    if re.search(r"[\u4e00-\u9fff]", re.sub(r"<d>.*?</d>", "", text or "",
+                                            flags=re.S | re.I)):
+        issues = list(issues) + [
+            "面板这里显示的是**源文**（含中文）。①-A 与 ①-B 之间的「剧本英译」"
+            "节点会在注入 H3 Director 前把它改写成英文单版（SKILL §1.3，"
+            "台词 <d>…</d> 保留原语言）；英译结果与逐块情况见那个节点的"
+            "「英译报告」输出口，以及 ①-B 的「解析报告」。"]
     if declared is not None and declared != len(segs):
         issues = list(issues) + [
             "头部写的段数是 %d，实际解析出 %d 段 —— 按实际段数渲染，"
@@ -102,6 +203,10 @@ def _pack_preview(text: str, session_name: str = "") -> dict:
         "ok": True,
         "header": header,
         "segments": segs,
+        # ★ ref_slots / ref_slot_count **不下发**（2026-09-24 18:23 回退）：
+        #   面板按用户定版只显示 6 项头部，不渲染参考图槽；需要槽位信息的
+        #   调用方（参考图版块、check_workflow）走 segments[*].pictures 或
+        #   prompt_pack.pack_info_json 即可，不改后端保持最小改动面。
         "total_new_seconds": round(total_new, 3),
         "total_gen_seconds": round(total_gen, 3),
         # 会话名由后端算好下发：H3Director 就是拿它当 chain 的 session 落盘的。
@@ -111,6 +216,24 @@ def _pack_preview(text: str, session_name: str = "") -> dict:
         # 否则解析器和预览会算出两个名字。
         "session_name": safe_session_name(session_name, header.get("project")),
         "issues": list(issues),
+        "fixes": fixes,
+        # ★ 这份 PACK 里**真的有**哪几侧内容。现行 minimax-h3-shot-segment 技能
+        #   只交付英文单版（没有 [1] 中文版 / [2] 英文版 分块），此时 has_zh 为
+        #   False —— 前端据此**藏掉「中文 ZH」标签**。
+        #   以前不区分：zh 侧解析在单语 PACK 上会退回英文内容，于是"中文"标签里
+        #   显示的是英文；用户在那儿一编辑，lang="zh" 回写还会打到英文段块上
+        #   （实测 PACK 44079 → 31643 字符、S01 英文正文清零）。
+        "has_en": bool(pp.lang_section_available(text or "", "en")),
+        "has_zh": bool(pp.lang_section_available(text or "", "zh")),
+        # 完整 PACK 文本（头部 + 段标题 + 六段正文 + END OF PACK）。
+        # 面板只会把每段正文送进 H3，但**人**要能核对的东西在头部和段标题里：
+        # 段数、总时长、以及 `S02 / 11s+1.6=12.6s` 这种一眼看出规划对不对的
+        # 写法。以前这两样根本没产出，只能从正文里数时间码反推。
+        "pack_text": pp.pack_text(
+            en_segments if en_segments else segs, en_meta,
+            project=header.get("project") or session_name or None,
+            mode=header.get("mode") or None,
+            aspect=header.get("aspect") or None),
     }
 
 
@@ -143,6 +266,30 @@ def _h3_lora_suggest(loras) -> list:
     return hot + cold
 
 
+def _loras_cached(ttl: float = 10.0) -> dict:
+    """/h3/loras 的带缓存版本。
+
+    LoRA 列表来自 ``folder_paths.get_filename_list`` —— 那是一次目录扫描，
+    而面板打开下拉框、每次重建参考图版块都会重拉一遍。用户在渲染中途往
+    loras 目录里丢文件是常事，所以不能永久缓存，用 10s TTL：既压掉同一
+    秒内的重复扫描，又不会让人等太久才看到新文件。
+    """
+    store = _lora_cache
+    now = time.time()
+    with _preview_lock:
+        hit = store.get("v")
+        if hit is not None and (now - hit[0]) < ttl:
+            return hit[1]
+    names = _lora_list()
+    payload = {"ok": True, "loras": names, "suggested": _h3_lora_suggest(names)}
+    with _preview_lock:
+        store["v"] = (now, payload)
+    return json.loads(json.dumps(payload))
+
+
+_lora_cache = {}
+
+
 # ---------------------------------------------------------------------------
 # /h3/input_images —— 参考图选择器
 # ---------------------------------------------------------------------------
@@ -168,6 +315,29 @@ def _input_images(limit=400) -> list:
             break
     out.sort(key=lambda item: -item["mtime"])
     return [{"name": item["name"]} for item in out]
+
+
+def _input_images_cached(ttl: float = 8.0) -> list:
+    """/h3/input_images 的带缓存版本（8s TTL）。
+
+    这一段是所有只读端点里最贵的：``os.walk`` 整棵 input 树 + **每个文件一次
+    ``os.path.getmtime`` 系统调用**，只为拿到一个按新到旧排序的文件名列表。
+    input 目录往往有几百上千张图，而面板每重建一次参考图版块就拉一次。
+    TTL 取 8s：同一轮编辑里的重复请求全部命中，而用户刚拖进来的新图最多
+    8 秒后就会出现在列表里 —— 这个延迟对"挑一张参考图"完全无感。
+    """
+    now = time.time()
+    with _preview_lock:
+        hit = _input_cache.get("v")
+        if hit is not None and (now - hit[0]) < ttl:
+            return [dict(item) for item in hit[1]]
+    names = _input_images()
+    with _preview_lock:
+        _input_cache["v"] = (now, names)
+    return [dict(item) for item in names]
+
+
+_input_cache = {}
 
 
 # ---------------------------------------------------------------------------
@@ -227,11 +397,17 @@ def _find_session(name: str):
     """
     try:
         from .session import sanitize
-    except Exception:                                            # pragma: no cover
-        def sanitize(text):
-            text = re.sub(r"[^A-Za-z0-9._-]+", "_", (text or "").strip())
-            text = re.sub(r"\.{2,}", "_", text)
-            return text.strip("._") or "session"
+    except Exception as exc:                                     # pragma: no cover
+        # ★ 兜底必须与 session.sanitize **同源**。以前这里内联了一套
+        #   ``[^A-Za-z0-9._-]+`` 的 ASCII 规则，把 CJK 全压成下划线 ——
+        #   与落盘侧（保留 CJK）**相反**：一进这条兜底路径目录就分叉，
+        #   渲染写 ``v18_en_v10``、面板查 ``曹贼的性价比_v18_en_v10``，
+        #   表现为「断点渲染又从第 1 段开始」+ 修复节点报 no handoff clip。
+        #   ``common.safe_session_name`` 就是同源实现（保留 CJK / 压非法字符 /
+        #   截断 60），直接复用它。
+        log("routes: 导入 session.sanitize 失败（%s），改用同源的 safe_session_name",
+            exc)
+        sanitize = safe_session_name
 
     raw = (name or "").strip()
     candidates = []
@@ -241,14 +417,19 @@ def _find_session(name: str):
     # 兜底：目录名被截断到 64 字符时，按前缀再找一次
     if raw and len(raw) > 64:
         candidates.append(sanitize(raw)[:64])
+    flat = sanitize(raw).lower().replace("_", "")
 
-    for root in _session_dirs():
+    # ★ _session_dirs() 提到循环外：它每次都要 import folder_paths、读配置、
+    #   对每个根做 isdir。原来它在 `for cand in candidates` 里面，一个会话名
+    #   要重复算 2~3 遍同样的目录列表（面板每次拉 /h3/session 都重来一轮）。
+    #   顺带把只在兜底里用到的 flat 也提到循环外 —— 它同样调了一次 sanitize。
+    roots = _session_dirs()
+    for root in roots:
         for cand in candidates:
             path = os.path.join(root, cand)
             if os.path.isdir(path):
                 return path
         # 最后再放宽：不区分大小写 + 去下划线比一遍
-        flat = sanitize(raw).lower().replace("_", "")
         if flat:
             try:
                 for entry in os.listdir(root):
@@ -262,6 +443,28 @@ def _find_session(name: str):
 
 
 def _ffprobe_seconds(path):
+    """视频时长（秒）。
+
+    ★ 必须按 (path, mtime, size) 缓存，且要**在起子进程之前**查。
+      ffprobe 是一次 fork + 一次进程等待，最快也要几十毫秒；而 /h3/session
+      在渲染途中被前端反复拉取（每段完成一次、断点渲染前一次、点刷新一次），
+      一条 6 段的会话就是每次 6 个子进程。渲染正忙时这些 fork 还会和采样
+      抢 CPU。段文件一旦落盘就不再改动（重渲会换 mtime），所以按 mtime+size
+      缓存是安全的 —— 内容变了这两个值必然变。
+
+      缓存无上限地按路径累积也没问题：会话目录里的段数是有限的，且用 LRU
+      兜住极端情况。
+    """
+    try:
+        st = os.stat(path)
+        stamp = (st.st_mtime, st.st_size)
+    except OSError:
+        stamp = None
+    key = os.path.abspath(path)
+    if stamp is not None:
+        hit = _cache_get(_ffprobe_cache, key)
+        if hit is not None and hit[0] == stamp:
+            return hit[1]
     try:
         import subprocess
 
@@ -269,9 +472,17 @@ def _ffprobe_seconds(path):
             ["ffprobe", "-v", "error", "-show_entries", "format=duration",
              "-of", "default=noprint_wrappers=1:nokey=1", path],
             capture_output=True, text=True, timeout=20)
-        return round(float(out.stdout.strip()), 3)
+        value = round(float(out.stdout.strip()), 3)
     except Exception:
-        return None
+        value = None
+    if stamp is not None:
+        # 探测失败（返回 None）也缓存：ffprobe 缺失或文件损坏时，重试一万次
+        # 也是同样的结果，没必要每次请求都再 fork 一次然后失败。
+        _cache_put(_ffprobe_cache, key, (stamp, value), maxsize=512)
+    return value
+
+
+_ffprobe_cache = {}
 
 
 def _load_panel_meta(path: str) -> dict:
@@ -280,15 +491,40 @@ def _load_panel_meta(path: str) -> dict:
     清完目录后只剩视频，时间线就变成一排没有信息的缩略图。这里把每段「讲了
     什么 / 谁在说话」从存档里捞回来 —— 优先 panel.json（精简），退回
     storyboard.json / shots.json。都没有就返回空，面板只显示时长，不会报错。
+
+    ★ 按 (文件, mtime, size) 缓存：/h3/session 会被反复拉，而这三个存档
+      文件在一次渲染过程中只被后端写一次（写完 mtime 就变了，缓存自动失效），
+      读侧却要反复 open + json.load。storyboard.json 动辄几百 KB。
     """
     for fname in ("panel.json", "storyboard.json", "shots.json"):
         full = os.path.join(path, fname)
         if not os.path.isfile(full):
             continue
         try:
+            st = os.stat(full)
+            stamp = (st.st_mtime, st.st_size)
+        except OSError:
+            continue
+        key = full
+        hit = _cache_get(_panel_meta_cache, key)
+        if hit is not None and hit[0] == stamp:
+            rows_out = hit[1]
+            if rows_out is not None:
+                # ★ 缓存里存的是「键值对列表」的 JSON 字符串，返回时反序列化出
+                #   一份全新对象。两个细节都不能省：
+                #     · 存 list-of-pairs 而不是 dict —— json 会把 int 键变成
+                #       字符串，"1" 永远匹配不上调用方的 panel.get(1)，时间线
+                #       的每段摘要会全空。
+                #     · 反序列化而不是浅拷贝 —— out[i]["speakers"] 是 list，
+                #       浅拷贝下调用方 append 一次说话人就写进缓存本体，
+                #       之后所有请求都带着这条脏数据（面板正是读它画徽标）。
+                return {int(k): v for k, v in json.loads(rows_out)}
+            continue                      # 缓存过一次「解析不出内容」
+        try:
             with open(full, encoding="utf-8") as fh:
                 data = json.load(fh)
         except (OSError, ValueError):
+            _cache_put(_panel_meta_cache, key, (stamp, None), maxsize=32)
             continue
         rows = None
         if isinstance(data, dict):
@@ -297,6 +533,7 @@ def _load_panel_meta(path: str) -> dict:
         elif isinstance(data, list):
             rows = data
         if not rows:
+            _cache_put(_panel_meta_cache, key, (stamp, None), maxsize=32)
             continue
         out = {}
         for i, row in enumerate(rows, start=1):
@@ -318,8 +555,14 @@ def _load_panel_meta(path: str) -> dict:
                       "speakers": speakers if isinstance(speakers, list) else [],
                       "seconds": row.get("duration") or row.get("seconds")}
         if out:
+            _cache_put(_panel_meta_cache, key,
+                       (stamp, json.dumps([[i, out[i]] for i in sorted(out)])),
+                       maxsize=32)
             return out
     return {}
+
+
+_panel_meta_cache = {}
 
 
 def _session_state(name: str) -> dict:
@@ -404,12 +647,35 @@ _registered = False
 # ---------------------------------------------------------------------------
 # /h3/pack_rebuild —— PACK 实时编辑器：把编辑后的六字段回写进整份 PACK
 # ---------------------------------------------------------------------------
+def _reject_missing_lang(text: str, lang):
+    """这份 PACK 没有 ``lang`` 那一侧内容时，返回"不改文本"的拒绝结果。
+
+    两个写回端点（``_pack_rebuild`` / ``_pack_apply_block``）的守卫逐字相同，
+    合成一处 —— 拦截判据一旦分叉，就会出现"一个拦了另一个没拦"的静默数据
+    损坏（实测 PACK 44079 → 31643 字符、S01 英文正文清零）。
+    """
+    if pp.lang_section_available(text or "", lang):
+        return None
+    return {
+        "ok": False, "text": text or "", "unchanged": True,
+        "warning": "这份 PACK 没有「%s」版块，本次编辑未写回（原文一字未改）。"
+                   "现行 minimax-h3-shot-segment 技能只交付英文单版。"
+                   % ("中文" if lang == "zh" else "英文"),
+    }
+
+
 def _pack_rebuild(text: str, segments: list, lang=None) -> dict:
     """segments=[{"index": n, "fields": {...}}] → 重拼后的 PACK 文本。
 
     ``lang`` 透传给 ``pp.rebuild_pack``：``"zh"``/``"en"`` 命中对应语言版块，
     ``None`` 命中最后一次出现的段标题（双语 PACK 默认英文版）。
+
+    ★ 指定了 ``lang`` 但这份 PACK 里没有那一侧内容时，**不改文本**，回一个
+    带 ``warning`` 的结果让前端说清楚。见 ``_reject_missing_lang``。
     """
+    blocked = _reject_missing_lang(text, lang)
+    if blocked is not None:
+        return blocked
     rebuilt = pp.rebuild_pack(text or "", segments, lang)
     return {"ok": True, "text": rebuilt}
 
@@ -418,7 +684,11 @@ def _pack_apply_block(text: str, blocks: list, lang=None) -> dict:
     """blocks=[{"index": n, "body": "整段六段式正文"}] → 原样整块替换后的 PACK。
 
     「一个文本框装整段提示词」的编辑通道：不拆字段、不规范化，body 原样写回。
+    ``lang`` 的缺失侧拦截同 ``_pack_rebuild``。
     """
+    blocked = _reject_missing_lang(text, lang)
+    if blocked is not None:
+        return blocked
     rebuilt = pp.rebuild_pack_block(text or "", blocks, lang)
     return {"ok": True, "text": rebuilt}
 
@@ -448,7 +718,7 @@ def register() -> bool:
         # 好让会话名的候选顺序和那个节点完全一致。
         sess = str((payload or {}).get("session_name") or "")
         try:
-            return web.json_response(_pack_preview(text, sess))
+            return web.json_response(_cached_preview(text, sess))
         except Exception as exc:                              # pragma: no cover
             return web.json_response({"ok": False, "error": str(exc)}, status=400)
 
@@ -497,9 +767,7 @@ def register() -> bool:
     @routes.get("/h3/loras")
     async def h3_loras(request):
         try:
-            names = _lora_list()
-            return web.json_response({"ok": True, "loras": names,
-                                      "suggested": _h3_lora_suggest(names)})
+            return web.json_response(_loras_cached())
         except Exception as exc:                              # pragma: no cover
             return web.json_response({"ok": False, "error": str(exc),
                                       "loras": []}, status=500)
@@ -507,7 +775,7 @@ def register() -> bool:
     @routes.get("/h3/input_images")
     async def h3_input_images(request):
         try:
-            return web.json_response({"ok": True, "images": _input_images()})
+            return web.json_response({"ok": True, "images": _input_images_cached()})
         except Exception as exc:                              # pragma: no cover
             return web.json_response({"ok": False, "error": str(exc),
                                       "images": []}, status=500)
@@ -715,6 +983,46 @@ def register() -> bool:
 # 进度事件（Director → 前端时间线）
 # ---------------------------------------------------------------------------
 EVENT_PROGRESS = "h3.director.progress"
+
+
+# ---- 相位心跳（2026-10-02）：渲染途中每 4s 广播一次当前相位 ----
+# 小马/状态行靠事件驱动；以前事件只在段完成时发，采样+解码+质检的几分钟里
+# 前端完全没有生命迹象（用户报「小马在渲染时不动了」）。现在 director 在每段
+# 开始时 set_phase，这个心跳线程按固定间隔把相位+已渲秒数持续广播出去。
+_phase = {"node_id": None, "phase": None, "t0": None, "extra": None}
+_hb_started = False
+
+
+def set_phase(node_id, phase, **extra):
+    """记录当前渲染相位（phase=None 清除）；心跳线程负责持续广播。"""
+    global _hb_started
+    if not _hb_started:
+        _hb_started = True
+        import threading
+        threading.Thread(target=_heartbeat_loop, daemon=True,
+                         name="h3-phase-heartbeat").start()
+    _phase["node_id"] = node_id
+    _phase["extra"] = dict(extra) if extra else None
+    if phase is not None and phase != _phase["phase"]:
+        _phase["phase"] = phase
+        _phase["t0"] = time.time()
+        emit_progress(node_id, event="phase", phase=phase, elapsed=0.0,
+                      **(_phase["extra"] or {}))
+    if phase is None:
+        _phase["phase"] = None
+
+
+def _heartbeat_loop():
+    while True:
+        try:
+            if _phase["phase"] is not None and _phase["node_id"] is not None:
+                emit_progress(_phase["node_id"], event="phase",
+                              phase=_phase["phase"],
+                              elapsed=round(time.time() - (_phase["t0"] or time.time()), 1),
+                              **(_phase["extra"] or {}))
+        except Exception:
+            pass
+        time.sleep(4)
 
 
 def emit_progress(node_id, **payload) -> None:

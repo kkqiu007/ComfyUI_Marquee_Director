@@ -160,6 +160,11 @@ def segment_key(settings, segment, handoff, previous_key):
         payload["handoff_mode"] = settings["handoff_mode"]
     if previous_key and settings.get("drift_arrest"):
         payload["drift_arrest"] = round(float(settings["drift_arrest"]), 4)
+    # 逐 step 重绘掩码（seam_remask）：与上面两项同一条规则 —— 只有**真的开了**
+    # 且这一段确实消费锚点时才并入。默认关，所以升级后既有会话一段都不用重渲；
+    # 打开后只有段 2..N 重渲，首段没有锚点、不受影响，缓存照旧命中。
+    if previous_key and settings.get("seam_remask"):
+        payload["seam_remask"] = True
     # 渲染方式参数：只在**显式设置**时才并入。既有会话的 settings 没有这两个键，
     # payload 就保持字节一致、不会因升级而无故重渲；一旦真设了，改动才会正确
     # 触发重渲 —— 否则改了渲染方式缓存却认为没变，会拿到旧路径渲染的结果。
@@ -175,6 +180,46 @@ def segment_key(settings, segment, handoff, previous_key):
         payload["seam_redraw"] = round(float(seam), 4)
     if RENDER_PIPELINE_ID:
         payload["pipe"] = RENDER_PIPELINE_ID
+    # 二采精修（H3 Refine）：同样只在**接了 refine 且给了噪声表**时才并入。
+    # 没接时 payload 保持字节一致 —— 既有会话不会因为多出这个功能而全量重渲。
+    # 接了之后改任何一个二采参数都会正确触发重渲（二采改的是成片本身）。
+    refine = settings.get("refine")
+    if isinstance(refine, dict) and refine.get("sigmas") is not None:
+        payload["refine"] = {
+            "sigmas": digest(refine.get("sigmas")),
+            # 不接 refine_model 时二采用的是主模型，其摘要已经在上面对过；
+            # 这里再记一次只是为了「接/不接二采模型」这两种情形能区分开。
+            "model": model_digest(refine.get("model") or settings["model"]),
+            "passes": int(refine.get("passes") or 1),
+            # 二采采样器存的是名字（字符串），不是 sampler 对象：对象每次运行
+            # 新建、repr 带内存地址，直接进键会让缓存永远不命中。
+            "sampler": refine.get("sampler") or 0,
+            "seed_mode": refine.get("seed_mode"),
+            "seed": int(refine.get("seed") or 0),
+        }
+    # 脸部修复（H3 FaceRefine）：与 refine 同一条规则 —— 只在接了且给了噪声表时
+    # 才并入。它改的是本段解码后的像素（贴回的人脸特写），段间锚点仍来自未修的
+    # latent，所以**不会**连带影响下一段；改修脸参数只需要本段重渲。
+    # 注意 detector / confidence / crop_factor 这些也必须进键：换检测器框出来的
+    # 脸不一样，成片就不一样，缓存不能认为没变。
+    face = settings.get("face_refine")
+    if isinstance(face, dict) and face.get("sigmas") is not None:
+        payload["face"] = {
+            "sigmas": digest(face.get("sigmas")),
+            "detector": str(face.get("detector") or ""),
+            "confidence": round(float(face.get("confidence") or 0.0), 4),
+            "select": face.get("select"),
+            "crop_factor": round(float(face.get("crop_factor") or 0.0), 4),
+            "canvas_mode": face.get("canvas_mode"),
+            "canvas": [int(face.get("canvas_width") or 0),
+                       int(face.get("canvas_height") or 0)],
+            "sampler": face.get("sampler") or 0,
+            "seed_mode": face.get("seed_mode"),
+            "paste_region": face.get("paste_region"),
+            "feather": int(face.get("feather") or 0),
+            "blend": round(float(face.get("blend") or 0.0), 4),
+            "seam_fade": face.get("seam_fade"),
+        }
     return hashlib.sha1(json.dumps(payload, sort_keys=True).encode()).hexdigest()[:20]
 
 
@@ -342,8 +387,32 @@ class Session:
         except (TypeError, ValueError):
             _fps = 0.0
         added = 0
+        _burned_dropped = 0
         for i in range(on_disk):
             if i in known:
+                continue
+            # ★ 2026-10-02：采纳无记录的磁盘段前，先 OCR 扫一遍底部字幕带。
+            #   烧字的段（典型：字幕质检重渲途中队列被取消，烧字段留在盘上、
+            #   manifest 记录又丢失）一旦被采纳就会静默拼进成片 —— v25 实测。
+            #   命中即删段文件（连同尾锚），让本段走正常重渲。宁可重烧，不可带伤交付。
+            try:
+                from .subtitle_qc import scan as _qc_scan
+                _qc_hits = _qc_scan(self.segment_path(i))
+            except Exception:
+                _qc_hits = []
+            if _qc_hits:
+                _burned_dropped += 1
+                try:
+                    os.remove(self.segment_path(i))
+                    _tp = self.tail_path(i)
+                    if os.path.exists(_tp):
+                        os.remove(_tp)
+                except OSError:
+                    pass
+                import logging
+                logging.getLogger(__name__).warning(
+                    "[H3 Continuous] reconcile: seg_%02d 采纳前 OCR 命中烧字 %s"
+                    " —— 已删除，本段将重渲", i + 1, _qc_hits)
                 continue
             has_tail = os.path.exists(self.tail_path(i))
             _len = self.probe_segment_frames(i)
