@@ -20,6 +20,10 @@ Chain any number of MiniMax H3 renders into **one unbroken take**.
 （2026-10-10 统一命名时删掉了旧 ID，旧工作流里的 `MinimaxH3SaveJson` /
 `MinimaxH3LoadJson` 会被 `tools/check_workflow.py` 报出来并可用 `--fix` 改写）。
 
+> 判定是**按图**的，不是按 ID：这两个 ID 同时也是已安装的
+> `Comfyui-MinimaxH3-Ref2VA-Auto-Video` 的现役节点。图里还有本包任一在用的节点类型
+> 才认作我们的旧图；一张都没有（比如那张 Ref2VA 看板流）就不报、`--fix` 也不动它。
+
 | node_id | 节点名 | 产出目录（相对 ComfyUI 输出目录） |
 | --- | --- | --- |
 | `H3ChainSettings` | H3 链路设置（模型/采样器/画布/种子） | 不写盘 |
@@ -837,9 +841,18 @@ slice lands where it should across every legal shape, and needs no GPU and no mo
 python tools/test_latent_handoff.py --comfy /path/to/ComfyUI
 ```
 
-`tools/check_workflow.py` validates every workflow in `workflows/` against a
-running ComfyUI's `/object_info`, so widget order and socket names cannot drift
-away from the nodes. Use `--fix` to append widgets a saved workflow is missing.
+`tools/check_workflow.py` validates every workflow in `workflows/` against this
+pack's own schemas — it imports the nodes the way ComfyUI does, so no server is
+needed, and widget order and socket names cannot drift away from the nodes. Use
+`--fix` to fill widgets a saved workflow is missing (into the named copy by name,
+into the positional array at that widget's real schema slot).
+
+Its own rules are pinned by `tools/test_workflow_check.py` — hand-made schemas,
+no server, no GPU:
+
+```bash
+python tools/test_workflow_check.py
+```
 
 ---
 

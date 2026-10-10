@@ -22,9 +22,12 @@ So this checks the graph the way the server will read it:
 3. **Sockets.** Every wired input on one of this pack's nodes matches the type
    that node declares.
 
-``--fix`` appends missing widget defaults at the **end** of both copies. It never
-reorders and never touches existing values, because appending is the only edit
-that a saved workflow survives without shifting.
+``--fix`` fills missing widget defaults into both copies: into the **named** copy
+by name, and into the positional array at the slot the schema gives that widget
+(its real slot, not simply the tail -- the array may end with a front-end DOM
+widget, and appending after it shifts everything below the insertion point). It
+never reorders and never touches existing values, because rewriting a saved
+value is the one edit a workflow cannot survive silently.
 """
 
 import argparse
@@ -39,7 +42,12 @@ WIDGET_TYPES = {"INT", "FLOAT", "STRING", "BOOLEAN", "COMBO"}
 # 所以旧图里的 ``type`` 会直接变成红色 missing node —— 而更坏的情况是它并不红：
 # 另一个已安装的包 ``Comfyui-MinimaxH3-Ref2VA-Auto-Video`` 恰好也注册这两个 ID，
 # 于是节点"看起来在"，实际是别人家的实现，槽位完全不同、连线静默错位。
-# 离线检查拿不到全机注册表，没法区分这两种情况，所以一律报出来让人确认。
+#
+# 但反过来也成立：那张 Ref2VA 自己的看板图里，``MinimaxH3LoadJson`` **就是**
+# 它自己的节点，不是我们的旧节点，改它等于把好端端的图改坏。离线检查拿不到
+# 全机注册表，所以判据换成图级的：同一张图里还有本包在用的其它节点类型，那个
+# 旧 ID 才是我们的（旧 Director 图必然整串都用本包）；一张都不剩，就是别人家的
+# 图，闭嘴。
 RETIRED_IDS = {
     "MinimaxH3SaveJson": "H3StoryboardSave",
     "MinimaxH3LoadJson": "H3StoryboardLoad",
@@ -120,6 +128,10 @@ def check_file(path, schemas, fix=False):
     problems = []
     fixed = []
 
+    # 这张图是不是本包的图（见 RETIRED_IDS 那段）：只要还有任一在用的类型是本包的，
+    # 图里残留的旧 ID 就归我们管。全是别的包的类型 —— 那是别人的图，不改。
+    is_ours = any(n.get("type") in schemas for n in data.get("nodes", []))
+
     # ---- links ----------------------------------------------------------
     seen_targets = {}
     for link in links:
@@ -151,7 +163,7 @@ def check_file(path, schemas, fix=False):
     # ---- nodes ----------------------------------------------------------
     for node in data.get("nodes", []):
         ntype = node.get("type")
-        if ntype in RETIRED_IDS:
+        if ntype in RETIRED_IDS and is_ours:
             new = RETIRED_IDS[ntype]
             problems.append(
                 "node %s: type %r 已被本包改名为 %r —— 图里这个现在解析到"
@@ -193,47 +205,68 @@ def check_file(path, schemas, fix=False):
                     % (node.get("id"), ntype, name))
 
         # widgets: positional array vs schema
+        # 命名副本先读 —— 数组是按位置存的，只有命名副本带名字，数组的真实槽位
+        # 表要靠它来还原（见下面 slots）。
         names = [n for w in schema["widgets"] for n in widget_slots(w)]
+        named = node.get("widgets_values_named")
+        named = named if isinstance(named, dict) else None
         values = node.get("widgets_values")
         if values is None:
             values = []
-        if len(values) > len(names):
-            # 前端的 DOM widget（本包是 ``h3_director_panels``：面板展开状态）
-            # 不在 schema 里，但会在数组末尾占一个槽位。数组多出来的个数
-            # 正好等于命名副本里那些"认不出来"的键时，它就是 DOM widget，
-            # 不是移位 —— 不报问题。对不上才说明真的有值被推后。
-            dom_keys = [k for k in (node.get("widgets_values_named") or {})
-                        if k not in names]
-            extra = len(values) - len(names)
-            if extra != len(dom_keys):
-                problems.append(
-                    "node %s (%s): %d widget values for %d slots -- %d extra "
-                    "(%d unexplained DOM/virtual keys); values from here on may "
-                    "be shifted"
-                    % (node.get("id"), ntype, len(values), len(names), extra,
-                       len(dom_keys)))
-        elif len(values) < len(names):
-            missing = names[len(values):]
+
+        # 数组里排在 schema 控件**之后**的那几格是前端自己挂的 DOM widget
+        # （本包是 ``h3_director_panels``：面板展开状态）。它不在 schema 里，
+        # 只在命名副本里有名字，所以按位置比对的真实槽位表是 ``names + 那些
+        # 认不出来的键``。以前把"多出来的格子"当成异常单独判断，结果是一个控件
+        # 缺席 + 一个 DOM 槽 = 数组长度刚好"对得上"，两条副本互相打掩护。
+        dom_keys = [k for k in (named or {}) if k not in names]
+        slots = names + dom_keys
+
+        # 文件是在某个控件被加进 schema **之前**存的：那个控件在数组和命名副本
+        # 里都缺席。补默认值必须插回它在 schema 里的那一格 —— 追加会插到 DOM 槽
+        # 之后，从那里起整条数组全部错位，而 ComfyUI 读的就是数组这一份。
+        absent = [n for n in names if named is not None and n not in named]
+        if absent and len(values) == len(names) - len(absent) + len(dom_keys):
             problems.append(
-                "node %s (%s): %d widget values for %d slots -- missing %s "
-                "(front-end falls back to schema defaults)"
-                % (node.get("id"), ntype, len(values), len(names), ", ".join(missing)))
+                "node %s (%s): array predates %s -- %d values for %d slots "
+                "(%d of them DOM keys)"
+                % (node.get("id"), ntype, ", ".join(absent), len(values),
+                   len(slots), len(dom_keys)))
             if fix:
-                for name in missing:
-                    values.append(_default_for_slot(schema["widgets"], name))
+                for name in absent:
+                    at = min(names.index(name), len(values) - len(dom_keys))
+                    values.insert(at, _default_for_slot(schema["widgets"], name))
                 node["widgets_values"] = values
-                fixed.append("node %s (%s): appended %s"
-                             % (node.get("id"), ntype, ", ".join(missing)))
+                fixed.append("node %s (%s): inserted %s at their schema slot"
+                             % (node.get("id"), ntype, ", ".join(absent)))
+        elif len(values) > len(slots):
+            problems.append(
+                "node %s (%s): %d widget values for %d slots -- %d extra "
+                "(%d explained as DOM keys); values from here on may be shifted"
+                % (node.get("id"), ntype, len(values), len(slots),
+                   len(values) - len(slots), len(dom_keys)))
+        elif len(values) < len(slots):
+            missing = [n for n in slots[len(values):] if n in names]
+            if missing:
+                problems.append(
+                    "node %s (%s): %d widget values for %d slots -- missing %s "
+                    "(front-end falls back to schema defaults)"
+                    % (node.get("id"), ntype, len(values), len(slots),
+                       ", ".join(missing)))
+                if fix:
+                    for name in missing:
+                        values.append(_default_for_slot(schema["widgets"], name))
+                    node["widgets_values"] = values
+                    fixed.append("node %s (%s): appended %s"
+                                 % (node.get("id"), ntype, ", ".join(missing)))
 
         # widgets: named copy vs schema, and vs the positional copy
-        named = node.get("widgets_values_named")
-        if isinstance(named, dict):
-            extra = [k for k in named if k not in names and k != "h3_director_panels"]
-            if extra:
+        if named is not None:
+            stale = [k for k in named if k not in names and k != "h3_director_panels"]
+            if stale:
                 problems.append(
                     "node %s (%s): named copy has stale keys %s"
-                    % (node.get("id"), ntype, ", ".join(map(str, extra))))
-            absent = [n for n in names if n not in named]
+                    % (node.get("id"), ntype, ", ".join(map(str, stale))))
             if absent:
                 problems.append(
                     "node %s (%s): named copy is missing %s"
@@ -243,13 +276,15 @@ def check_file(path, schemas, fix=False):
                         named[name] = _default_for_slot(schema["widgets"], name)
                     fixed.append("node %s (%s): named += %s"
                                  % (node.get("id"), ntype, ", ".join(absent)))
-            # the two copies must agree where both are present
-            for i, name in enumerate(names):
-                if name in named and i < len(values):
-                    if named[name] != values[i]:
-                        problems.append(
-                            "node %s (%s): %s disagrees -- array %r vs named %r"
-                            % (node.get("id"), ntype, name, values[i], named[name]))
+            # the two copies must agree where both are present -- walked through
+            # ``slots`` so a DOM key never borrows a schema widget's array value
+            for i, name in enumerate(slots):
+                if name not in names:
+                    continue
+                if i < len(values) and name in named and named[name] != values[i]:
+                    problems.append(
+                        "node %s (%s): %s disagrees -- array %r vs named %r"
+                        % (node.get("id"), ntype, name, values[i], named[name]))
 
     if fix and fixed:
         with open(path, "w", encoding="utf-8") as fh:
