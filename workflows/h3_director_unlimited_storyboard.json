@@ -836,7 +836,7 @@
     },
     {
       "id": 351,
-      "type": "MinimaxH3SaveJson",
+      "type": "H3StoryboardSave",
       "pos": [
         -723.1155112134594,
         1896.2565780355947
@@ -875,7 +875,7 @@
       ],
       "title": "② 剧本 JSON 落盘（清洗后）",
       "properties": {
-        "Node name for S&R": "MinimaxH3SaveJson",
+        "Node name for S&R": "H3StoryboardSave",
         "ue_properties": {
           "widget_ue_connectable": {},
           "version": "7.8",
@@ -1069,7 +1069,7 @@
           ]
         }
       ],
-      "title": "⑤-9 H3 连续链路设置（宽高←⑤-8）",
+      "title": "⑤-9 H3 链路设置（宽高←⑤-8）",
       "properties": {
         "Node name for S&R": "H3ChainSettings",
         "ue_properties": {
@@ -1095,7 +1095,8 @@
         "latent",
         0.05,
         0.1,
-        false
+        false,
+        ""
       ],
       "widgets_values_named": {
         "width": 480,
@@ -1106,7 +1107,8 @@
         "handoff_mode": "latent",
         "drift_arrest": 0.05,
         "seam_redraw": 0.1,
-        "seam_remask": false
+        "seam_remask": false,
+        "script_name": ""
       },
       "color": "#3f5159",
       "bgcolor": "#222d33"
@@ -1784,7 +1786,7 @@
           "links": []
         }
       ],
-      "title": "② H3 Director（剧本→渲染→时间线→成片）",
+      "title": "② H3 导演（剧本→渲染→时间线→成片）",
       "properties": {
         "Node name for S&R": "H3Director",
         "ue_properties": {
@@ -1815,6 +1817,7 @@
         "",
         "分镜JSON",
         "",
+        "h264",
         ""
       ],
       "widgets_values_named": {
@@ -1839,7 +1842,8 @@
         "run_segments": "",
         "source": "分镜JSON",
         "video_path": "",
-        "h3_director_panels": ""
+        "h3_director_panels": "",
+        "seg_cache_codec": "h264"
       },
       "color": "#b58b2a",
       "bgcolor": "#3d3116"
@@ -2496,7 +2500,7 @@
     },
     {
       "id": 2,
-      "title": "② H3 Director（剧本→渲染→时间线→成片）",
+      "title": "② H3 导演（剧本→渲染→时间线→成片）",
       "bounding": [
         -763.1155112134594,
         6.256578035592852,

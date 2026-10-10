@@ -35,6 +35,16 @@ import sys
 
 WIDGET_TYPES = {"INT", "FLOAT", "STRING", "BOOLEAN", "COMBO"}
 
+# 本包**以前**注册过、现在已改名的节点 ID。2026-10-10 统一命名时不留别名，
+# 所以旧图里的 ``type`` 会直接变成红色 missing node —— 而更坏的情况是它并不红：
+# 另一个已安装的包 ``Comfyui-MinimaxH3-Ref2VA-Auto-Video`` 恰好也注册这两个 ID，
+# 于是节点"看起来在"，实际是别人家的实现，槽位完全不同、连线静默错位。
+# 离线检查拿不到全机注册表，没法区分这两种情况，所以一律报出来让人确认。
+RETIRED_IDS = {
+    "MinimaxH3SaveJson": "H3StoryboardSave",
+    "MinimaxH3LoadJson": "H3StoryboardLoad",
+}
+
 
 def _comfy_root():
     # tools/ lives at <ComfyUI>/custom_nodes/ComfyUI_Marquee_Director/tools/
@@ -141,6 +151,20 @@ def check_file(path, schemas, fix=False):
     # ---- nodes ----------------------------------------------------------
     for node in data.get("nodes", []):
         ntype = node.get("type")
+        if ntype in RETIRED_IDS:
+            new = RETIRED_IDS[ntype]
+            problems.append(
+                "node %s: type %r 已被本包改名为 %r —— 图里这个现在解析到"
+                "**别的包**的同名节点（槽位不同），或直接是红色 missing node"
+                % (node.get("id"), ntype, new))
+            if fix:
+                node["type"] = new
+                props = node.get("properties") or {}
+                if props.get("Node name for S&R") == ntype:
+                    props["Node name for S&R"] = new
+                fixed.append("node %s: type %s -> %s"
+                             % (node.get("id"), ntype, new))
+                ntype = new
         schema = schemas.get(ntype)
         if schema is None:
             continue  # a node from another pack; nothing to compare against

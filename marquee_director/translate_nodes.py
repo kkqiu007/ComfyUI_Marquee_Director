@@ -1311,7 +1311,7 @@ class H3ScriptTranslate(io.ComfyNode):
                      "API 模式先检查 Base URL / 模型名 / Key；"
                      "「自查未过」类失败多为台词被翻/残留中文，报告里有原因。"
                      % n_fail)
-        log("[H3ScriptTranslate] %s", head.replace("\n", " | "))
+        log("translate: %s", head.replace("\n", " | "))
         return io.NodeOutput(result, head + "\n" + "\n".join(report))
 
 

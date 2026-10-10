@@ -2,8 +2,8 @@
 """二采精修（Refine）—— 借鉴 ComfyUI_MiniMaxH3_Director 的 ``refine`` 外接形态。
 
 那个包把后处理做成**可选外接节点**：导演台留一个 ``refine`` 口，不接就是原来
-的单次采样，接了才多跑一遍。这里照搬同一条契约——``H3 Refine`` 节点把二采配置
-打包成一个 ``H3_REFINE`` 对象，接到 H3 Director 的 ``refine`` 口；不接时
+的单次采样，接了才多跑一遍。这里照搬同一条契约——``H3 二采精修`` 节点把二采配置
+打包成一个 ``H3_REFINE`` 对象，接到 ``H3Director`` 的 ``refine`` 口；不接时
 ``settings`` 里根本没有 ``refine`` 键，``engine.render_segment`` 的分支进不去，
 行为与加这个功能之前**逐字节相同**。
 
@@ -52,12 +52,12 @@ _SIGMAS_TOOLTIP = (
     "必须带 denoise<1：二采是「在已有画面上再降一次噪」，不是从头生成。接了 "
     "denoise=1 的表等于把一采结果当纯噪声重画一遍，画面会整体偏移、段间直接跳。\n\n"
     "BasicScheduler 的 model 口请接**二采用的那套模型**（接了 refine_model 就接它，"
-    "没接就接 H3 Chain Settings 的 model），H3 的 SigmaShift 由模型那侧带上。\n\n"
+    "没接就接 H3 链路设置 的 model），H3 的 SigmaShift 由模型那侧带上。\n\n"
     "不接这个口 = 关闭二采（即便节点已接到 Director）。"
 )
 
 _MODEL_TOOLTIP = (
-    "二采用的 UNET。不接则用 H3 Chain Settings 的主模型。\n\n"
+    "二采用的 UNET。不接则用 H3 链路设置 的主模型。\n\n"
     "典型用法：一采挂 Turbo LoRA（步数少、构图快），二采换成不带 LoRA 的原模型或"
     "另一套，用细节换回速度。换模型会进缓存键，相关段会重渲。\n\n"
     "MODEL only——H3 的 LoRA 都在扩散侧，把它塞进 Qwen3-VL 文本编码器不是它被"
@@ -71,7 +71,7 @@ _PASSES_TOOLTIP = (
 )
 
 _SAMPLER_TOOLTIP = (
-    "二采采样器。「%s」= 跟一采用同一个（H3 Chain Settings 的 sampler 口）。\n\n"
+    "二采采样器。「%s」= 跟一采用同一个（H3 链路设置 的 sampler 口）。\n\n"
     "官方 H3 模板一采用 res_multistep；二采常用 euler，收敛更稳。\n\n"
     "跟随一采时改上游采样器会连带改二采，且会进缓存键触发重渲 —— 这是对的，"
     "采样器变了产物本来就变了。"
@@ -89,20 +89,20 @@ _SEED_TOOLTIP = (
 
 
 class H3RefineNode(io.ComfyNode):
-    """Pack a second-sample pass. Wire ``refine`` into H3 Director's ``refine``."""
+    """Pack a second-sample pass. Wire ``refine`` into ``H3Director``'s ``refine``."""
 
     @classmethod
     def define_schema(cls):
         return io.Schema(
             node_id="H3Refine",
-            display_name="H3 Refine（二采精修）",
+            display_name="H3 二采精修（二次采样提画质）",
             category=CATEGORY,
             description=(
-                "Optional second sample pass for H3 Director. Connect "
+                "Optional second sample pass for H3Director. Connect "
                 "`sigmas` (a denoise<1 schedule) and wire `refine` into the "
-                "Director's `refine` input; every segment is then sampled once "
+                "H3Director `refine` input; every segment is then sampled once "
                 "more before it is decoded, its handoff tail is cut, and the "
-                "cut is joined. Unwired (or wired without `sigmas`) the Director "
+                "cut is joined. Unwired (or wired without `sigmas`) H3Director "
                 "behaves exactly as before: one sample per segment.\n\n"
                 "The second pass reuses the first pass' conditioning, so the "
                 "pinned seam at a segment's head stays locked while the rest of "

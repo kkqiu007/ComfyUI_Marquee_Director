@@ -1,6 +1,6 @@
 """The three-segment stage example: one singer, one song, one unbroken take.
 
-The smallest chain worth shipping. Three 8-second H3 Render Segment nodes at the
+The smallest chain worth shipping. Three 8-second H3RenderSegment nodes at the
 default 1.625 s handoff make a ~20.75 s continuous performance -- enough to show every
 rule the pack depends on, short enough to render in one sitting.
 

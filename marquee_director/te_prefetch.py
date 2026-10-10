@@ -43,11 +43,10 @@ behaviour is upstream's.
 Switch it off with ``MARQUEE_TE_PREFETCH=0``.
 """
 
-import logging
 import os
 import sys
 
-log = logging.getLogger(__name__)
+from .common import log, warn
 
 #: ``MARQUEE_TE_PREFETCH=0`` disables the shim entirely.
 ENABLED = os.environ.get("MARQUEE_TE_PREFETCH", "1").strip().lower() not in (
@@ -109,7 +108,7 @@ def _report_once(wants):
     if _reported:
         return
     _reported = True
-    log.info("[Marquee] text-encoder prefetch: restored the flag the "
+    log("text-encoder prefetch: restored the flag the "
              "KV-cache gate cleared (config asked for prefetch: %s). This is "
              "the shim that replaces the comfy/text_encoders/llama.py patch, "
              "which a ComfyUI update reverts. Set MARQUEE_TE_PREFETCH=0 to "
@@ -122,20 +121,20 @@ def install():
     if _installed:
         return True
     if not ENABLED:
-        log.info("[Marquee] text-encoder prefetch shim disabled by "
+        log("text-encoder prefetch shim disabled by "
                  "MARQUEE_TE_PREFETCH")
         return False
     try:
         import comfy.model_prefetch as mp
     except Exception as exc:
-        log.warning("[Marquee] text-encoder prefetch shim skipped, could not "
+        warn("text-encoder prefetch shim skipped, could not "
                     "import comfy.model_prefetch (%s: %s)",
                     type(exc).__name__, exc)
         return False
 
     original = getattr(mp, "make_prefetch_queue", None)
     if original is None:
-        log.warning("[Marquee] text-encoder prefetch shim skipped: "
+        warn("text-encoder prefetch shim skipped: "
                     "comfy.model_prefetch.make_prefetch_queue is gone "
                     "(upstream changed); nothing was patched")
         return False
@@ -151,7 +150,7 @@ def install():
         except Exception as exc:
             # A shim that can take down a render is worse than the wasted
             # minutes it saves, so any surprise falls back to upstream exactly.
-            log.warning("[Marquee] text-encoder prefetch shim skipped this "
+            warn("text-encoder prefetch shim skipped this "
                         "call (%s: %s)", type(exc).__name__, exc)
             options = transformer_options
         return original(queue, device, options)
@@ -159,7 +158,7 @@ def install():
     make_prefetch_queue._marquee_te_prefetch = True
     mp.make_prefetch_queue = make_prefetch_queue
     _installed = True
-    log.info("[Marquee] text-encoder prefetch shim installed "
+    log("text-encoder prefetch shim installed "
              "(wraps comfy.model_prefetch.make_prefetch_queue; no ComfyUI file "
              "was modified)")
     return True

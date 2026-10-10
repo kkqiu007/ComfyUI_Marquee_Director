@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Offline regression tests for the H3 Refine (second-sample) path.
+"""Offline regression tests for the H3 二采精修 (second-sample) path.
 
     python tools/test_refine.py
 
@@ -149,8 +149,20 @@ names = [i.id for i in schema.inputs
          if i.io_type in WIDGET_TYPES and not i.force_input]
 check("schema exposes source + video_path widgets",
       "source" in names and "video_path" in names)
-check("source/video_path are last (saved workflows shift otherwise)",
-      names[-2:] == ["source", "video_path"], str(names[-3:]))
+# The contract is **append-only**, not "these two sit at the tail": a saved
+# workflow stores widgets by position, so anything inserted before an existing
+# widget shifts every later value by one slot. New widgets go at the END, so
+# this list grows on the right and never in the middle. Copy it when you append
+# a widget — that copy step is the point: it forces you to notice where it goes.
+DIRECTOR_WIDGETS = ["global_prompt", "prompt_lines", "sensitivity",
+                    "min_shot_seconds", "max_shot_seconds", "fallback_prompt",
+                    "max_shots", "handoff_seconds", "resume",
+                    "duration_is_new_content", "unload_every", "crf",
+                    "stabilize", "build_timeline", "export_segments",
+                    "ref_image_size", "ref_classify", "repair_segment",
+                    "run_segments", "source", "video_path", "seg_cache_codec"]
+check("Director widget order is append-only", names == DIRECTOR_WIDGETS,
+      "got %s" % (names,))
 
 # --- 4. refine_samples call sequence (sampler mocked out) -------------------
 print("\n--- refine_samples (mocked sampler) ---")

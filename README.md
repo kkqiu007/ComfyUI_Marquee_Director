@@ -4,42 +4,75 @@ Pack name: `ComfyUI_Marquee_Director`
 
 > 派生自 [`loopforge0/ComfyUI-H3-Continuous`](https://github.com/loopforge0/ComfyUI-H3-Continuous)
 > （MIT，© 2026 Greg Henry），本仓库在其基础上改名并继续维护。
-> 节点 ID 与输出目录**刻意保持原样**，以兼容既有工作流与已渲染素材。
 > 出处与许可详见文末 [Credits](#credits)。
+>
+> ★ **2026-10-10 起，节点 ID 与落盘目录都主动偏离了上游**（见下两张表）。
+> 段文件与 manifest 的**内容格式**仍然完全兼容，所以旧素材不用重渲：
+> `h3_continuous/<会话名>/` 这种单层老目录会被**原位沿用**，不会被搬进新布局 ——
+> 搬动等于让断点续渲看不见已渲好的段，凭空一次全量重渲。
 
 Chain any number of MiniMax H3 renders into **one unbroken take**.
 
-> **⚠ 2026-09-20 — 节点集已收敛到 `H3 Director` 一体化链路。**
-> 本文档下面的 A/B 两种接线（`H3 Render Segment` 一镜一节点、`H3 Chain to Video`
-> 拼接、`H3 Load Session` 续接、`H3 Repair Segment` 单段修复、`H3 Segment Timeline`
+## 节点命名与产出目录（唯一对照表）
+
+`node_id` 是工作流 JSON 里 `"type"` 的那个字符串，也是画布搜索、`/h3/*` 路由和
+前端脚本用的同一个词；「节点名」是画布上看得见的标题。两者一一对应，**没有别名**
+（2026-10-10 统一命名时删掉了旧 ID，旧工作流里的 `MinimaxH3SaveJson` /
+`MinimaxH3LoadJson` 会被 `tools/check_workflow.py` 报出来并可用 `--fix` 改写）。
+
+| node_id | 节点名 | 产出目录（相对 ComfyUI 输出目录） |
+| --- | --- | --- |
+| `H3ChainSettings` | H3 链路设置（模型/采样器/画布/种子） | 不写盘 |
+| `H3PromptPackParser` | H3 分镜提示词 PACK（文本→分镜 JSON） | 不写盘（定下剧本名与会话名） |
+| `H3ScriptTranslate` | H3 剧本英译（中文 → 英文单版） | 不写盘 |
+| `H3Director` | H3 导演（剧本/源视频 → 渲染 → 时间线 → 成片） | `h3_continuous/<剧本名>/<版本名>/`；开「逐段导出」时另写 `h3_seg_export/<时间戳>/` |
+| `H3StoryboardSave` | H3 剧本存档（分镜 JSON 落盘） | `h3_continuous/<剧本名>/<版本名>/storyboard.json` |
+| `H3StoryboardLoad` | H3 剧本读档（分镜 JSON 读回） | 只读上面那些 JSON |
+| `H3Refine` | H3 二采精修（二次采样提画质） | 不写盘 |
+| `H3FaceRefine` | H3 脸部修复（逐帧检测重采贴回） | 不写盘 |
+| `H3RenderSegment` / `H3RepairSegment` | H3 渲染单段 / H3 修复单段 | **引擎类，不注册**；Director 直接调其 `execute()`，写回同一个会话目录 |
+
+> **⚠ 2026-09-20 — 节点集已收敛到「H3 导演」一体化链路。**
+> 本文档下面的 A/B 两种接线（`H3 渲染单段` 一镜一节点、`H3 Chain to Video`
+> 拼接、`H3 Load Session` 续接、`H3 修复单段` 单段修复、`H3 Segment Timeline`
 > 时间线）描述的是**旧范式**。现行注册的节点共八个：
 >
 > | 节点 | 作用 |
 > | --- | --- |
-> | `H3 Chain Settings` | 模型 / 采样器 / 画布 / 种子 / 会话名，打包一次 |
-> | `H3 Prompt Pack Parser` | 分镜提示词 PACK → 分镜 JSON |
-> | `H3 Director` | 剧本 → 分段渲染 → 时间线 → 成片，一个节点全包 |
-> | `H3 Refine` | 二采精修（可选外接，见下） |
-> | `H3 FaceRefine` | 脸部修复（可选外接，见下） |
-> | `H3 Script Translate` | 剧本英译：中文剧本 → 英文单版（可选外接，需文本模型） |
-> | `MinimaxH3SaveJson` | 分镜 JSON 存档 |
-> | `MinimaxH3LoadJson` | 存档读回 |
+> | `H3 链路设置` | 模型 / 采样器 / 画布 / 种子 / 会话名 / 剧本名，打包一次 |
+> | `H3 分镜提示词 PACK` | 分镜提示词 PACK → 分镜 JSON |
+> | `H3 导演` | 剧本 → 分段渲染 → 时间线 → 成片，一个节点全包 |
+> | `H3 二采精修` | 二采精修（可选外接，见下） |
+> | `H3 脸部修复` | 脸部修复（可选外接，见下） |
+> | `H3 剧本英译` | 剧本英译：中文剧本 → 英文单版（可选外接，需文本模型） |
+> | `H3 剧本存档` | 分镜 JSON 存档 |
+> | `H3 剧本读档` | 存档读回 |
 >
-> 三个可选外接（`H3 Refine` / `H3 FaceRefine` / `H3 Script Translate`）都不接就
+> 三个可选外接（`H3 二采精修` / `H3 脸部修复` / `H3 剧本英译`）都不接就
 > 不参与渲染，注册它们不会改变任何既有链路的行为。
 >
-> `H3 Refine` 借鉴 `ComfyUI_MiniMaxH3_Director` 的 `refine` 外接形态：接到
-> `H3 Director` 的 `refine` 口才生效，不接就是原来的一采成片。二采发生在每段
+> `H3 二采精修` 借鉴 `ComfyUI_MiniMaxH3_Director` 的 `refine` 外接形态：接到
+> `H3 导演` 的 `refine` 口才生效，不接就是原来的一采成片。二采发生在每段
 > **一采之后、解码之前**，段间锚点因此也来自二采结果 —— 接缝不会出现画质跳变。
 >
-> 同样借鉴来的还有 `H3 Chain Settings` 上的 **逐 step 重绘掩码**（`seam_remask`，
+> 同样借鉴来的还有 `H3 链路设置` 上的 **逐 step 重绘掩码**（`seam_remask`，
 > advanced）。默认**关**：整段采样用同一张 `noise_mask`；打开后回放区的重绘余量
 > 按「下一步 σ / 当前步 σ」逐步收紧，采样末期把前缀锁回上一段的真实尾帧，而
 > 接缝那几个 token 全程不低于 `seam_redraw`。默认关是刻意的 —— 它改变成片本身，
 > 开着会让既有会话重渲一次，这不该由一次升级替你决定。
 >
-> `H3 FaceRefine` 借鉴 `ComfyUI_MiniMaxH3_Director` 的 `face_refine`（那又改编自
-> `ComfyUI-H3-FaceRefine`，MIT, Carasibana）。接到 `H3 Director` 的 `face_refine`
+> **无损段缓存**（`H3 导演` 上的 `段缓存像素 = ffv1`，advanced）借鉴
+> `ComfyUI_MiniMaxH3_Director` 的 `lib/frames_ffv1.py`（Apache-2.0）。打开后每段除了 mp4
+> 再多写一份 FFV1 边车 `seg_NN.frames.mkv`，拼接时读边车而不是 mp4。不开的话每段先被
+> crf10 压损一次、拼接时再被 crf14 压损一次，成片是**两代有损**。实测拼接画质
+> PSNR **+1.12 dB**（34.35 → 35.46）。代价在磁盘：864×480 高噪声内容每 60 帧约 123 MB，
+> 实拍画面压得好一些，但仍然可观。默认 `h264` 是刻意的，两点：它改变成片，而且
+> **只对打开之后真烧显卡重渲的段生效** —— 这个开关刻意不进缓存指纹，
+> 从磁盘复用的段不会有边车，拼接照样读它的 mp4。清理会话会连边车一起删掉，
+> 于是拼片退回 mp4。
+>
+> `H3 脸部修复` 借鉴 `ComfyUI_MiniMaxH3_Director` 的 `face_refine`（那又改编自
+> `ComfyUI-H3-FaceRefine`，MIT, Carasibana）。接到 `H3 导演` 的 `face_refine`
 > 口才生效，**且那个节点自己必须接 `sigmas`** —— 不接噪声表就等于关。链路是：
 > 解码成片 → 逐帧检测跟踪人脸 → 仿射裁出特写画布 → 注入 AV latent 视频流 →
 > 低 denoise 重采 → 解码 → 逆变换贴回 → 接缝处淡回原图。
@@ -140,7 +173,7 @@ Already have it installed and just want to update? `git pull` in that folder.
 There is no build step; a restart picks the change up.
 
 Restart ComfyUI. To check it worked, double-click the empty canvas and type
-`H3 Chain` — if **H3 Chain Settings** comes up, the nodes are installed.
+`H3 Chain` — if **H3 链路设置** comes up, the nodes are installed.
 
 Model download list, mirror URLs and the output layout live in
 [INSTALL_STATUS.md](INSTALL_STATUS.md).
@@ -182,16 +215,16 @@ rather than an unexplained empty dropdown.
 One example ships in `workflows/`: the panel-driven director workflow, described below.
 
 > **The earlier hand-wired example is gone.** `workflows/h3_continuous.json` — one
-> **H3 Render Segment** node per shot, wired in a line — referenced the retired node
-> set and was removed along with it. **H3 Director** does that job in one node, so the
+> **H3 渲染单段** node per shot, wired in a line — referenced the retired node
+> set and was removed along with it. **H3 导演** does that job in one node, so the
 > example to copy is the director workflow.
 
 ---
 
 #### A — `workflows/h3_director_unlimited_storyboard.json` · panel-driven, needs setup
 
-You do not hand-wire one **H3 Render Segment** per shot. You write
-the script, the **H3 Director** panel parses it into a storyboard, and the chain
+You do not hand-wire one **H3 渲染单段** per shot. You write
+the script, the **H3 导演** panel parses it into a storyboard, and the chain
 renders from that. This is the one to copy once you are doing real multi-shot work.
 
 ![the director workflow](docs/director-workflow.png)
@@ -210,7 +243,7 @@ published here:
 | `VAELoader` (video) | `minimax_h3_video_vae_int8_convrot.safetensors` | reselect → `minimax_h3_video_vae_fp16.safetensors` |
 | `VAELoader` (audio) | `minimax_h3_audio_vae_fp32.safetensors` | already the published file |
 | `LoraLoaderModelOnly` | `H3/minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16.safetensors` | the same file, minus the `H3/` folder — drop it into `models/loras/` and reselect |
-| `CLIPLoader` (translate) | `qwen3vl_8b_int8_convrot.safetensors` | only read when **H3 Script Translate** is on `local`; leave that node on `openai_api` (it ships that way) and this loader is unused |
+| `CLIPLoader` (translate) | `qwen3vl_8b_int8_convrot.safetensors` | only read when **H3 剧本英译** is on `local`; leave that node on `openai_api` (it ships that way) and this loader is unused |
 
 The five H3-chain files in the middle column are the ones listed under **Get the
 models** above, so if you set those up you already have them. The 8B translate
@@ -220,7 +253,7 @@ encoder is the exception — it is not part of that list.
 nothing generated on the author's machine is published here. `image_0` … `image_3`
 are wired to the Director, `image_4` … `image_7` are spares. Drop in your own.
 
-**3. The translate branch.** Group ① runs the PACK through **H3 Script Translate**
+**3. The translate branch.** Group ① runs the PACK through **H3 剧本英译**
 before the parser, so the storyboard is built from the English single version rather
 than from your Chinese source. It ships on `model_source = openai_api` with the key
 field **empty** — the node reads it from the `AGNES_API_KEY` environment variable
@@ -260,7 +293,7 @@ budget. `0.41` MP (480×864 in 9:16) is a good, safe starting point on 12 GB. On
 **`0.4` MP / 16:9 → 864×480** is the setting every figure in
 [It runs on 8 GB](#it-runs-on-8-gb) was measured at.
 
-**2 — Shots (the purple group).** One **H3 Render Segment** node per shot, wired in a
+**2 — Shots (the purple group).** One **H3 渲染单段** node per shot, wired in a
 line: each node's `chain_state` output goes into the next node's `chain_state` input.
 The first node's `chain_state` input stays empty.
 
@@ -285,14 +318,19 @@ Two rules that will bite you if you skip them:
   Those frames are a fixed replay of the previous shot. Schedule your first new action
   after the 1.7-second mark.
 
-**3 — Name the session.** Set `session_name` on **H3 Chain Settings** to anything you
-like. Everything lands in `ComfyUI/output/h3_continuous/<session_name>/`.
+**3 — Name the session.** Set `session_name`（会话名 = 版本名）on **H3 链路设置** to
+anything you like, plus `script_name`（剧本名）when the graph has no PACK header to
+read a `Project` from. Everything lands in
+`ComfyUI/output/h3_continuous/<剧本名>/<版本名>/`；版本名留空则自动 `r1`/`r2`…。
+两个都没填才落到 `h3_continuous/h3_pack/`（全包唯一的兜底名）。
+**H3 导演**不用你填：它从分镜 JSON 读这两个名字（PACK 解析器写进去的），源视频模式
+下则拿视频文件名当剧本名。
 
 **4 — Hit Run.** Once. That is the whole thing.
 
 Shots render one at a time and each is written to disk the moment it finishes, so you
 can watch the take build up in the session folder. When the last one is done,
-**H3 Chain to Video** stitches them into `<session_name>.mp4`.
+**H3 导演** stitches them into `<版本名>.mp4`（永远与它所在的目录同名）。
 
 If you stop it, change your mind, or crash: **just hit Run again.** Only the shots
 whose settings actually changed get re-rendered. See
@@ -345,6 +383,7 @@ models are released after every segment instead of every two.
 | `stabilize` | Chain to Video, advanced | 1.0 flattens the take's slow colour drift away from its own opening. Costs no GPU. **Leave it on.** |
 | `drift_arrest` | Settings, advanced | Experimental, ships at 0. Steers the latent but overshoots the picture; no measured benefit. [Why](docs/how-it-works.md#drift_arrest). |
 | `unload_every` | Render Segment / Director / Script Batch Render, advanced | Unload the models after every N rendered segments. `0` = never, `1` = every segment (the old `unload_models_after=true`), **`2` = every two segments (default)**. Unloading forces a full reload of the UNet and text encoder from disk, which dominates runtime on a small box, so `2` halves that cost while still bounding the peak. Only segments that actually rendered count — segments reused from disk cache do not, since they never loaded anything. The end of a chain always unloads once (unless `0`) to leave VRAM to the join/encode step. |
+| `段缓存像素` (`seg_cache_codec`) | Director, advanced | `h264` (default) is the old behaviour: a segment lives as a crf10 mp4 and the join re-encodes it at crf14, so the finished cut carries **two generations of loss**. `ffv1` additionally writes a lossless `.frames.mkv` sidecar per segment and reads that back when joining — measured **+1.12 dB PSNR** on the cut (34.35 → 35.46). Costs roughly 123 MB per 60 frames at 864×480 for high-noise content (real footage compresses better, but it is still material). Deliberately **not** part of a segment's fingerprint: switching it on re-renders nothing, and only segments rendered afterwards get a sidecar — the rest keep joining from their mp4. |
 
 **Set `handoff_seconds` to about a fifth of `seconds`.** That is the one rule. The
 1.625 s default is right for 8-second shots and wrong for short ones — on a 4-second
@@ -365,15 +404,15 @@ in [how it works](docs/how-it-works.md#1-anchor-the-tail-dont-reference-it).
 
 ### A LoRA on one shot
 
-**H3 Render Segment** has an optional `model` input. Wire one in and that segment
-renders on it instead of the model on **H3 Chain Settings**; leave it unconnected and
+**H3 渲染单段** has an optional `model` input. Wire one in and that segment
+renders on it instead of the model on **H3 链路设置**; leave it unconnected and
 nothing changes. There is no LoRA widget on the node, because ComfyUI already has good
 LoRA nodes and this way you get all of them:
 
 ```
-Load Diffusion Model ─┬─ LoraLoaderModelOnly (turbo) ─┬─ H3 Chain Settings . model
-                      │                               ├─ H3 Render Segment 2 . model
-                      │                               └─ LoraLoaderModelOnly (dance) ─ H3 Render Segment 3 . model
+Load Diffusion Model ─┬─ LoraLoaderModelOnly (turbo) ─┬─ H3 链路设置 . model
+                      │                               ├─ H3 渲染单段 2 . model
+                      │                               └─ LoraLoaderModelOnly (dance) ─ H3 渲染单段 3 . model
 ```
 
 Two things to hold on to:
@@ -395,15 +434,26 @@ shots. Settle the take first, then decorate.
 
 ## It resumes, and that changes how you work
 
-Every finished segment is written to `output/h3_continuous/<session>/`:
+Every finished segment is written to `output/h3_continuous/<剧本名>/<版本名>/`:
 
 ```
 seg_01.mp4          the segment
+seg_01.frames.mkv   lossless pixel cache — only when 段缓存像素 = ffv1 (see the knobs)
 seg_01.tail.mp4     the clip segment 2 opens on
 seg_01.tail.wav     that clip's soundtrack, sample-exact
 manifest.json       what was rendered, and the fingerprint of each segment
-stage_song.mp4      the joined cut
+storyboard.json     剧本存档节点写的清洗后分镜 JSON
+<版本名>.mp4          the joined cut — 名字永远等于它所在的目录名
 ```
+
+`<剧本名>` 取自 PACK 头部的 `Project`（源视频模式下取视频文件名），`<版本名>` 取自
+会话名控件；会话名留空时自动 `r1`/`r2`…，所以**同一部剧本每次全新渲染都会翻开新的一页**，
+上一版的产出原封不动还在。两个名字都由 `session.resolve_session_dir()` 一次算定。
+
+A sidecar and its mp4 are always written together or not at all, and the join reads a
+sidecar only when it decodes to exactly the frame count the mp4 reports. A missing,
+unreadable or short `.frames.mkv` falls back to that segment's mp4 with a warning — it
+never silently shortens the film.
 
 **Each shot is its own node execution**, not one loop hidden inside a container node, so
 `seg_03.mp4` and `manifest.json` are both written to disk the moment segment 3 finishes —
@@ -428,7 +478,7 @@ change the fingerprint cannot see. Rename the session or turn `resume` off when 
 that.
 
 Need to add more shots to a session that already finished? **H3 Load Session**'s `chain`
-output wires straight into another **H3 Render Segment**'s `chain_state` input, same as
+output wires straight into another **H3 渲染单段**'s `chain_state` input, same as
 chaining live segments — it renders on, without touching what is already there.
 
 ---
@@ -441,20 +491,20 @@ nodes and press **Ctrl+B** to un-bypass them, then select the shots in group **A
 **Ctrl+B** those off. Run with both halves live and you render — and pay GPU time for —
 both.
 
-It shares the **H3 Chain Settings** node with the chain, so the models, sampler, canvas
+It shares the **H3 链路设置** node with the chain, so the models, sampler, canvas
 size and `chain_seed` are already the ones your session used. They have to be.
 
 One segment came out wrong — a fluffed line, a hand through a lamppost. Normally
 re-rendering segment N changes its ending, so every segment after it stops joining and
 has to be re-rendered too. On a seven-shot chain, fixing shot 2 costs you six renders.
 
-**H3 Repair Segment pins both ends.** The opening is pinned to the previous segment's
+**H3 修复单段 pins both ends.** The opening is pinned to the previous segment's
 handoff clip; the ending is pinned to *the very clip the next segment already opens on*.
 The replacement lands between two fixed points and nothing downstream moves.
 
 1. Type the `session_name` into **H3 Load Session**. It prints what is in that session.
 2. Set `segment_number` (1-based, matching `seg_NN.mp4`).
-3. Rebuild that shot on the **H3 Repair Segment** node — same references, same length,
+3. Rebuild that shot on the **H3 修复单段** node — same references, same length,
    fixed prompt.
 4. Run. The old file is kept as `seg_NN.replaced.mp4`, the node's own `video` output
    plays the replacement immediately, and the whole cut is re-joined.
@@ -535,28 +585,31 @@ images are in each folder's `refs/`.
 
 ## The nodes
 
+（ID ↔ 中文名 ↔ 产出目录 的权威对照表在文首[「节点命名与产出目录」](#节点命名与产出目录唯一对照表)；
+下面只说各自干什么。）
+
 | Node | Does |
 | --- | --- |
-| **H3 Chain Settings** | Models, sampler, canvas, seed and session name in one bundle. Every other node here takes it. |
-| **H3 Director** | The one node most workflows use: a script (`shots_json`) plus reference media in, a finished timeline and a single continuous cut out — render, seam, export and report all in a single pass. `refine` and `face_refine` are optional inputs; leave them out and the Director renders exactly as it always did. |
-| **H3 Prompt Pack Parser** | Turns a PACK script into `shots_json`, validating it as it goes. |
-| **H3 Script Translate** | Chinese script → one English version, with three fallbacks (self-check → re-translate → salvage) so a failed call never silently drops a line. |
-| **H3 Refine** | Optional second sample pass. Wire `sigmas` (a `denoise` < 1 schedule) and its `refine` output into the Director. |
-| **H3 FaceRefine** | Optional face pass: tracks and crops each face, re-samples it, stitches it back, and fades the join so the seam does not step. **Quality self-check** is on by default — see below. |
-| **MinimaxH3SaveJson** | Writes the storyboard to `output/h3_continuous/<session>/storyboard.json`. |
-| **MinimaxH3LoadJson** | Reads a storyboard back. |
+| **H3 链路设置** `H3ChainSettings` | Models, sampler, canvas, seed, session name and script name in one bundle. Every other node here takes it. |
+| **H3 导演** `H3Director` | The one node most workflows use: a script (`shots_json`) plus reference media in, a finished timeline and a single continuous cut out — render, seam, export and report all in a single pass. `refine` and `face_refine` are optional inputs; leave them out and the Director renders exactly as it always did. |
+| **H3 分镜提示词 PACK** `H3PromptPackParser` | Turns a PACK script into `shots_json`, validating it as it goes. |
+| **H3 剧本英译** `H3ScriptTranslate` | Chinese script → one English version, with three fallbacks (self-check → re-translate → salvage) so a failed call never silently drops a line. |
+| **H3 二采精修** `H3Refine` | Optional second sample pass. Wire `sigmas` (a `denoise` < 1 schedule) and its `refine` output into the Director. |
+| **H3 脸部修复** `H3FaceRefine` | Optional face pass: tracks and crops each face, re-samples it, stitches it back, and fades the join so the seam does not step. **Quality self-check** is on by default — see below. |
+| **H3 剧本存档** `H3StoryboardSave` | Writes the storyboard to `h3_continuous/<剧本名>/<版本名>/storyboard.json` —— 和渲染**同一个目录**（两个名字都取自 JSON）。 |
+| **H3 剧本读档** `H3StoryboardLoad` | Reads a storyboard back（下拉列出的就是上面那些 JSON 的相对路径）。 |
 
 > `H3 Chain to Video`, `H3 Load Session`, `H3 Shot Board`, `H3 Shot Renderer`,
 > `H3 Segment Timeline`, `H3 Shot Prompt`, `H3 Script Batch Render` and
 > `H3 Script Repair Segment` were removed on 2026-09-20 — the Director replaced
-> all of them. `H3 Render Segment` and `H3 Repair Segment` still exist as classes
+> all of them. `H3RenderSegment` and `H3RepairSegment` still exist as classes
 > and are called by the Director internally, but are not registered as nodes.
 
 ### Face quality self-check
 
 H3 renders a face as a smear whenever the head is a small fraction of the frame —
 a property of head-size-in-frame, not of resolution, so it survives 720p and up.
-`H3 FaceRefine` fixes that by cropping the face to fill the canvas and re-sampling
+`H3 脸部修复` fixes that by cropping the face to fill the canvas and re-sampling
 it. The trap is that nothing in that chain looks at the result: `denoise` goes up
 one notch, the face turns to wax, and the pipeline carries on regardless.
 
@@ -821,6 +874,18 @@ The **8 GB figures** in [It runs on 8 GB](#it-runs-on-8-gb) and
 measurements — an RTX 3070 with 8192 MB at 864×480, read out of ComfyUI's own
 `Prompt executed in` lines and sampler progress bars, not extrapolated from the 12 GB
 numbers above.
+
+---
+
+Four capabilities here are borrowed from
+[`AIMixer/ComfyUI_MiniMaxH3_Director`](https://github.com/AIMixer/ComfyUI_MiniMaxH3_Director),
+Apache-2.0: the external **`H3 二采精修`** second-pass form, **`H3 脸部修复`** (which that
+pack itself adapts from `ComfyUI-H3-FaceRefine`, MIT, Carasibana), the per-step seam redraw
+mask **`seam_remask`**, and the lossless segment cache
+(`marquee_director/frames_cache.py`, after its `lib/frames_ffv1.py`). Reimplemented rather
+than copied — the frame cache here goes through PyAV instead of a spawned `ffmpeg`, and
+stores 16-bit planar RGB because PyAV's `ffv1` encoder refuses 8-bit `rgb24`/`gbrp` — but
+the ideas, and in places the constant choices, are theirs.
 
 ---
 

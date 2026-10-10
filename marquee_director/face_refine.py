@@ -7,7 +7,7 @@
     解码成片 → 逐帧检测并跟踪人脸 → 仿射裁出特写画布 → 把裁图注入 AV latent 的
     视频流 → 低 denoise 重采一次 → 解码 → 按仿射逆变换贴回 → 接缝处淡回原图
 
-做成**可选外接节点**，与 ``H3 Refine``（二采）同一套契约：接到 Director 的
+做成**可选外接节点**，与 ``H3 二采精修``（二采）同一套契约：接到 Director 的
 ``face_refine`` 口才生效，不接（或接了没给 sigmas）就完全不动成片。
 
 ★ 接缝是本模块唯一需要自己想的地方，也是它和别的包不一样的地方。
@@ -56,7 +56,9 @@ CATEGORY = "ComfyUI_Marquee_Director"
 # 外接可选节点的载体类型。Director 的 face_refine 口与这个节点的输出口是同一个。
 H3FaceRefine = None  # 下面用 io.Custom 赋值（io 需要在 comfy_api 可用后导入）
 
-SKIP_NO_FACE = "FaceRefine skipped"
+# 报告里那句「这一段没修」。**不带节点名**：节点 ID 随时会改（2026-10-10 就改了一轮），
+# 而这句是给人读的，读的人认的是「脸部修复」这个词，不是某个 class 名。
+SKIP_NO_FACE = "脸部修复跳过"
 
 # 接缝淡出的兜底帧数（"跟随回放衔接"取不到 handoff 时用）。
 DEFAULT_SEAM_FADE_FRAMES = 39
@@ -135,12 +137,12 @@ def load_detector(name: str):
                 break
     if path is None:
         raise FileNotFoundError(
-            "FaceRefine 检测器 '%s' 未找到。请放到 ComfyUI/models/ultralytics/bbox/。"
+            "「H3 脸部修复」检测器 '%s' 未找到。请放到 ComfyUI/models/ultralytics/bbox/。"
             % name)
     try:
         from ultralytics import YOLO
     except ImportError as exc:
-        raise ImportError("FaceRefine 需要 ultralytics：pip install ultralytics") from exc
+        raise ImportError("「H3 脸部修复」需要 ultralytics：pip install ultralytics") from exc
     model = YOLO(path)
     _DETECTOR_CACHE[name] = model
     return model
@@ -265,7 +267,7 @@ def _rank_box(box, frame_w: int, frame_h: int, select: str) -> float:
 def track_and_crop(images: torch.Tensor, pack: dict):
     """Return ``(crops [N,ch,cw,3], transform, report)``; no face -> ``(None, None, note)``."""
     if images.ndim != 4 or images.shape[0] < 1:
-        raise ValueError("FaceRefine 需要 IMAGE 视频帧 [N,H,W,C]。")
+        raise ValueError("「H3 脸部修复」需要 IMAGE 视频帧 [N,H,W,C]。")
     frames = images[..., :3].contiguous()
     n_frames, height, width, _ = frames.shape
     detector = load_detector(str(pack.get("detector") or "face_yolov8m.pt"))
@@ -290,7 +292,7 @@ def track_and_crop(images: torch.Tensor, pack: dict):
             boxes = res.boxes.xyxy.tolist() if len(res.boxes) else []
         except Exception as exc:
             # common.log 是函数不是 logger（它内部走 logging.info），别写 log.debug。
-            log("FaceRefine: frame %d detect failed (%s)", i, exc)
+            log("face_refine: frame %d detect failed (%s)", i, exc)
             boxes = []
         if not boxes:
             continue
@@ -375,7 +377,7 @@ def track_and_crop(images: torch.Tensor, pack: dict):
         "face_rect": face_rect,
         "crop_factor": float(crop_factor),
     }
-    report = ("FaceRefine track: %d/%d 帧有脸, select=%s, canvas=%dx%d (%s), crop×%g"
+    report = ("脸部修复跟踪：%d/%d 帧有脸, select=%s, canvas=%dx%d (%s), crop×%g"
               % (found, n_frames, select, canvas_w, canvas_h, canvas_mode, crop_factor))
     return crops, transform, report
 
@@ -524,7 +526,7 @@ def inject_video_latent(av_latent: dict, images: torch.Tensor, vae) -> dict:
     if not (isinstance(samples, comfy.nested_tensor.NestedTensor)
             or getattr(samples, "is_nested", False)):
         raise ValueError(
-            "FaceRefine 需要 MiniMax H3 联合 AV latent（NestedTensor），"
+            "「H3 脸部修复」需要 MiniMax H3 联合 AV latent（NestedTensor），"
             "拿到的是 %s。" % type(samples).__name__)
 
     members = list(samples.unbind())
@@ -535,7 +537,7 @@ def inject_video_latent(av_latent: dict, images: torch.Tensor, vae) -> dict:
     tgt_t, tgt_h, tgt_w = video_tmpl.shape[-3], video_tmpl.shape[-2], video_tmpl.shape[-1]
     got_t, got_h, got_w = encoded.shape[-3], encoded.shape[-2], encoded.shape[-1]
     if (got_h, got_w) != (tgt_h, tgt_w):
-        raise ValueError("FaceRefine 裁剪画布与 H3 latent 空间不一致：编码 %dx%d，期望 %dx%d。"
+        raise ValueError("「H3 脸部修复」裁剪画布与 H3 latent 空间不一致：编码 %dx%d，期望 %dx%d。"
                          % (got_h, got_w, tgt_h, tgt_w))
     if got_t != tgt_t:
         if got_t > tgt_t:
@@ -643,9 +645,9 @@ def apply_face_refine(settings, segment, images, *, prompt="", replay_frames=0):
                                         prompt=prompt, replay_frames=replay_frames)
     except Exception:
         import traceback
-        log("FaceRefine 失败，本段沿用未修脸的成片（画面不受影响）：\n%s",
+        log("face_refine: 失败，本段沿用未修脸的成片（画面不受影响）：\n%s",
             traceback.format_exc())
-        return images, ("FaceRefine 出错，已跳过（画面沿用未修脸的成片，"
+        return images, ("脸部修复出错，已跳过（画面沿用未修脸的成片，"
                         "详见日志堆栈）")
 
 
@@ -735,7 +737,7 @@ def _apply_face_refine_inner(settings, segment, images, pack, *,
                 settings, segment, pack, crops, transform,
                 prompt=prompt, seed=seed, denoise_scale=scale)
         except Exception as exc:                    # 采样本身炸了这一遍
-            log("FaceRefine 第 %d/%d 遍采样失败：%s", attempt, attempts, exc)
+            log("face_refine: 第 %d/%d 遍采样失败：%s", attempt, attempts, exc)
             if attempt >= attempts:
                 break
             seed = (seed * 1103515245 + 12345) % (1 << 63)
@@ -769,7 +771,7 @@ def _apply_face_refine_inner(settings, segment, images, pack, *,
             best = (score, stitched)
         line = face_qc.format_report(verdict, attempt, attempts)
         notes.append(line)
-        log("FaceRefine %s", line)
+        log("%s", line)
         if verdict.get("ok"):
             break
         if attempt < attempts:
@@ -779,7 +781,7 @@ def _apply_face_refine_inner(settings, segment, images, pack, *,
             scale *= QC_DENOISE_DISCOUNT
 
     if best is None:                                # 每一遍都炸在采样里
-        return images, track_note + "; FaceRefine 全部重试失败，已沿用原片"
+        return images, track_note + "; 脸部修复全部重试失败，已跳过（沿用原片）"
 
     note = "%s; canvas %dx%d" % (track_note, transform["canvas"][0],
                                  transform["canvas"][1])
@@ -799,22 +801,22 @@ def _build_node():
     H3FaceRefine = io.Custom("H3_FACE_REFINE")
 
     class H3FaceRefineNode(io.ComfyNode):
-        """Pack a face-refine pass. Wire ``face_refine`` into H3 Director."""
+        """Pack a face-refine pass. Wire ``face_refine`` into ``H3Director``."""
 
         @classmethod
         def define_schema(cls):
             return io.Schema(
                 node_id="H3FaceRefine",
-                display_name="H3 FaceRefine（脸部修复）",
+                display_name="H3 脸部修复（逐帧检测重采贴回）",
                 category=CATEGORY,
                 description=(
-                    "Optional face pass for H3 Director. Connect `sigmas` (a "
-                    "denoise<1 schedule) and wire `face_refine` into the "
-                    "Director: every segment's decoded frames are then tracked, "
+                    "Optional face pass for H3Director. Connect `sigmas` (a "
+                    "denoise<1 schedule) and wire `face_refine` into "
+                    "H3Director: every segment's decoded frames are then tracked, "
                     "cropped to a close-up canvas, re-sampled, and stitched back "
                     "with the seam faded to the unrefined frames so the join "
-                    "does not step. Unwired (or wired without `sigmas`) the "
-                    "Director behaves exactly as before.\n\n"
+                    "does not step. Unwired (or wired without `sigmas`) "
+                    "H3Director behaves exactly as before.\n\n"
                     "Needs ultralytics and a YOLO weight in "
                     "ComfyUI/models/ultralytics/bbox/ (face_yolov8m.pt). No "
                     "face detected -> the segment is left untouched."

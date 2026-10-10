@@ -30,6 +30,13 @@ import time
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 PKG = os.path.join(ROOT, "marquee_director")
+# 本包在 <ComfyUI>/custom_nodes/ 下，所以上两级就是 ComfyUI 根目录。
+# routes._find_session 现在直接用 session.sanitize（本尊，且不吃 torch），而
+# session.py 顶部要 import folder_paths —— 没有这条路径就找不到它。
+COMFY_ROOT = os.path.dirname(os.path.dirname(ROOT))
+for _p in (COMFY_ROOT, ROOT, PKG):
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
 
 FAIL = []
 

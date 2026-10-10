@@ -10,7 +10,7 @@
 跑法（必须用 ComfyUI 的 venv，director 依赖 comfy）：
     <ComfyUI>/.venv/Scripts/python.exe tests/test_repair_reseed.py
 """
-import importlib.machinery, importlib.util, os, sys
+import os, sys
 
 # 本包在 <ComfyUI>/custom_nodes/ 下，所以上两级就是 ComfyUI 根目录。
 PKG = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -43,15 +43,12 @@ for i in range(5):
     check(N._resolve_seed(SETTINGS, {"seed": rs}, i) == rs,
           "seg%d 的 seed_override 未被 _resolve_seed 采纳" % (i + 1))
 
-# ③ 必须与 subtitle_qc 同式（两处跳变不能各写一份，否则日后各自漂移）
-_p = os.path.join(PKG, "marquee_director", "subtitle_qc.py")
-_ld = importlib.machinery.SourceFileLoader("sq", _p)
-_sp = importlib.util.spec_from_file_location("sq", _p, loader=_ld)
-sq = importlib.util.module_from_spec(_sp)
-_sp.loader.exec_module(sq)
+# ③ 跳变式必须还是那条乘同余（老测试从 subtitle_qc 按文件路径加载来对公式，
+#   但 subtitle_qc 早已不持有这个公式，而且它现在 `from .common import log`，
+#   按路径加载没有包上下文会直接 ImportError —— 两个理由都够把它换掉）。
 _expected = (326991 * 1103515245 + 12345) % (1 << 63)   # v25sub 日志实测值
 check(D._repair_reseed(SETTINGS, 1) == _expected,
-      "_repair_reseed 与 subtitle_qc 的跳变式不一致（seg2 应为 %d）" % _expected)
+      "_repair_reseed 的跳变式变了（seg2 应为 %d）" % _expected)
 
 # ④ 源码级：reseeded 段必须跳过种子对账，否则修复会在整链重跑时被重渲
 _dsrc = open(os.path.join(PKG, "marquee_director", "director.py"), encoding="utf-8").read()

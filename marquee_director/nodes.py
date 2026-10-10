@@ -1,28 +1,45 @@
 """The current nodes.
 
-    H3 Chain Settings   ->  models, sampler, canvas and seed, bundled once
-    H3 Director         ->  the whole chain in one node: script -> render ->
-                            timeline -> one cut (see ``director.py``)
+★ **命名规范（2026-10-10 全量统一）**：``node_id`` 一律 ``H3`` + 大驼峰，
+``display_name`` 一律 ``H3 中文名（一句话说明）``，不带 emoji、不带包名。
+节点 ID 是工作流 JSON 里 ``"type"`` 的那个字符串，也是 ``/h3/*`` 路由、
+前端 ``findNodeByClass`` 和 README 对照表用的同一个词 —— 同一个节点在六处
+（注册表 / 画布标题 / 面板文案 / 报错指路 / 文档 / 工作流 JSON）必须叫同一个
+名字，否则用户按文档找不到节点。
 
-``H3 Render Segment`` / ``H3 Repair Segment`` are **not registered** as standalone
-nodes any more: ``H3Director`` calls their ``execute()`` directly as internal
-engine, so the classes stay, but the old "wire one node per shot" paradigm they
-belonged to is gone. The retired nodes (``H3 Script Batch Render``,
-``H3 Script Repair Segment``, ``H3 Chain to Video``, ``H3 Load Session``,
-``H3 Segment Timeline``, ``H3 Shot Prompt``, ``H3 Shots Board``,
-``H3 Shot Renderer``) were deleted on 2026-09-20 --
-all of them are superseded by ``H3Director``.
+**节点 ID ↔ 中文名 ↔ 产出目录**（目录都相对 ComfyUI 自己的输出目录；
+``session.output_root()`` 是全包唯一解析它的地方）：
 
-``MinimaxH3LoadJson`` was **not** deleted -- it is still registered, and it is
-the read side of ``MinimaxH3SaveJson``. (The note in ``get_node_list`` used to
-list it among the deleted ones; that was wrong and made the registry look one
-node smaller than it is.)
+* ``H3ChainSettings``   = 「H3 链路设置」 —— 不写盘
+* ``H3PromptPackParser`` = 「H3 分镜提示词 PACK」 —— 不写盘（定下剧本名/会话名）
+* ``H3ScriptTranslate`` = 「H3 剧本英译」 —— 不写盘
+* ``H3Director``        = 「H3 导演」 —— ``h3_continuous/<剧本名>/<版本名>/``
+  （段 mp4、manifest.json、成片、时间线）；开「逐段导出」时另写
+  ``h3_seg_export/<时间戳>/``，**故意在总根之外**（那是交付物，清理不碰）
+* ``H3StoryboardSave``  = 「H3 剧本存档」 —— 同会话目录下的 ``storyboard.json``
+* ``H3StoryboardLoad``  = 「H3 剧本读档」 —— 只读
+* ``H3Refine``          = 「H3 二采精修」 —— 不写盘
+* ``H3FaceRefine``      = 「H3 脸部修复」 —— 不写盘
+* ``H3RenderSegment`` / ``H3RepairSegment`` = 「H3 渲染单段」/「H3 修复单段」 ——
+  **引擎类，不注册**：``H3Director`` 直接调它们的 ``execute()``，所以类留在包里，
+  但"一个镜头接一个节点"那种接线范式已经没有了。修复单段写回同一个会话目录。
 
-Every H3 Render Segment is its own node execution, so its ``video`` output populates
--- and can feed a Preview Video node, or anything else -- the moment that one segment
-finishes, independent of how many more are still to come. That is also what makes
-resume robust to a hard kill: the manifest is rewritten after every segment's own
-execute() returns, not once at the end of a run that might not reach one.
+已删除的旧节点（``H3ScriptBatchRender`` / ``H3ScriptRepairSegment`` /
+``H3ChainToVideo`` / ``H3LoadSession`` / ``H3SegmentTimeline`` /
+``H3ShotPrompt`` / ``H3ShotsBoard`` / ``H3ShotRenderer``，2026-09-20）全部被
+``H3Director`` 取代。
+
+``H3StoryboardSave`` / ``H3StoryboardLoad`` 原名 ``MinimaxH3SaveJson`` /
+``MinimaxH3LoadJson``。**改名是必须的而不是为了整齐**：另一个已安装的包
+``Comfyui-MinimaxH3-Ref2VA-Auto-Video`` 也注册这两个 ID，谁先加载谁赢，
+于是「② 剧本存档」节点会静默变成别人家的那个（槽位完全不同）。
+
+Every ``H3RenderSegment`` is its own node execution, so its ``video`` output
+populates -- and can feed a Preview Video node, or anything else -- the moment
+that one segment finishes, independent of how many more are still to come. That
+is also what makes resume robust to a hard kill: the manifest is rewritten after
+every segment's own execute() returns, not once at the end of a run that might
+not reach one.
 """
 
 import json
@@ -35,6 +52,7 @@ from comfy_api.latest import ComfyExtension, io
 
 from . import session as session_mod
 from . import video_io
+from . import frames_cache
 from . import subtitle_qc
 from .common import (
     FPS,
@@ -61,6 +79,18 @@ from .engine import (
 from . import wardrobe as wardrobe_mod
 
 CATEGORY = "ComfyUI_Marquee_Director"
+
+
+def _lossless_frames(settings):
+    """这一段要不要写 FFV1 无损边车（H3Director 的「段缓存像素」控件决定）。
+
+    单独一个函数而不是到处写 `settings.get(...) == "ffv1"`：段与尾锚两处都必须用
+    同一个判断，两边漂移一寸，就会出现「段有边车、尾锚没有」这种读起来精度不一致
+    的会话。
+    """
+    return frames_cache.enabled_for(settings)
+
+
 # 2026-09-20 清理：STABILIZE_TOOLTIP 是旧节点下线后遗留的（全包零引用），
 # 但它记的东西没处可查 —— 已回收进 director.py 的 stabilize 控件 tooltip
 # （译成中文，与其余控件一致），不是删掉。
@@ -175,11 +205,11 @@ class H3ChainSettingsNode(io.ComfyNode):
     def define_schema(cls):
         return io.Schema(
             node_id="H3ChainSettings",
-            display_name="H3 Chain Settings",
+            display_name="H3 链路设置（模型/采样器/画布/种子）",
             category=CATEGORY,
             description="Everything the chain and the repair node both need: models, "
                         "sampler, canvas and seed. Wire one of these into either.\n\n"
-                        "session_name is read by H3 Render Segment (for the first segment "
+                        "session_name is read by H3 渲染单段 (for the first segment "
                         "of a chain; later ones inherit it via chain_state) but NOT by H3 "
                         "Repair Segment, which keeps its own session_name -- a repair "
                         "targets a session by name explicitly and does not have to match "
@@ -207,14 +237,17 @@ class H3ChainSettingsNode(io.ComfyNode):
                              tooltip="Each segment derives its own seed from this one, so "
                                      "changing it re-renders the whole chain."),
                 io.String.Input(
-                    "session_name", default="my_chain", multiline=False,
-                    tooltip="Folder under output/h3_continuous/. Lives here, not on each "
-                            "H3 Render Segment, because a chain only ever has one session "
-                            "no matter how many segment nodes are wired into it -- the "
-                            "first segment (the one with chain_state unconnected) reads it "
-                            "from here; every segment after that inherits the session "
-                            "object it already resolved, off the chain_state wire.\n\n"
-                            "★ 接 H3 Director 时这一项**不生效**：Director 的会话名一律取自"
+                    "session_name", display_name="会话名（版本）", default="",
+                    multiline=False,
+                    tooltip="落盘第二层文件夹名：output/h3_continuous/<剧本名称>/<会话名>/。\n\n"
+                            "Live here, not on each H3RenderSegment, because a chain only "
+                            "ever has one session no matter how many segment nodes are wired "
+                            "into it -- the first segment (the one with chain_state "
+                            "unconnected) reads it from here; every segment after that "
+                            "inherits the session object it already resolved, off the "
+                            "chain_state wire.\n\n"
+                            "留空 = 自动 r1/r2…（接了「剧本名称」时），或 h3_pack（两个都空）。\n\n"
+                            "★ 接「H3 导演」时这一项**不生效**：导演的会话名一律取自"
                             "分镜 JSON 的 session_name（H3 分镜提示词 PACK 会把它写成 PACK "
                             "头部的 Project）。要换会话目录，改 PACK 头部的 Project，"
                             "别改这里 —— 两边不一致时日志与运行报告里会明确告警。"),
@@ -237,6 +270,20 @@ class H3ChainSettingsNode(io.ComfyNode):
                 # 逐 step 重绘掩码。同样挂**末尾**（本节点全 required 段）。
                 io.Boolean.Input("seam_remask", default=False, advanced=True,
                                  tooltip=SEAM_REMASK_TOOLTIP),
+                # 剧本名 = 落盘第一层文件夹。**必须挂在列表最末尾**：widget 顺序就是
+                # 已存工作流 widgets_values 的对齐顺序，插在中间会让既有控件整体错位
+                # 一格（advanced 也一样）。
+                io.String.Input(
+                    "script_name", display_name="剧本名称（落盘第一层）", default="",
+                    multiline=False, advanced=True,
+                    tooltip="output/h3_continuous/<剧本名称>/<会话名>/ 的第一层。\n\n"
+                            "接「H3 导演」时通常**不用填**：剧本名自动取 PACK 头部的 "
+                            "Project（源视频模式下自动取视频文件名），中文片名直接就是文件夹名。\n"
+                            "这里留空且上游也没给名字时，产出落在 "
+                            "output/h3_continuous/<会话名>/（升级前的单层布局）。\n\n"
+                            "★ 会话名留空时，全新渲染（复用关掉）会在剧本夹里自动开 "
+                            "r1/r2…，上一版产出一个字节都不动 —— 这就是「同一部剧本的多条 "
+                            "take 分开放」的入口。"),
             ],
             outputs=[H3Settings.Output(display_name="settings")],
         )
@@ -244,12 +291,14 @@ class H3ChainSettingsNode(io.ComfyNode):
     @classmethod
     def execute(cls, model, clip, vae, audio_vae, sampler, sigmas, width, height,
                 chain_seed, session_name, ref_image_size, handoff_mode="latent",
-                drift_arrest=0.0, seam_redraw=0.10, seam_remask=False) -> io.NodeOutput:
+                drift_arrest=0.0, seam_redraw=0.10, seam_remask=False,
+                script_name="") -> io.NodeOutput:
         return io.NodeOutput({
             "model": model, "clip": clip, "vae": vae, "audio_vae": audio_vae,
             "sampler": sampler, "sigmas": sigmas,
             "width": width, "height": height, "seed": chain_seed,
             "session_name": session_name, "ref_image_size": ref_image_size,
+            "script_name": script_name,
             "handoff_mode": handoff_mode, "drift_arrest": float(drift_arrest),
             "seam_redraw": float(seam_redraw),
             "seam_remask": bool(seam_remask),
@@ -288,10 +337,10 @@ HANDOFF_TOOLTIP = (
 
 
 SEGMENT_MODEL_TOOLTIP = (
-    "A MODEL for THIS SHOT ONLY, overriding the one on H3 Chain Settings. Leave it "
+    "A MODEL for THIS SHOT ONLY, overriding the one on H3 链路设置. Leave it "
     "unconnected and the segment renders on the settings model, which is what every "
     "segment did before this input existed.\n\n"
-    "This is where a per-shot LoRA goes: wire H3 Chain Settings' own model source "
+    "This is where a per-shot LoRA goes: wire H3ChainSettings' own model source "
     "through a LoraLoaderModelOnly (or any LoRA stacker) and into here, and only "
     "this segment sees it. Different LoRAs on different segments is the point -- a "
     "character LoRA that carries the whole take, a motion or style LoRA that comes "
@@ -308,7 +357,7 @@ SEGMENT_MODEL_TOOLTIP = (
 
 
 def _segment_schema():
-    """The shot fields shared by H3 Render Segment and H3 Repair Segment."""
+    """The shot fields shared by H3RenderSegment and H3RepairSegment."""
     return [
         io.String.Input("prompt", multiline=True, dynamic_prompts=False,
                         tooltip=PROMPT_TOOLTIP),
@@ -390,7 +439,7 @@ def _segment_from_widgets(prompt, seconds, handoff_seconds, seed_override,
 def _with_model(settings, model):
     """The settings bundle this shot renders on, with its own model swapped in.
 
-    A copy, never a mutation: one H3 Chain Settings node feeds every segment in the
+    A copy, never a mutation: one H3ChainSettings node feeds every segment in the
     chain, so writing into it would leak this shot's LoRA into all the others -- and
     into their cache keys, re-rendering the lot.
     """
@@ -424,9 +473,9 @@ def _with_wardrobe_fixes(prompt):
 
 
 CHAIN_STATE_TOOLTIP = (
-    "Wire in the PREVIOUS H3 Render Segment's chain_state to continue its take. Leave "
+    "Wire in the PREVIOUS H3RenderSegment's chain_state to continue its take. Leave "
     "unconnected on the first segment of a session, or to start a new one.\n\n"
-    "Also accepts H3 Load Session's chain output -- wiring that in here appends new "
+    "Also accepts H3Director's chain output -- wiring that in here appends new "
     "segments onto a session that was already finished, without re-rendering it."
 )
 
@@ -459,20 +508,20 @@ class H3RenderSegmentNode(io.ComfyNode):
     def define_schema(cls):
         return io.Schema(
             node_id="H3RenderSegment",
-            display_name="H3 Render Segment",
+            display_name="H3 渲染单段（链上的一段）",
             category=CATEGORY,
             description="One shot in a continuous take: a prompt, its references, how long "
                         "it runs -- and it renders right here. Chain shots by wiring this "
-                        "node's chain_state output into the next H3 Render Segment's "
+                        "node's chain_state output into the next H3RenderSegment's "
                         "chain_state input; each one after the first opens on an exact "
                         "replay of the one before it, anchored with MiniMaxH3AddGuide, so "
                         "the cut is invisible.\n\n"
                         "This node's video output is real the moment THIS segment finishes "
                         "-- you do not wait for the rest of the chain to preview, save or "
                         "post-process it. The segment is also written to "
-                        "output/h3_continuous/<session>/ and reused on the next queue, so a "
-                        "crash, an interrupt or an edited prompt only costs the segments "
-                        "that actually changed.",
+                        "output/h3_continuous/<剧本名>/<会话名>/ and reused on the next "
+                        "queue, so a crash, an interrupt or an edited prompt only costs "
+                        "the segments that actually changed.",
             inputs=[
                 H3Settings.Input("settings"),
                 H3Chain.Input("chain_state", optional=True, tooltip=CHAIN_STATE_TOOLTIP),
@@ -513,7 +562,7 @@ class H3RenderSegmentNode(io.ComfyNode):
         handoff = segment["handoff"]
 
         if chain_state is None:
-            sess = session_mod.Session(settings["session_name"])
+            sess = session_mod.Session.from_settings(settings)
             index, previous_key, anchor, records = 0, None, None, []
             reference = None
         else:
@@ -595,8 +644,13 @@ class H3RenderSegmentNode(io.ComfyNode):
                 # reads that instead of decoding the mp4's AAC back, which is what kept
                 # the soundtrack from being encoded twice on its way to the finished
                 # film. Same reason the handoff tails below already ask for it.
+                # lossless_frames: the same argument for the picture -- the join and
+                # any later repair read the FFV1 sidecar instead of decoding crf10
+                # pixels and re-encoding them. Off unless the Director asks (「段缓存
+                # 像素」= 无损 FFV1), and off means any stale sidecar is deleted here.
                 video_io.save_clip(sess.segment_path(index), images_out, audio_out,
-                                   exact_audio=True)
+                                   exact_audio=True,
+                                   lossless_frames=_lossless_frames(settings))
                 _hits = subtitle_qc.scan(sess.segment_path(index))
                 if not _hits:
                     if qc_retries:
@@ -642,7 +696,8 @@ class H3RenderSegmentNode(io.ComfyNode):
                 # conditioning signal the next segment renders against. Bringing
                 # it to delivery level would move the condition itself.
                 video_io.save_clip(sess.tail_path(index), pixel_tail[0], pixel_tail[1],
-                                   exact_audio=True, master_audio=False)
+                                   exact_audio=True, master_audio=False,
+                                   lossless_frames=_lossless_frames(settings))
                 # Saved uncorrected, deliberately: the file on disk is what this
                 # segment actually ended on, which is what the repair node has to pin
                 # against. Drift correction is applied when the anchor is consumed.
@@ -820,7 +875,7 @@ def _script_segment(asset, shot, include_global_prompt=True,
 
     Two image sources are supported:
     - The original Ref2VA Auto board: global roles/prop/scene plus shot.appear.
-    - Local shot prompts: shot.image_paths, written by H3 Shot Prompt nodes.
+    - Local shot prompts: shot.image_paths, carried in on the storyboard JSON.
     If ``ref_images_override`` is supplied it wins over both.
     """
     images = []
@@ -908,7 +963,7 @@ class H3RepairSegmentNode(io.ComfyNode):
     def define_schema(cls):
         return io.Schema(
             node_id="H3RepairSegment",
-            display_name="H3 Repair Segment",
+            display_name="H3 修复单段（原地重渲那一段）",
             category=CATEGORY,
             description="Re-render one segment of a finished session, in place.\n\n"
                         "Normally regenerating segment N changes its ending, so every segment "
@@ -917,7 +972,13 @@ class H3RepairSegmentNode(io.ComfyNode):
                         "very clip the next segment already opens on. Nothing downstream moves.",
             inputs=[
                 H3Settings.Input("settings"),
-                io.String.Input("session_name", default="my_chain", multiline=False),
+                io.String.Input(
+                    "session_name", display_name="会话名（版本）", default="",
+                    multiline=False,
+                    tooltip="要修的那一条 take：output/h3_continuous/<剧本名称>/<会话名>/。\n\n"
+                            "留空 = 修「剧本名称」那一层里最新的版本。想修旧版本就把它的确切"
+                            "文件夹名填进来（r1、v2暖色…）。\n"
+                            "★ 剧本名那一层从 settings 取，与整条渲染同一个来源。"),
                 io.Int.Input("segment_number", default=2, min=1, max=32,
                              tooltip="1-based, matching seg_NN.mp4 in the session folder."),
                 *_segment_schema(),
@@ -927,7 +988,7 @@ class H3RepairSegmentNode(io.ComfyNode):
                                          "to re-render everything after this one."),
                 H3Chain.Input(
                     "chain_state", optional=True,
-                    tooltip="Wire the LAST H3 Render Segment's chain_state in here and the "
+                    tooltip="Wire the LAST H3RenderSegment's chain_state in here and the "
                             "chain is guaranteed to have rendered before this node runs -- "
                             "which is what lets one queue render a session and repair a "
                             "segment of it in one go. Without it this node can only repair a "
@@ -951,7 +1012,11 @@ class H3RepairSegmentNode(io.ComfyNode):
         prompt = _with_wardrobe_fixes(prompt)
         segment = _segment_from_widgets(prompt, seconds, handoff_seconds, seed_override,
                                         images, videos, video_audios, audios)
-        sess = session_mod.Session(session_name)
+        # 剧本名那一层从 settings 拿：Director 已经解析过一次，这里照同一个输入
+        # 重算必然得到同一个目录。少了它就是"渲染写 <剧本>/<版本>、修复读 <版本>"
+        # —— 修复会在总根下另起一个同名单层目录，把刚修好的段写到成片够不着的地方。
+        sess = session_mod.Session(
+            session_name, script=(settings or {}).get("script_name"))
         manifest = sess.load()
         # 磁盘上渲好的段可能比 manifest 里记录的多（见 Session.reconcile）。
         # 不补齐的话，修第 3 段会因为 manifest 只有 1 条记录而直接报越界。
@@ -976,7 +1041,7 @@ class H3RepairSegmentNode(io.ComfyNode):
         if not manifest:
             raise FileNotFoundError(
                 "no manifest in %s -- run the chain workflow for this session first, or "
-                "wire the last H3 Render Segment's chain_state into this node so both "
+                "wire the last H3RenderSegment's chain_state into this node so both "
                 "happen in one queue." % sess.dir)
         records = manifest["segments"]
         index = int(segment_number) - 1
@@ -1078,11 +1143,14 @@ class H3RepairSegmentNode(io.ComfyNode):
 
         target = sess.segment_path(index)
         if os.path.exists(target):
-            # Back the sidecar up with the mp4, not just the mp4. The join reads
+            # Back the sidecars up with the mp4, not just the mp4. The join reads
             # the WAV sidecar whenever one exists, so replacing a segment without
             # replacing its sidecar would splice the *previous* take's audio into
-            # the film -- and keep a stale file around to do it again.
-            for src in (target, video_io._wav_path(target)):
+            # the film -- and keep a stale file around to do it again. Same for the
+            # FFV1 pixels: a stale frame cache is read **ahead of** the new mp4, so
+            # it would silently pin the repair's seams to the take being replaced.
+            for src in (target, video_io._wav_path(target),
+                        frames_cache.frames_path(target)):
                 if os.path.exists(src):
                     shutil.copyfile(src, os.path.join(
                         sess.dir, "seg_%02d.replaced%s"
@@ -1090,7 +1158,8 @@ class H3RepairSegmentNode(io.ComfyNode):
         # exact_audio=True: a repaired segment must leave a sidecar in step with
         # its own mp4, for the reason above. master_audio stays on -- it is a
         # deliverable segment, exactly like one the render node wrote.
-        video_io.save_clip(target, images_out, audio_out, exact_audio=True)
+        video_io.save_clip(target, images_out, audio_out, exact_audio=True,
+                           lossless_frames=_lossless_frames(settings))
         length = int(images_out.shape[0])
 
         # The handoff clip is NOT rewritten while the ending is pinned: the file on disk
@@ -1108,7 +1177,8 @@ class H3RepairSegmentNode(io.ComfyNode):
                 # master_audio=False for the same reason as the render node's
                 # tail: it is a condition, not a deliverable.
                 video_io.save_clip(sess.tail_path(index), tail[0], tail[1],
-                                   exact_audio=True, master_audio=False)
+                                   exact_audio=True, master_audio=False,
+                                   lossless_frames=_lossless_frames(settings))
                 video_io.save_latent_tail(sess.tail_path(index),
                                           latent_tail(samples, handoff))
             log("pin_ending was off: segment %d's ending has moved, so segments %d..%d no "
@@ -1149,16 +1219,15 @@ class MarqueeDirectorExtension(ComfyExtension):
         from . import refine_nodes
         from . import face_refine
         from . import translate_nodes
-        # ★ 2026-09-20 旧节点下线。注册表只留现行链路：
-        #     H3 Chain Settings  →  H3 Prompt Pack Parser  →  H3 Director
-        #     （+ MinimaxH3SaveJson 存档）
-        #   H3 Refine（二采精修）/ H3 FaceRefine（脸部修复）都是**可选外接**：
+        # ★ 2026-09-20 旧节点下线。注册表只留现行链路（ID 见本模块开头的表）：
+        #     H3ChainSettings  →  H3PromptPackParser  →  H3Director
+        #     （+ H3StoryboardSave 存档 / H3StoryboardLoad 读档）
+        #   H3Refine（二采精修）/ H3FaceRefine（脸部修复）都是**可选外接**：
         #   不接到 Director 的 refine / face_refine 口就不参与渲染，注册它们
         #   不会改变任何既有链路的行为。
         #   被删的：H3ScriptBatchRender / H3ScriptRepairSegment / H3ChainToVideo /
         #   H3LoadSession / H3SegmentTimeline / H3ShotPrompt / H3ShotsBoard /
         #   H3ShotRenderer —— 全部被 H3Director 取代。
-        #   （MinimaxH3LoadJson 没删，它是 SaveJson 的读回侧，仍在用。）
         #   H3RenderSegment / H3RepairSegment 的**类**保留（H3Director 内部直接
         #   调它们的 execute()），但不再注册成独立节点。
         return [
@@ -1186,7 +1255,7 @@ except Exception as _exc:                                      # pragma: no cove
     try:
         from .common import log
 
-        log("H3 routes not registered (%s)", _exc)
+        log("routes: not registered (%s)", _exc)
     except Exception:
         pass
 
@@ -1203,6 +1272,6 @@ except Exception as _exc:                                      # pragma: no cove
     try:
         from .common import log
 
-        log("H3 cleanup not installed (%s)", _exc)
+        log("cleanup: not installed (%s)", _exc)
     except Exception:
         pass

@@ -75,6 +75,7 @@ from . import routes as routes_mod
 from . import session as session_mod
 from . import ref_images as ref_images_mod
 from . import video_io
+from . import frames_cache
 from . import wardrobe as wardrobe_mod
 from .common import (
     FPS,
@@ -85,10 +86,10 @@ from .common import (
     seconds_to_frames,
 )
 from .engine import free_between_segments, unload_due, unload_every_int
-# H3_REFINE 类型定义在这里进：Director 的 refine 口与 H3 Refine 节点的输出口
+# H3_REFINE 类型定义在这里进：Director 的 refine 口与 H3 二采精修 节点的输出口
 # 必须是同一个 io.Custom 实例，两边各建一个同名字符串也能跑，但那是两份真相。
 from .refine_nodes import H3Refine
-# 与 refine 同理：Director 的 face_refine 口和 H3 FaceRefine 节点的输出口必须是
+# 与 refine 同理：Director 的 face_refine 口和 H3 脸部修复 节点的输出口必须是
 # 同一个 io.Custom 实例。face_refine 模块已被 engine 在模块层导入，这里只是取类型。
 from .face_refine import H3FaceRefine
 from .nodes import (
@@ -154,7 +155,7 @@ _ASPECT_RE = re.compile(r"(\d{1,2})\s*[:：xX*]\s*(\d{1,2})")
 
 
 def _canvas_note(info, settings):
-    """PACK 声明的画幅 vs H3 Chain Settings 的画布，不一致就说一句。
+    """PACK 声明的画幅 vs H3 链路设置 的画布，不一致就说一句。
 
     这是 PACK 模块最有用的一个用处：画幅写 16:9、画布却是 416×736（9:16），
     渲出来是一整条竖屏片子，等到导出才发现就白烧一张卡。
@@ -175,7 +176,7 @@ def _canvas_note(info, settings):
     if abs(got - want) < 0.02:
         return ""
     return ("PACK 画幅 %s（%.3f）与画布 %d×%d（%.3f）不一致 —— "
-            "成片会是后者，要改请改「H3 Chain Settings」的 width/height。"
+            "成片会是后者，要改请改「H3 链路设置」的 width/height。"
             % (aspect, want, width, height, got))
 
 
@@ -343,11 +344,28 @@ def _clean_shot_json(shots_json):
 
 
 def _session_name_from(data, fallback):
-    """Widget wins when it is non-empty; otherwise fall back to the JSON."""
+    """Widget wins when it is non-empty; otherwise fall back to the JSON.
+
+    返回的是**版本名**（落盘第二层）。剧本名（第一层）由
+    :func:`_script_name_from` 单独取 —— 以前这两个身份挤在一个字符串里，
+    目录就只能是一层 ``h3_continuous/<会话名>/``。
+    """
     name = str(fallback or "").strip()
     if name:
         return name
-    return str(data.get("session_name") or data.get("session") or "my_chain")
+    # ``or ""`` 而不是兜到 "my_chain"：留空交给 session.resolve_session_dir
+    # 统一处理（它知道怎么配剧本名、怎么排自动版本号）。以前这里私藏一个
+    # 兜底名，存档节点那边是另一个兜底名，同一份剧本于是分居两个目录。
+    return str(data.get("session_name") or data.get("session") or "")
+
+
+def _script_name_from(data, fallback=""):
+    """剧本名（落盘第一层文件夹）：控件优先，其次分镜 JSON 里的 script_name / project。"""
+    name = str(fallback or "").strip()
+    if name:
+        return name
+    return str(data.get("script_name") or data.get("project")
+               or data.get("项目") or "")
 
 
 def _json_dumps(data) -> str:
@@ -437,7 +455,7 @@ def cleanup_segment_vram(unload_models: bool = False) -> None:
         gc.collect()
         mm.soft_empty_cache()
     except Exception as exc:                                     # pragma: no cover
-        log("H3Director: VRAM cleanup skipped (%s)", exc)
+        log("director: VRAM cleanup skipped (%s)", exc)
 
 
 # ---------------------------------------------------------------------------
@@ -1143,10 +1161,6 @@ def _shot_bounds(cuts, total_frames, min_gap, max_len):
     return out
 
 
-
-
-
-
 def _split_source_video(video, video_path, session_name, sensitivity,
                         min_shot_seconds, max_shot_seconds, fallback_prompt,
                         global_prompt, prompt_lines):
@@ -1209,7 +1223,13 @@ def _split_source_video(video, video_path, session_name, sensitivity,
         raise ValueError("没有切出任何分镜。试着调低 min_shot_seconds。")
 
     asset = {
-        "session_name": str(session_name or "my_chain"),
+        # ★ 名字一律留空而不是私藏兜底名：兜底属于 session.resolve_session_dir
+        #   （全包只有那一个 UNNAMED 常量）。这里以前写死 "my_chain"，存档节点那边
+        #   是 "h3_pack"，同一份分镜分居两个目录，面板查不到自己刚存的档。
+        "session_name": str(session_name or "").strip(),
+        # 源视频模式下，**文件名就是剧本名**：产出直接落到
+        # h3_continuous/<源视频名>/<版本名>/，磁盘上看得见是哪个片子的哪一版。
+        "script_name": os.path.splitext(os.path.basename(path))[0].strip(),
         "duration": round(total_frames / fps, 3),
         "shots_info": shots_info,
         "global": {"global_prompt": str(global_prompt or "").strip()},
@@ -1239,11 +1259,14 @@ def _export_segments(chain, label=""):
     from pathlib import Path
 
     try:
-        import folder_paths
+        from . import session as _sess
 
-        base = Path(folder_paths.get_output_directory()) / "h3_seg_export"
+        # ★ 走 session.output_root()，而且**故意落在 h3_continuous 之外**：
+        #   这里是「交付物」导出（逐段 mp4），而清理扫描只管总根里的中间产出。
+        #   并进总根的话，一次「清理没成片的会话」就会把用户要带走的东西删掉。
+        base = Path(_sess.output_root()) / "h3_seg_export"
     except Exception as exc:                                     # pragma: no cover
-        log("H3Director: segment export skipped (%s)", exc)
+        log("segment export skipped (%s)", exc)
         return None
     try:
         base.mkdir(parents=True, exist_ok=True)
@@ -1255,7 +1278,7 @@ def _export_segments(chain, label=""):
             n += 1
         root.mkdir(parents=True, exist_ok=False)
     except OSError as exc:
-        log("H3Director: segment export dir unavailable (%s)", exc)
+        log("director: segment export dir unavailable (%s)", exc)
         return None
 
     written = 0
@@ -1267,8 +1290,8 @@ def _export_segments(chain, label=""):
             shutil.copy2(src, str(root / ("seg_%04d.mp4" % (index + 1))))
             written += 1
         except Exception as exc:                                 # pragma: no cover
-            log("H3Director: segment %d export failed (%s)", index + 1, exc)
-    log("H3Director exported %d segments -> %s", written, root)
+            log("director: segment %d export failed (%s)", index + 1, exc)
+    log("exported %d segments -> %s", written, root)
     return str(root)
 
 
@@ -1310,13 +1333,13 @@ def _parse_run_segments(text, total):
 
 class H3DirectorNode(io.ComfyNode):
     """One node to replace: MinimaxH3ScriptBoard + H3ScriptBatchRender +
-    H3ChainToVideo + H3SegmentTimeline + MinimaxH3SaveJson + H3ShotSplit."""
+    H3ChainToVideo + H3SegmentTimeline + H3StoryboardSave + H3ShotSplit."""
 
     @classmethod
     def define_schema(cls):
         return io.Schema(
             node_id="H3Director",
-            display_name="🎬 ComfyUI_Marquee_Director（剧本/源视频 → 渲染 → 时间线 → 成片）",
+            display_name="H3 导演（剧本/源视频 → 渲染 → 时间线 → 成片）",
             category=CATEGORY,
             description=(
                 "One node for the whole take. Pick 剧本来源, connect `settings` "
@@ -1331,7 +1354,7 @@ class H3DirectorNode(io.ComfyNode):
                 "rendered. Combine with `dry_run` to preview the cuts first.\n\n"
                 "`chain_state` appends onto an existing session instead of "
                 "starting a new one — that is the unlimited-shot loop.\n\n"
-                "`refine` takes an optional H3 Refine node. When it is wired "
+                "`refine` takes an optional H3Refine node. When it is wired "
                 "every segment is sampled a second time (a denoise<1 schedule) "
                 "before it is decoded, and the handoff tail is cut from that "
                 "refined result — so the next segment anchors on refined frames "
@@ -1360,7 +1383,7 @@ class H3DirectorNode(io.ComfyNode):
                     tooltip="接「H3 分镜提示词 PACK」的 pack_info 输出。"
                             "有了它，Director 的 PACK 模块就能显示"
                             "（项目 / 模式 / 总时长 / 段数 / 画幅），"
-                            "并把 PACK 声明的画幅和 H3 Chain Settings 的画布对账。"),
+                            "并把 PACK 声明的画幅和 H3 链路设置 的画布对账。"),
                 io.Video.Input(
                     "video", display_name="源视频", optional=True,
                     tooltip="「源视频自动切分」模式下使用。留空则用 video_path。"),
@@ -1396,7 +1419,7 @@ class H3DirectorNode(io.ComfyNode):
                     tooltip="自动切分出的镜头没有对应提示词时用这句顶上。"),
                 H3Chain.Input(
                     "chain_state", display_name="续接会话", optional=True,
-                    tooltip="接「H3 Load Session」的 chain，本次的 shots_info 会"
+                    tooltip="接上一次「H3 导演」的 chain 输出口，本次的 shots_info 会"
                             "渲染成该会话的第 N+1、N+2… 段，而不是新建会话——"
                             "这就是无限分镜的追加模式。留空则新建会话。"),
                 io.Int.Input(
@@ -1446,7 +1469,7 @@ class H3DirectorNode(io.ComfyNode):
                             "增益限幅 ±25%：唯一和漂移分不清的，是某个镜头因为真实光线变化"
                             "而确实变暗。真实变化幅度大、留得下来；累积漂移幅度小、被限掉。\n\n"
                             "0.7–1.0 是有效区间。代价是多一次解码，不烧显卡。"
-                            "**只修颜色** —— 人物/身份漂移要用 H3 Chain Settings 的 "
+                            "**只修颜色** —— 人物/身份漂移要用 H3 链路设置 的 "
                             "drift_arrest，那个作用在生成阶段，不是成片。"),
                 io.Boolean.Input(
                     "build_timeline", display_name="生成时间线", default=True,
@@ -1512,7 +1535,7 @@ class H3DirectorNode(io.ComfyNode):
                 #   中间会把既有连线整体带偏一格。
                 H3Refine.Input(
                     "refine", display_name="二采精修", optional=True,
-                    tooltip="接「H3 Refine（二采精修）」节点的 refine 输出。"
+                    tooltip="接「H3 二采精修」节点的 refine 输出。"
                             "接上后每一段在一采之后、解码之前再采一遍（噪声表由"
                             "那个节点的 sigmas 口给），成片与段间锚点都来自二采"
                             "结果，所以接缝不会出现画质跳变。\n"
@@ -1538,13 +1561,32 @@ class H3DirectorNode(io.ComfyNode):
                 # 空着 = 不修脸。同样挂在末尾（widget 顺序 = 已存工作流的值顺序）。
                 H3FaceRefine.Input(
                     "face_refine", display_name="脸部修复", optional=True,
-                    tooltip="接「H3 FaceRefine（脸部修复）」节点的 face_refine 输出。"
+                    tooltip="接「H3 脸部修复」节点的 face_refine 输出。"
                             "接上后每段解码成片会逐帧检测并跟踪人脸，裁成特写画布重采"
                             "一次再贴回；段首/段尾会把修脸结果淡回原图，避免接缝处"
                             "「脸突然变清楚」的跳变。\n"
                             "★ 那个节点自己不接 sigmas = 关闭修脸。\n"
                             "★ 检测不到脸的段原样放过，不报错也不改画面。\n"
                             "需要 ultralytics + models/ultralytics/bbox/ 下的 YOLO 权重。"),
+                # 无损段缓存（借鉴 ComfyUI_MiniMaxH3_Director 的 frames_ffv1，
+                # Apache-2.0）。★ 必须挂在**列表末尾**：widget 顺序就是已存工作流
+                # widgets_values 的对齐顺序，插在中间会让既有控件整体错位一格。
+                io.Combo.Input(
+                    "seg_cache_codec", display_name="段缓存像素",
+                    options=["h264", "ffv1"], default="h264", optional=True,
+                    advanced=True,
+                    tooltip="每段在磁盘上留什么像素。\n\n"
+                            "h264（默认）= 只有 seg_NN.mp4（crf10，有损）。拼接成片时"
+                            "要从它**解出来再编一次** crf14 —— 每段带着两代有损进片子；"
+                            "单段修复 / 断点续渲的像素锚点同样读它。\n\n"
+                            "ffv1 = 额外写一份 seg_NN.frames.mkv（FFV1 无损，16-bit 平面"
+                            "RGB）。拼接与锚点自动优先读它，成片因此只剩那一次必要的编码"
+                            "（与音频早就是 WAV 边车同一个道理）。\n"
+                            "代价：每段多占几十到几百 MB；一次 FFV1 编码约几秒，不烧显卡。"
+                            "★ 只对**本次真烧显卡重渲的段**生效——命中缓存复用的段不会补写"
+                            "边车（所以换这个开关不会让既有会话重渲）。要整条换成无损，"
+                            "用「选择渲染段」把要补的段重渲一遍。\n\n"
+                            "默认关是刻意的：它改变成片本身，不该由一次升级替你决定。"),
             ],
             outputs=[
                 io.String.Output(
@@ -1572,12 +1614,12 @@ class H3DirectorNode(io.ComfyNode):
                 build_timeline=True, export_segments=False, ref_images=None,
                 ref_image_size=REF_SIZE_MATCH, pack_info="",
                 ref_classify="", repair_segment=0, run_segments="",
-                refine=None, face_refine=None):
+                refine=None, face_refine=None, seg_cache_codec="h264"):
         mode = _source_mode(source)
         node_id = _node_id(cls)
 
         if not settings:
-            raise ValueError("settings 未连接：请把 H3 Chain Settings 的 "
+            raise ValueError("settings 未连接：请把 H3 链路设置 的 "
                              "H3_SETTINGS 接到 settings 口。")
         # Every input is optional now (see the note in define_schema), so an
         # older or hand-edited workflow can hand us None. Fall back to the
@@ -1601,7 +1643,7 @@ class H3DirectorNode(io.ComfyNode):
         _phase_text(cls, "%s：%s" % (_PHASE_LABELS["plan"], "解析剧本"))
         if mode == "video":
             asset, split_meta = _split_source_video(
-                video, video_path, session_name or "my_chain", sensitivity,
+                video, video_path, session_name, sensitivity,
                 min_shot_seconds, max_shot_seconds, fallback_prompt,
                 global_prompt, prompt_lines)
             _phase_text(cls, "%s：切出 %d 个镜头"
@@ -1631,12 +1673,15 @@ class H3DirectorNode(io.ComfyNode):
             raise ValueError("没有可渲染的分镜。%s" % hint)
 
         sess_name = _session_name_from(asset, session_name)
+        # 剧本名（落盘第一层）。控件没处填，取分镜 JSON 的 script_name / project：
+        # PACK 解析器把头部 Project 原样写在那里，所以中文片名直接成了文件夹名。
+        script_name = _script_name_from(asset)
         settings = _settings_for_script(settings or {}, asset)
         # The session name is a director decision, not a graph-topology one:
         # H3RenderSegmentNode reads settings["session_name"] when chain_state is
         # None, so the widget only takes effect if it lands here.
         # ★ 上下游会话名对账（2026-09-26）：包里有**两个**同名控件 ——
-        #   H3 Chain Settings 的 session_name，与 H3 分镜提示词 PACK 的 session_name。
+        #   H3 链路设置 的 session_name，与 H3 分镜提示词 PACK 的 session_name。
         #   真正生效的是 PACK 那一个：解析器把名字写进 shots_json，Director 从
         #   JSON 里读（`_session_name_from` 的 fallback 参数恒为空，因为 H3Director
         #   自己不暴露 session_name 控件）。实测三个名字互不相同
@@ -1644,17 +1689,36 @@ class H3DirectorNode(io.ComfyNode):
         #   实际落盘=…_v10_iter6）却全程静默 —— 用户会以为改 Chain Settings 就能
         #   换会话，结果断点续渲照样接在 PACK 那个目录上。分歧必须说出来。
         _declared_session = str((settings or {}).get("session_name") or "").strip()
-        settings = dict(settings, session_name=session_mod.sanitize(sess_name))
+        _declared_script = str((settings or {}).get("script_name") or "").strip()
+        # 目录**在这里算一次**，算完把定下来的两个名字并回 settings：渲染节点、
+        # 修复分支、时间线行随后都从 settings 重建 Session，各自再算一遍就可能
+        # 挑到不同的自动版本号（r2 / r3 各写一半段，链条断在半路）。
+        # fresh = 「复用」关掉 —— 那时候同一部剧本要翻开新的一页，而不是把上一版
+        # 的产出就地覆盖掉；复用开着则正相反，必须落回已有那一版，否则整条重渲。
+        _dir, _script_eff, _sess_eff = session_mod.resolve_session_dir(
+            sess_name, script=script_name or _declared_script,
+            fresh=not bool(resume))
+        settings = dict(settings, session_name=_sess_eff,
+                        script_name=_script_eff)
+        # 无损段缓存开关：从控件并进 settings，由渲染/修复节点在每次 save_clip 时读。
+        # ★ **故意不进** session.segment_key 的 payload（见 frames_cache.enabled_for）：
+        #   这个开关不改变一段的**内容**，只改变它落盘的精度。并进 payload 会让所有
+        #   既有会话在升级后凭空全量重渲 —— 那是三十五分钟显卡为一行配置买单。
+        #   老工作流没有这个键 ⇒ 落到 "h264"，与开关存在前的行为逐比特一致。
+        settings = dict(settings, seg_cache_codec=(seg_cache_codec or "h264"))
         session_name_note = ""
-        if (_declared_session
-                and session_mod.sanitize(_declared_session) != settings["session_name"]):
+        # 分歧的双方是「Chain Settings 上写的」和「本轮真正拿到的那个名字」。
+        # 自动版本号（r1/r2…）属于布局细节，不算分歧 —— 拿它去比会每次误报。
+        _declared = session_mod.sanitize(_declared_session)
+        _wanted = session_mod.sanitize(sess_name) if str(sess_name).strip() else ""
+        if _declared and _wanted and _declared != _wanted:
             session_name_note = (
-                "会话名不一致：H3 Chain Settings 写的是「%s」，本次实际使用「%s」"
+                "会话名不一致：H3 链路设置 写的是「%s」，本次实际使用「%s」"
                 "（取自 PACK 头部 Project / 分镜 JSON 的 session_name）。"
                 "要以 Chain Settings 为准，请改 PACK 头部的 Project。"
-                % (_declared_session, settings["session_name"]))
+                % (_declared_session, _wanted))
             log("%s", session_name_note)
-        # 二采精修（外接 H3 Refine）。只在**接了并且给了噪声表**时才并进
+        # 二采精修（外接 H3 二采精修）。只在**接了并且给了噪声表**时才并进
         # settings —— 不并的话 segment_key 的 payload 与旧版字节一致，既有会话
         # 不会因为多了这个功能而全量重渲；并了之后改任何二采参数都会正确重渲。
         # 二采发生在每段一采之后、解码之前，所以段间锚点与成片同源（见
@@ -1736,7 +1800,7 @@ class H3DirectorNode(io.ComfyNode):
         # 不带 done_count 的话前端在收到 plan 事件时只能把 doneSet 清零，
         # 进度条瞬间从「已渲 4/6」掉回「已渲 0/6」，要等后续段渲完才会爬回
         # 正确数字（且最终数字还少 4，因为被清掉的 4 段永远不会被加回来）。
-        sess = chain["sess_obj"] if chain else session_mod.Session(settings["session_name"])
+        sess = chain["sess_obj"] if chain else session_mod.Session.from_settings(settings)
         manifest = sess.load() if resume else None
         recovered = 0
         if resume:
@@ -1812,7 +1876,7 @@ class H3DirectorNode(io.ComfyNode):
                     ["分镜%d·图%d" % (ridx + 1, k + 1) for k in range(len(r_images))])
                 # 修复需要已存在的会话：续接模式直接有 chain_state，否则从磁盘读 manifest
                 if chain is None:
-                    _sess = session_mod.Session(settings["session_name"])
+                    _sess = session_mod.Session.from_settings(settings)
                     # 按磁盘补齐：manifest 可能少记了已经渲好的段，不补齐的话
                     # 「重渲第 3 段」会因为只有 1 条记录而报越界。
                     _man = _sess.reconcile(_sess.load())
@@ -1843,7 +1907,8 @@ class H3DirectorNode(io.ComfyNode):
                 log("修复第 %d 段：换种子 %d → %d（否则会复现同一结果）",
                     ridx + 1, _resolve_seed(settings, {"seed": 0}, ridx), _rep_seed)
                 _rep_video, rep_chain, _rep_summary = H3RepairSegmentNode.execute(
-                    settings, sess_name, ridx + 1, r_prompt, r_plan["gen_seconds"],
+                    settings, settings["session_name"], ridx + 1, r_prompt,
+                    r_plan["gen_seconds"],
                     r_tail, _rep_seed, True,
                     images=_images_autogrow(r_images), chain_state=chain_state)
                 routes_mod.emit_progress(
@@ -1872,7 +1937,7 @@ class H3DirectorNode(io.ComfyNode):
             handoff_overrides = []
 
         header = [
-            "H3 Director 运行报告",
+            "H3 导演运行报告",
             "会话   %s" % sess.name,
             "目录   %s" % sess.dir,
             "来源   %s" % ("源视频自动切分" if mode == "video" else "分镜JSON"),
@@ -2092,12 +2157,12 @@ class H3DirectorNode(io.ComfyNode):
         # 这一条是旧行为的保留项 —— 以前每段都卸，末段自然也卸，而末段之后紧接着
         # 就是拼接 / 编码，显存留给它更稳。unload_every=0（从不卸载）时连这里也不卸。
         if unload_due(1, unload_every, is_last=True):
-            log("H3Director: 链尾释放 —— 卸载模型并清显存（unload_every=%d）",
+            log("director: 链尾释放 —— 卸载模型并清显存（unload_every=%d）",
                 unload_every_int(unload_every))
             free_between_segments(True)
             cleanup_segment_vram(True)
         else:
-            log("H3Director: 链尾不释放 —— unload_every=0，模型交给 ComfyUI 自行回收")
+            log("director: 链尾不释放 —— unload_every=0，模型交给 ComfyUI 自行回收")
 
         if handoff_overrides:
             uniq = sorted({round(v, 3) for _, v in handoff_overrides})
@@ -2126,27 +2191,33 @@ class H3DirectorNode(io.ComfyNode):
                     _rec["handoff"] = generation_length(seconds_to_frames(_sec))
                     log("P2 handoff-stamp: seg %d handoff 0 -> %d frames (shots=%.3fs)",
                         _ri + 1, _rec["handoff"], _sec)
-            out_path = os.path.join(chain["dir"], "%s.mp4" % chain["session"])
+            # 成片路径**只由 Session 算**（``<会话目录>/<目录名>.mp4``）。
+            # 这里以前自己拼了一遍 ``chain["dir"] + chain["session"] + ".mp4"``，
+            # 与 Session.joined_path 是同一条公式的两份副本 —— 布局一改就要记得
+            # 改两处，漏一处的后果是拼片写到会话目录外面去。
+            out_path = sess.joined_path()
             try:
                 joined_path, _frames = video_io.join(
                     _join_parts(chain), out_path,
                     crf=float(crf), stabilize=float(stabilize))
                 video_out = VideoFromFile(joined_path)
-                log("H3Director joined %d segments -> %s",
+                log("joined %d segments -> %s",
                     len(chain["segments"]), joined_path)
             except (FileNotFoundError, ValueError) as exc:
                 warnings.append("拼接跳过：%s" % exc)
-                log("H3Director: chain assembled but join skipped (%s)", exc)
+                log("director: chain assembled but join skipped (%s)", exc)
 
         # 4. Save the cleaned JSON next to the session manifest ----------------
         if chain is not None and chain.get("dir"):
             try:
-                sess_disk = session_mod.Session(chain["session"])
+                # 照 chain 已经算好的目录认领，不再从名字推第二遍：两层布局下
+                # ``chain["session"]`` 只是版本名，光凭它推不出剧本那一层。
+                sess_disk = session_mod.Session.from_dir(chain["dir"])
                 meta_path = os.path.join(sess_disk.dir, "shots.json")
                 with open(meta_path, "w", encoding="utf-8") as fh:
                     fh.write(_json_dumps(asset))
             except Exception as exc:                             # pragma: no cover
-                log("H3Director: shots.json not written (%s)", exc)
+                log("director: shots.json not written (%s)", exc)
 
         # 5. Optional per-segment export ---------------------------------------
         if export_segments and chain is not None and chain.get("segments"):
@@ -2163,7 +2234,7 @@ class H3DirectorNode(io.ComfyNode):
                     thumb_width=160, gap=10,
                     show_status=True, show_duration=True)
             except Exception as exc:                             # pragma: no cover
-                log("H3Director: timeline preview failed (%s)", exc)
+                log("director: timeline preview failed (%s)", exc)
 
         # 7. Progress + report ----------------------------------------------------
         records = (chain or {}).get("segments") or []
@@ -2179,6 +2250,19 @@ class H3DirectorNode(io.ComfyNode):
         # 断点续渲到底复用了没有 —— 放进报告，别再让人去翻日志（第 44 轮）
         header.append("缓存   复用 %d 段 / 重渲 %d 段（共 %d 段）"
                       % (reused_count, rendered_count, total))
+        # 段缓存像素：与 unload_every 同一个理由 —— 控件是可选 widget，老工作流
+        # 不带这个键时会静默落到默认值，报告里不说出来用户只能猜开关生效了没有。
+        _sc_n, _sc_bytes = frames_cache.sidecar_summary(chain_dir) if chain_dir else (0, 0)
+        if frames_cache.enabled_for(settings):
+            header.append("段缓存 FFV1 无损：%d 个边车，共 %.2f GB（%s）"
+                          % (_sc_n, _sc_bytes / 1073741824.0, chain_dir or "无会话目录"))
+            if _sc_n == 0 and rendered_count:
+                header.append("注意   要无损边车，但本次一段都没写出来。要么这些段全部"
+                              "命中缓存（边车是**写段时**顺带写的，不补写）；要么每次写"
+                              "边车都失败了 —— 往上翻 `lossless frame cache skipped`。")
+        else:
+            header.append("段缓存 H.264 crf10（有损）：拼接会二次编码每段像素，"
+                          "「段缓存像素」选 ffv1 可省掉这一代损失")
         if resume and reused_count == 0 and total > 1:
             header.append("注意   本次一段都没复用。若磁盘上本来就有已渲段，"
                           "往上翻 `本次不复用 —— …` 那几行，那里写了每一段"

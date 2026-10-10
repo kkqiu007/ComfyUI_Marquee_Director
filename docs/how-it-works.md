@@ -211,7 +211,7 @@ so each handoff is shifted back toward segment 1's per-channel latent means befo
 pinned:
 
 ```
-drift_arrest = 0.5     on H3 Chain Settings (advanced)
+drift_arrest = 0.5     on H3 链路设置 (advanced)
 ```
 
 Two limits are deliberate. It is a **fraction, not a reset** — the previous segment
@@ -293,7 +293,7 @@ resolvable, at three to thirteen times its own noise floor.
 already on disk, and that needs no GPU at all:
 
 ```
-stabilize = 1.0        on H3 Chain to Video (advanced)
+stabilize = 1.0        on H3Director (advanced)
 ```
 
 The drift is slow by definition, which is what makes it separable. Each channel's

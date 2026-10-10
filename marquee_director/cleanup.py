@@ -7,11 +7,20 @@
 
 所以规则是：
     保留  seg_<NN>.mp4          —— 分镜分段视频（不含 .tail.mp4）
-    保留  <会话名>.mp4          —— 完整拼接视频
+    保留  <会话名>.mp4          —— 完整拼接视频（名字 = 会话目录名）
     删除  会话目录里的其它一切   —— *.tail.mp4 / *.tail.wav /
                                    *.tail.latent.safetensors /
+                                   *.frames.mkv（无损段缓存边车，删掉后
+                                   拼片退回读 seg_NN.mp4，段本身不受影响）/
                                    manifest.json / shots.json / 其它
     删除  输出根目录下的 h3_timeline_*.png（时间线缩略图，曾误写盘）
+
+会话目录有两种布局，都要扫到（见 ``session.resolve_session_dir``）：
+    <总根>/<剧本名>/<版本名>/      现行两层
+    <总根>/<会话名>/               升级前的单层
+**只有"有产出的目录"才算会话目录**（``session.is_session_dir``）。剧本那一层
+只是分组夹，里面没有段文件；把它误当会话目录扫，等于把整部剧本的产出当
+"没成片的中间文件"处理。
 
 **但只在成片出来之后才动这个会话**（见 ``_session_done``）。用户说的是
 "**最后输出**只保留…"，是"最后"不是"随时"。成片还没出就清，会把断点续渲
@@ -90,13 +99,54 @@ def _session_done(path: str, session: str) -> bool:
 
 
 def _session_root():
-    """跟随 ComfyUI 自己配置的输出目录，绝不硬编码。"""
+    """跟随 ComfyUI 自己配置的输出目录，绝不硬编码。
+
+    ★ 根的计算统一走 ``session.store_root()`` —— 全包只有那一处读
+      ``folder_paths.get_output_directory()``。以前这里自己拼了一遍，
+      Desktop 一改 outputDir 就会出现"渲染写新根、清理扫旧根"的分叉。
+    """
     try:
-        import folder_paths
+        from . import session as _sess
+
+        root = _sess.store_root()
     except Exception:
         return None
-    root = os.path.join(folder_paths.get_output_directory(), "h3_continuous")
     return root if os.path.isdir(root) else None
+
+
+def _output_root():
+    """ComfyUI 的输出根（时间线 PNG 躺在这里，不在总根里）。
+
+    ★ 同样只经由 ``session.output_root()``：预览与删除必须读同一个根，否则面板
+      列出的文件名和真正删掉的不是同一批 —— 用户照着清单确认，确认错了对象。
+    """
+    from . import session as _sess
+
+    return _sess.output_root()
+
+
+def _session_dirs(root):
+    """总根下的会话目录（两层布局的 ``<剧本>/<版本>`` 与老的单层都算）。"""
+    try:
+        from . import session as _sess
+
+        return _sess.iter_session_dirs(root)
+    except Exception:
+        # 拿不到 helper 就退回单层扫描，**绝不退回"扫所有子目录"**：
+        # 剧本分组夹里没有 seg_NN.mp4，把它当会话扫会因为"没成片"而跳过，
+        # 但把它当会话又去删文件是另一回事 —— 少扫比错扫安全。
+        return [os.path.join(root, entry) for entry in sorted(os.listdir(root))
+                if os.path.isdir(os.path.join(root, entry))]
+
+
+def _script_of(path, root):
+    """会话目录所属的剧本夹名；老单层布局返回 ''，helper 拿不到也返回 ''。"""
+    try:
+        from .session import script_of
+
+        return script_of(path, root)
+    except Exception:
+        return ""
 
 
 def _queue_busy() -> bool:
@@ -150,10 +200,8 @@ def sweep(force: bool = False) -> dict:
 
     busy = (not force) and _queue_busy()
 
-    for entry in sorted(os.listdir(root)):
-        path = os.path.join(root, entry)
-        if not os.path.isdir(path):
-            continue
+    for path in _session_dirs(root):
+        entry = os.path.basename(os.path.normpath(path))
         stats["sessions"] += 1
         # 成片没出来 = 会话还在进行中 = 不动（见 _session_done 的说明）
         if not _session_done(path, entry):
@@ -175,13 +223,11 @@ def sweep(force: bool = False) -> dict:
                 stats["removed"] += 1
                 stats["bytes"] += size
             except OSError as exc:
-                log("H3 cleanup: 删不掉 %s (%s)", full, exc)
+                log("cleanup: 删不掉 %s (%s)", full, exc)
 
     # 输出根目录：只清我们自己写出去的时间线缩略图
     try:
-        import folder_paths
-
-        out = folder_paths.get_output_directory()
+        out = _output_root()
         for p in glob.glob(os.path.join(out, "h3_timeline_*.png")):
             if not _TIMELINE_RE.match(os.path.basename(p)):
                 continue
@@ -194,7 +240,7 @@ def sweep(force: bool = False) -> dict:
         pass
 
     if stats["removed"] or stats["timeline_removed"]:
-        log("H3 cleanup: 清掉 %d 个中间文件（%.1f MB）+ %d 张时间线图",
+        log("cleanup: 清掉 %d 个中间文件（%.1f MB）+ %d 张时间线图",
             stats["removed"], stats["bytes"] / 1e6, stats["timeline_removed"])
     return stats
 
@@ -209,10 +255,8 @@ def preview(force: bool = False) -> dict:
     busy = (not force) and _queue_busy()
     out["busy"] = busy
 
-    for entry in sorted(os.listdir(root)):
-        path = os.path.join(root, entry)
-        if not os.path.isdir(path):
-            continue
+    for path in _session_dirs(root):
+        entry = os.path.basename(os.path.normpath(path))
         idle = _dir_idle(path)
         done = _session_done(path, entry)
         would = []
@@ -230,6 +274,7 @@ def preview(force: bool = False) -> dict:
                 keep.append(name)      # 会话没成片 → 全部按"保留"显示
         out["sessions"].append({
             "session": entry,
+            "script": _script_of(path, root),
             "idle": idle,
             "done": done,
             "skipped": (not done) or busy or (not force and not idle),
@@ -238,10 +283,11 @@ def preview(force: bool = False) -> dict:
         })
 
     try:
-        import folder_paths
-
-        for p in glob.glob(os.path.join(folder_paths.get_output_directory(),
-                                        "h3_timeline_*.png")):
+        # ★ 与 sweep() 用同一个根（session.output_root()）。预览和删除各读一套根的
+        #   话，面板列出来的文件名跟真正删掉的不是同一批 —— 用户按清单确认，
+        #   结果确认错了对象。
+        for p in glob.glob(os.path.join(_output_root(),
+                                       "h3_timeline_*.png")):
             if _TIMELINE_RE.match(os.path.basename(p)):
                 out["timeline"].append(os.path.basename(p))
     except Exception:
@@ -268,7 +314,7 @@ def _periodic():
         #   递归续期：一旦这里抛出且不记日志，巡检就**永久停摆**，而用户毫无
         #   察觉 —— 会话目录再也不会被自动清理（只有下次重启才恢复）。
         from .common import log
-        log("H3 cleanup: 定时巡检失败（%s），本轮跳过、下轮继续", exc)
+        log("cleanup: 定时巡检失败（%s），本轮跳过、下轮继续", exc)
     _timer = threading.Timer(SWEEP_INTERVAL, _periodic)
     _timer.daemon = True
     _timer.start()

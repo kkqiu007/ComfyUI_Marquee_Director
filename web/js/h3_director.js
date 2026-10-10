@@ -908,6 +908,46 @@ const CSS = `
 .h3d-segs { outline: none; }
 .h3d-segs:focus-visible { outline: 1px solid #4fff8f; outline-offset: 2px; }
 
+/* ========= 分镜时间线：可缩放 + 横向滚动 =========
+ * 参考 ComfyUI-Video-Frame-Extractor 的 DAW 式交互：
+ *   · 滚轮 = 以光标为中心缩放时间线
+ *   · Shift + 滚轮（或带水平 delta 的滚轮）= 左右平移
+ *   · 也提供拖拽平移与顶部缩放滑块，方便触屏/无滚轮场景。
+ * 标尺、段块、轨道三线共用同一宽度，全部包在一个 overflow-x:auto 的
+ * 轨道里，滚动天然同步，不需要 JS 逐帧同步 scrollLeft。 */
+.h3d-timeline-wrap { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.h3d-timeline-track {
+  display: flex; flex-direction: column; gap: 3px;
+  min-width: 0;
+  overflow-x: auto; overflow-y: hidden;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255,255,255,.22) transparent;
+  cursor: grab; }
+.h3d-timeline-track.is-dragging { cursor: grabbing; }
+.h3d-timeline-track::-webkit-scrollbar { height: 6px; }
+.h3d-timeline-track::-webkit-scrollbar-track { background: transparent; }
+.h3d-timeline-track::-webkit-scrollbar-thumb {
+  background: rgba(255,255,255,.22); border-radius: 3px; }
+/* 轨道内三行：标尺 / 段块 / 轨道 都按内容宽度撑开，禁止压缩 */
+.h3d-timeline-track > .h3d-ruler,
+.h3d-timeline-track > .h3d-segs,
+.h3d-timeline-track > .h3d-rail {
+  flex: none; min-width: 0; }
+/* 段块：由 flex 均分改为固定基础宽度，配合 zoom 因子伸缩 */
+.h3d-segs { display: flex; gap: 3px; min-width: 0; }
+.h3d-seg { flex: 0 0 auto; min-width: 56px; height: 87px; }
+
+/* 缩放控制条 */
+.h3d-zoombar { display: flex; align-items: center; gap: 6px; flex: none; min-width: 0; }
+.h3d-zoombar .h3d-btn { padding: 0 7px; }
+.h3d-zoombar input[type="range"] {
+  flex: 1 1 auto; min-width: 60px; height: 14px; margin: 0;
+  accent-color: var(--h3d-acc);
+  background: transparent; cursor: pointer; }
+.h3d-zoombar .h3d-zoom-value {
+  font-size: 10px; color: #9a9a9a; min-width: 38px;
+  text-align: right; font-variant-numeric: tabular-nums; }
+
 /* 提示词 <Picture N> / <Video K> / <Audio J> 胶囊（B1，只读，可点定位参考图） */
 .h3d-tok { display: inline-flex; align-items: center; gap: 4px; height: 16px;
            padding: 0 5px 0 2px; border-radius: 3px; vertical-align: middle;
@@ -1024,7 +1064,7 @@ const CSS = `
 .h3d-ruler::after { content: ""; position: absolute; inset: 0; z-index: 3;
                     border-radius: inherit; pointer-events: none;
                     box-shadow: var(--h3d-rim); }
-.h3d-rul-cell { position: relative; flex: 1 1 0; min-width: 0; height: 100%; }
+.h3d-rul-cell { position: relative; flex: 0 0 auto; min-width: 0; height: 100%; }
 /* 该段真实时长（new+handoff）：格子右上角，与段块右下 .dur 的"新增秒数"互补。
    段号取消后顶部那条让它独占，只在格子够宽时出现 */
 .h3d-rul-len { position: absolute; right: 3px; top: 1px;
@@ -1050,7 +1090,7 @@ const CSS = `
 /* 收尾：最右端的终点线 + 总时长（各段真实时长之和）。
    ★ height:100% 不能省 —— 它是 0 宽的 flex item，不撑高的话里面的
      bottom:3px 会相对一个 0 高的盒子算，数字会飘到条子外面去。 */
-.h3d-rul-end { position: relative; flex: 0 0 0; width: 0; min-width: 0;
+.h3d-rul-end { position: relative; flex: 0 0 auto; width: 0; min-width: 0;
                height: 100%; }
 .h3d-rul-end > i { position: absolute; right: 0; bottom: 3px; width: 0; height: 9px;
                    border-right: 1px solid rgba(255,255,255,.34); }
@@ -1074,10 +1114,10 @@ const CSS = `
  *   由虚到实、由暗到亮的进度线本身，别再往上堆框。
  *   这里保留这段记录，免得以后又想给它加框。 */
 .h3d-rail { position: relative; height: 38px; margin-top: 1px;
-            overflow: hidden; }
-.h3d-rail-line { position: absolute; left: 0; right: 0; bottom: 5px;
-                 display: flex; height: 1px; }
-.h3d-rail-seg { position: relative; flex: 1 1 0; min-width: 4px; height: 1px; }
+            overflow: visible; display: flex; align-items: flex-end; }
+.h3d-rail-line { position: relative; flex: none;
+                 display: flex; height: 1px; margin-bottom: 5px; }
+.h3d-rail-seg { position: relative; flex: 0 0 auto; min-width: 4px; height: 1px; }
 .h3d-rail-seg > .base { position: absolute; inset: 0;
   background: repeating-linear-gradient(90deg,
     #3a3a3a 0 4px, transparent 4px 7px); }
@@ -3284,7 +3324,7 @@ function buildPackPanel(node, state) {
 /* ------------------------------------------------------------------ */
 /* 版块 2：输出规格 —— 分辨率（画幅比 + 像素量）+ 时长（代理上游节点）   */
 /* ------------------------------------------------------------------ */
-/* 分辨率读/写 ResolutionSelector（无则直写 H3 Chain Settings）；时长读/写
+/* 分辨率读/写 ResolutionSelector（无则直写 H3 链路设置）；时长读/写
  * PACK 解析器的 default_duration 与 H3Director 的 handoff_seconds。 */
 /* ------------------------------------------------------------------ */
 /* 修脸质检 —— H3FaceRefine 的开关与报告                                 */
@@ -3605,7 +3645,7 @@ function buildOutputPanel(node, state) {
       setWidget(r, "aspect_ratio", aspect);
       setWidget(r, "megapixels", mp);
       const [w, hh] = calcResolution(aspect, mp, readNum(r, "multiple", 8));
-      // 顺手同步到 H3 Chain Settings：那边是连线驱动，值本来就等于算式结果，
+      // 顺手同步到 H3 链路设置：那边是连线驱动，值本来就等于算式结果，
       // 同步一下只是让节点上显示的宽高不再停留在旧数字上。
       if (c) { setWidget(c, "width", w); setWidget(c, "height", hh); }
     } else if (mode === "direct" && c) {
@@ -3660,13 +3700,13 @@ function buildOutputPanel(node, state) {
       if (!isFocused(inW)) inW.value = w ? String(w) : "";
       if (!isFocused(inH)) inH.value = hh ? String(hh) : "";
       noteRes.textContent = r
-        ? "画布由 H3 Chain Settings 自己决定（ResolutionSelector 没接到它上面）"
-        : "图上没有 ResolutionSelector，直接写 H3 Chain Settings 的宽高（自动对齐 32）";
+        ? "画布由「H3 链路设置」自己决定（ResolutionSelector 没接到它上面）"
+        : "图上没有 ResolutionSelector，直接写「H3 链路设置」的宽高（自动对齐 32）";
       noteRes.className = "h3d-note";
       tag.textContent = w && hh ? w + "×" + hh : "";
       tag.className = "h3d-tag " + (w && hh ? "is-ok" : "");
     } else {
-      noteRes.textContent = "图上没有 ResolutionSelector，也没有 H3 Chain Settings";
+      noteRes.textContent = "图上没有 ResolutionSelector，也没有「H3 链路设置」";
       noteRes.className = "h3d-note is-warn";
       tag.textContent = "";
       tag.className = "h3d-tag";
@@ -4593,6 +4633,7 @@ function buildTimelinePanel(node, state) {
   const sec = h("div", "h3d-sec");
   const head = sectionHead(0, "分镜时间线");
   const hd = head.hd, tag = head.tag;
+  hd.style.flexWrap = "wrap";   // 渲染按钮 + 缩放条太宽时允许换行
 
   // 渲染模式按钮组：放刷新状态左侧，按钮间 10px 间隔（用户要求）。
   // 「全部渲染」= resume=false，忽略缓存整条重渲；「断点渲染」= resume=true，
@@ -4616,6 +4657,33 @@ function buildTimelinePanel(node, state) {
   const btnRefresh = h("button", "h3d-btn", "刷新状态");
   renderBtns.appendChild(btnRefresh);
   hd.appendChild(renderBtns);
+
+  // ★ 时间线缩放控制条（参考 ComfyUI-Video-Frame-Extractor 的滚轮缩放交互）
+  const ZOOM_MIN = 0.35, ZOOM_MAX = 4.0, ZOOM_STEP = 0.08;
+  const PX_PER_SEC = 18;   // 1.0  zoom 时每秒占 18px
+  const MIN_SEG_W = 56;    // 段块最窄不要低于 56px，保证缩略图/段号可读
+  let timelineZoom = 1.0;
+  const zoombar = h("span", "h3d-zoombar");
+  const btnZoomOut = h("button", "h3d-btn", "−");
+  btnZoomOut.title = "缩小时间线";
+  const btnZoomIn = h("button", "h3d-btn", "+");
+  btnZoomIn.title = "放大时间线";
+  const btnZoomFit = h("button", "h3d-btn", "适配");
+  btnZoomFit.title = "适配宽度：把所有分镜塞进当前节点宽度";
+  const zoomSlider = document.createElement("input");
+  zoomSlider.type = "range";
+  zoomSlider.min = String(Math.round(ZOOM_MIN * 100));
+  zoomSlider.max = String(Math.round(ZOOM_MAX * 100));
+  zoomSlider.value = "100";
+  zoomSlider.title = "拖动缩放时间线";
+  const zoomValue = h("span", "h3d-zoom-value", "100%");
+  zoombar.appendChild(btnZoomOut);
+  zoombar.appendChild(zoomSlider);
+  zoombar.appendChild(btnZoomIn);
+  zoombar.appendChild(btnZoomFit);
+  zoombar.appendChild(zoomValue);
+  hd.appendChild(zoombar);
+
   const bd = h("div", "h3d-bd");
 
   // 进度条
@@ -4628,9 +4696,8 @@ function buildTimelinePanel(node, state) {
   barRow.appendChild(barText);
   bd.appendChild(barRow);
 
-  // 段块
+  // 段块（先创建，稍后包进可滚动轨道）
   const segsRow = h("div", "h3d-segs");
-  bd.appendChild(segsRow);
 
   /* ★ 第 39 轮：run_segments 脏串兜底标志 —— syncRunSegmentsToUI 首次发现
      raw 是脏的（parseRunSegments 解出空集 + raw 非空）就写回 "" 一次，
@@ -4718,24 +4785,17 @@ function buildTimelinePanel(node, state) {
     else if (e.key === "Escape") { activeIndex = -1; e.preventDefault(); }
     else if (e.key === "r" || e.key === "R") { repairSegment(cur); e.preventDefault(); }
   });
-  // 滚轮横向滚动：只有段数多到溢出时才接管；不溢出就不拦，纵向滚动照常给页面
-  segsRow.addEventListener("wheel", function (e) {
-    if (Math.abs(e.deltaY) <= Math.abs(e.deltaX)) { return; }
-    if (segsRow.scrollWidth <= segsRow.clientWidth + 1) { return; }
-    segsRow.scrollLeft += e.deltaY;
-    e.preventDefault();
-  }, { passive: false });
+  // 滚轮交互后移到 timelineTrack 上（缩放 + 平移统一处理）。
 
   /* 第 26 轮起：段块右键菜单整体移除。showSegMenu 函数不再保留——
      cell.oncontextmenu 只 preventDefault 屏蔽浏览器原生菜单，不再挂浮层。
      段块交互入口收敛到三个：单击选中 / 双击全屏 / hover-.re 重渲。 */
 
   // 时间标尺（A2 → 第 40 轮重写）：段块上方一行秒刻度。只展示、不参与渲染。
-  // ★ 与 .h3d-segs 同构：同样的 flex + gap + 每格同样的 flexGrow（= 该段
-  //   真实时长），所以尺子上的每一格都压在它对应的分镜缩略图正上方。
+  // ★ 与 .h3d-segs 同构：同样的 flex + gap + 每格同样的宽度（= 该段真实时长），
+  //   所以尺子上的每一格都压在它对应的分镜缩略图正上方。
   //   刻度间隔由 rulerStep() 决定，保证带数字的刻度不会挤在一起。
   const ruler = h("div", "h3d-ruler");
-  bd.insertBefore(ruler, segsRow);
 
   // 轨道 + 蹄印层 + 小马（蹄印在马下面，免得盖住马腿）
   const rail = h("div", "h3d-rail");
@@ -4745,7 +4805,94 @@ function buildTimelinePanel(node, state) {
   rail.appendChild(hoofs);
   const pony = ponySvg();
   rail.appendChild(pony.wrap);
-  bd.appendChild(rail);
+
+  // ★ 把标尺、段块、轨道包进同一个横向滚动轨道，三线天然同步滚动
+  const timelineWrap = h("div", "h3d-timeline-wrap");
+  const timelineTrack = h("div", "h3d-timeline-track");
+  timelineTrack.appendChild(ruler);
+  timelineTrack.appendChild(segsRow);
+  timelineTrack.appendChild(rail);
+  timelineWrap.appendChild(timelineTrack);
+  bd.appendChild(timelineWrap);
+
+  // ── 缩放 / 平移交互 ────────────────────────────────────────────────
+  function segWidthFor(grow) {
+    return Math.max(MIN_SEG_W, grow * PX_PER_SEC * timelineZoom);
+  }
+  function setZoom(z, centerRatio) {
+    z = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, z));
+    if (Math.abs(z - timelineZoom) < 0.001) return;
+    const track = timelineTrack;
+    const oldScroll = track.scrollLeft;
+    const viewW = track.clientWidth || 1;
+    centerRatio = typeof centerRatio === "number" ? centerRatio : 0.5;
+    timelineZoom = z;
+    zoomSlider.value = String(Math.round(z * 100));
+    zoomValue.textContent = Math.round(z * 100) + "%";
+    // 重绘段块、标尺、轨道宽度
+    render(true);
+    // 以 centerRatio 处为锚点保持视口稳定：
+    // oldScroll + viewW*ratio 这一点在缩放后应仍位于 viewW*ratio
+    const contentW = track.scrollWidth || viewW;
+    const newScroll = oldScroll + (contentW - viewW) * centerRatio - viewW * centerRatio;
+    track.scrollLeft = Math.max(0, Math.min(newScroll, contentW - viewW));
+  }
+  function zoomBy(factor, centerRatio) {
+    setZoom(timelineZoom * factor, centerRatio);
+  }
+  function fitZoom() {
+    const segs = state.segments();
+    if (!segs.length) return;
+    const totalGrow = segs.reduce((a, s) => a + Math.max(0.55, segTotalSec(s)), 0);
+    const gaps = (segs.length - 1) * 3;
+    const avail = (timelineTrack.clientWidth || 300) - gaps;
+    const z = avail / Math.max(1, totalGrow * PX_PER_SEC);
+    setZoom(Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, z)), 0);
+  }
+  btnZoomOut.addEventListener("click", () => zoomBy(1 / 1.15, 0.5));
+  btnZoomIn.addEventListener("click", () => zoomBy(1.15, 0.5));
+  btnZoomFit.addEventListener("click", fitZoom);
+  zoomSlider.addEventListener("input", () => {
+    const v = Number(zoomSlider.value) / 100;
+    setZoom(v, 0.5);
+  });
+
+  // 滚轮：普通滚轮缩放，Shift/水平滚轮平移
+  timelineTrack.addEventListener("wheel", function (e) {
+    const isPan = e.shiftKey || Math.abs(e.deltaX) > Math.abs(e.deltaY);
+    if (isPan) {
+      timelineTrack.scrollLeft += (e.deltaX || e.deltaY);
+      e.preventDefault();
+      return;
+    }
+    // 缩放：以光标在轨道内的位置为锚点
+    const rect = timelineTrack.getBoundingClientRect();
+    const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / (rect.width || 1)));
+    const factor = e.deltaY > 0 ? 1 / 1.12 : 1.12;
+    zoomBy(factor, ratio);
+    e.preventDefault();
+  }, { passive: false });
+
+  // 拖拽平移（按住空白处左右拖）
+  let _dragStartX = 0, _dragStartScroll = 0, _dragging = false;
+  timelineTrack.addEventListener("mousedown", function (e) {
+    // 只在点击轨道空白处（不是段块、不是按钮）时启动拖拽
+    if (e.target.closest(".h3d-seg, .h3d-btn, .run, input, button")) return;
+    _dragging = true;
+    _dragStartX = e.clientX;
+    _dragStartScroll = timelineTrack.scrollLeft;
+    timelineTrack.classList.add("is-dragging");
+    e.preventDefault();
+  });
+  window.addEventListener("mousemove", function (e) {
+    if (!_dragging) return;
+    timelineTrack.scrollLeft = _dragStartScroll - (e.clientX - _dragStartX);
+  });
+  window.addEventListener("mouseup", function () {
+    if (!_dragging) return;
+    _dragging = false;
+    timelineTrack.classList.remove("is-dragging");
+  });
 
   const status = h("div", "h3d-status", "空闲");
   bd.appendChild(status);
@@ -4777,14 +4924,14 @@ function buildTimelinePanel(node, state) {
    * 重画都把当前段已经长出来的实线清零（进度事件一来一次，看着像闪断）。 */
   let _progress = 0;
 
-  function span() { return Math.max(0, (rail.clientWidth || 0) - PONY_W); }
+  function span() { return Math.max(0, (railLine.offsetWidth || 0) - PONY_W); }
 
   /** 当前正在渲的那一截轨道的 [起点, 终点]（小马左边界的可跑范围）。
    *  没在渲任何一段时返回 null —— 那就跑全程。 */
   function activeRange() {
     const el = activeIndex >= 1 ? railSpans[activeIndex - 1] : null;
     if (!el || !el.offsetParent) return null;
-    const total = rail.clientWidth || 0;
+    const total = railLine.offsetWidth || 0;
     const w = el.offsetWidth || 0;
     if (!total || w <= 0) return null;
     const a = Math.max(0, Math.min(el.offsetLeft || 0, total - PONY_W));
@@ -4933,13 +5080,18 @@ function buildTimelinePanel(node, state) {
    *    2. 画布上 H3PromptPackParser 的 session_name 控件 —— 这就是后端
    *       H3PromptPackParser.execute / H3Director 落盘时用的**同一份来源**
    *    3. PACK 解析下发的 session_name（点过「解析 PACK」才有）
-   *    4. my_chain（兜底）
+   *    4. 留空（**不再自己猜兜底名**）
    *
    *  ★ 为什么必须补第 2 步：H3Director 已经把 session_name 控件删了（冗余 widget
    *    清理），而 state.packData 只有点过「解析 PACK」才会被填充。于是"先渲染、
    *    隔天再点断点渲染"这条最正常的路径下，第 3 步拿不到值 → 面板退回
    *    my_chain → 去查一个不存在的会话目录 → done=0 → 表面看就是"断点渲染
    *    又从第 1 段开始了"。直接从画布 parser 控件读，和是否点过解析无关。
+   *
+   *  ★ 第 4 步为什么是空串而不是某个字面量：兜底名全包只有一个
+   *    （``session.UNNAMED`` = ``h3_pack``），而它由后端
+   *    ``routes._find_session("")`` 应用。前端再抄一份字面量，就是第五套名字 ——
+   *    上面那条 bug 的成因正是"两处各自兜底"。
    */
   function sessionName() {
     const w = findWidget(node, "session_name");
@@ -4952,8 +5104,7 @@ function buildTimelinePanel(node, state) {
       if (pkSess) return pkSess;
     } catch (e) { /* parser 不在画布上：继续往下退 */ }
     const pk = state.packData;
-    const fromPack = pk && String(pk.session_name || "").trim();
-    return fromPack || "my_chain";
+    return (pk && String(pk.session_name || "").trim()) || "";
   }
 
   /** 新窗口/新标签打开这一段的完整视频（ComfyUI 的 /view 直链）。 */
@@ -5078,18 +5229,17 @@ function buildTimelinePanel(node, state) {
     ruler.replaceChildren();
     const segs = state.segments();
     if (!segs.length) return;
-    const W = ruler.clientWidth || segsRow.clientWidth || 0;
-    if (!W) { requestAnimationFrame(paintRuler); return; }  // 布局未就绪，下一帧再试
     // ★ 与段块宽度同一个口径、同一个下限：new_seconds + handoff_seconds
     //   （段真实时长），且和 render() 里的 grow 逐字一致，否则尺子和缩略图
     //   会错开几像素。
     const lens = segs.map((s) => Math.max(0.55, segTotalSec(s)));
     const total = lens.reduce((a, b) => a + b, 0);
     if (total <= 0) return;
-    const pxPerSec = W / total;
+    // 缩放后每格宽度直接由 segWidthFor() 决定，刻度密度按实际像素宽判断。
+    const pxPerSec = PX_PER_SEC * timelineZoom;
     // 主刻度间隔：rulerStep() 保证相邻两个**带数字**的刻度至少隔 46px，
     // 所以标签永远不会互相压字（这正是旧版"0s2s4s…"乱码的解药）。
-    const step = rulerStep(total, W);
+    const step = rulerStep(total, total * pxPerSec);
     // 细刻度 = 主刻度的 1/5，只画竖线不写字；46/5 ≈ 9px 一根，再挤就不画
     const minor = step / 5;
     const drawMinor = minor * pxPerSec >= 4;
@@ -5099,10 +5249,10 @@ function buildTimelinePanel(node, state) {
     lens.forEach((len, i) => {
       const start = acc;
       acc += len;
-      const cellW = len * pxPerSec;   // 估算像素宽，用来决定这一格放得下几个字
+      const cellW = segWidthFor(len);   // 实际像素宽，用来决定这一格放得下几个字
       const pct = (t) => (((t - start) / len) * 100).toFixed(3) + "%";
       const rc = h("div", "h3d-rul-cell" + (cellW < 20 ? " is-tiny" : ""));
-      rc.style.flexGrow = String(len);
+      rc.style.width = cellW + "px";
       rc.dataset.index = String(i + 1);
       // ★ 第 41 轮：段号取消 —— 段块左上角 .no 已经有 S01/S02…，标尺上不再
       //   重复一份。标尺靠下面的段分界竖线对齐缩略图，不靠文字。
@@ -5170,6 +5320,7 @@ function buildTimelinePanel(node, state) {
       "a" + activeIndex,
       "r" + (state.runSetSig || ""),
       "g" + Array.from(state.dirtySegs || []).sort((a, b) => a - b).join(","),
+      "z" + timelineZoom.toFixed(3),
     ];
     for (let i = 0; i < segs.length; i++) {
       const seg = segs[i] || {};
@@ -5264,9 +5415,9 @@ function buildTimelinePanel(node, state) {
       // 段宽按时长成比例 —— 时间线要反映时间。
       // ★ 第 40 轮：口径从"只算新增"改成"新增 + 锚定尾巴"（segTotalSec），
       //   也就是这一段落盘视频的真实长度（帧数 / fps 就是这个值）。
-      //   标尺 paintRuler() 用同一个函数算 flexGrow，尺子才能压在缩略图正上方。
+      //   标尺 paintRuler() 用同一个函数算宽度，尺子才能压在缩略图正上方。
       const grow = Math.max(0.55, segTotalSec(seg));
-      cell.style.flexGrow = String(grow);
+      cell.style.width = segWidthFor(grow) + "px";
       // ★ 第 27 轮：段块 tooltip 完全清空。
       //   之前这里写的是「段号 · 新增 Xs · 生成 Ys · 任务类型」——
       //   用户要求 hover 段块时**什么 tooltip 都不要弹**。
@@ -5487,7 +5638,7 @@ function buildTimelinePanel(node, state) {
 
       // 轨道：暗虚线打底 + 亮实线填充（小马跑到哪儿填到哪儿，与段块同宽）
       const rl = h("div", "h3d-rail-seg");
-      rl.style.flexGrow = String(grow);
+      rl.style.width = segWidthFor(grow) + "px";
       rl.appendChild(h("i", "base"));
       rl.appendChild(h("i", "fill"));
       railLine.appendChild(rl);
@@ -5502,14 +5653,17 @@ function buildTimelinePanel(node, state) {
         // 同时打到控制台 —— 以前这里没有兜底，异常直接冒到 onPack 的空 catch，
         // 界面上留下"少了几格"的残骸而没有任何解释。
         console.error("[H3 Director] 第 " + (i + 1) + " 段块渲染失败：", err);
+        const grow = Math.max(0.55, segTotalSec(seg));
         const bad = h("div", "h3d-seg is-bad");
         bad.dataset.index = String(i + 1);
+        bad.style.width = segWidthFor(grow) + "px";
         bad.appendChild(h("div", "no", (seg && seg.id) || ("S" + (i + 1))));
         bad.appendChild(h("div", "dur", "渲染失败"));
         bad.title = "这一段块渲染失败：" + ((err && err.message) || err)
           + " —— 详细堆栈见浏览器控制台";
         segsRow.appendChild(bad);
         const rl = h("div", "h3d-rail-seg");
+        rl.style.width = segWidthFor(grow) + "px";
         rl.appendChild(h("i", "base"));
         rl.appendChild(h("i", "fill"));
         railLine.appendChild(rl);
@@ -5629,7 +5783,8 @@ function buildTimelinePanel(node, state) {
     const sess = sessionName();
     w.value = index;
     if (node.setDirtyCanvas) node.setDirtyCanvas(true, true);
-    setPony(true, "⏳ 已排队：重渲第 " + index + " 段（" + sess + "）");
+    setPony(true, "⏳ 已排队：重渲第 " + index + " 段（"
+      + (sess || "自动：最新一版") + "）");
     try {
       app.queuePrompt(0, 1);
     } catch (e) {
@@ -7200,7 +7355,7 @@ function mountPanels(node) {
         catch (e) { console.error("[H3 Director] 功能规划刷新失败：", e); }
         // PACK 解析完才知道会话名（session_name 控件空着时用它），所以
         // 「已渲染到第几段」必须等这一下再拉 —— 首屏那次 refreshRendered
-        // 是在 pack 解析之前跑的，会话名还是 my_chain，拉回来是空的。
+        // 是在 pack 解析之前跑的，名字还是空串（后端退到 h3_pack），拉回来是空的。
         try { timeline && timeline.refreshRendered && timeline.refreshRendered(); }
         catch (e) { console.error("[H3 Director] 时间线拉取已渲段失败：", e); }
       },

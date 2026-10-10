@@ -16,11 +16,10 @@
 - ``MARQUEE_SUBTITLE_QC_STEP`` 取样步长（帧），默认 3（8Hz）。
 """
 
-import logging
 import os
 import re
 
-log = logging.getLogger("marquee.subtitle_qc")
+from .common import log  # 全包统一前缀见 common.LOG_PREFIX
 
 _TEXT_RE = re.compile(r"[\u4e00-\u9fffA-Za-z0-9]")
 # 逐字禁令挂进 prompt 后，成片正文里唯一合法的"文字"就是台词配音 —— 画面上
@@ -84,12 +83,12 @@ def _ocr():
     try:
         from rapidocr_onnxruntime import RapidOCR
     except Exception as e:  # 缺库/坏安装：质检降级为不扫描
-        log.info("subtitle QC: rapidocr 不可用（%s），跳过扫描", e)
+        log("subtitle QC: rapidocr 不可用（%s），跳过扫描", e)
         return None
     try:
         return RapidOCR()
     except Exception as e:
-        log.info("subtitle QC: RapidOCR 初始化失败（%s），跳过扫描", e)
+        log("subtitle QC: RapidOCR 初始化失败（%s），跳过扫描", e)
         return None
 
 
@@ -108,7 +107,7 @@ def scan(path):
         import av
         import numpy as np
     except Exception as e:
-        log.info("subtitle QC: av/numpy 不可用（%s），跳过扫描", e)
+        log("subtitle QC: av/numpy 不可用（%s），跳过扫描", e)
         return []
 
     frames = []
@@ -125,7 +124,7 @@ def scan(path):
                 img = frame.to_ndarray(format="bgr24")[y0:h, 0:w]
                 frames.append(img)
     except Exception as e:
-        log.info("subtitle QC: 解码 %s 失败（%s），跳过扫描", path, e)
+        log("subtitle QC: 解码 %s 失败（%s），跳过扫描", path, e)
         return []
 
     seen = []  # (t, text, conf)

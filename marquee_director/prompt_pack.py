@@ -5082,8 +5082,13 @@ def segment_windows(segments, index):
     return replay_in, tail_out
 
 
-def to_shots_json(segments, session_name="", include_task=True):
-    """转成 H3Director 认识的 shots_info。"""
+def to_shots_json(segments, session_name="", script_name="", include_task=True):
+    """转成 H3Director 认识的 shots_info。
+
+    ``script_name`` 是**剧本名**（落盘的第一层文件夹），``session_name`` 是会话名
+    /版本名（第二层）。两个都写进 payload，下游（Director、存档节点）只读不算，
+    免得每个消费者各自推一遍名字、推出两个目录。
+    """
     shots = []
     total = len(segments)
     for index, seg in enumerate(segments):
@@ -5125,6 +5130,7 @@ def to_shots_json(segments, session_name="", include_task=True):
         shots.append(shot)
     return {
         "session_name": session_name,
+        "script_name": script_name,
         "global": {"global_prompt": ""},
         "shots_info": shots,
         "source": "prompt_pack",
@@ -5197,7 +5203,7 @@ def format_report(segments, meta, issues, music_hit=(), fixes=None):
     out.append("")
     out.append("  规范帧 = 生成时长 × %dfps（接线表口径）；实际生成按 H3 的 17k+5"
                % FPS)
-    out.append("  网格向上对齐，见 H3 Director 报告里的帧数。")
+    out.append("  网格向上对齐，见「H3 导演」报告里的帧数。")
     if issues:
         out.append("")
         out.append("注意：")

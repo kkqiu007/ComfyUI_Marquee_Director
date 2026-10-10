@@ -816,7 +816,7 @@ def _render_segment_once(settings, segment, start_anchor=None, end_anchor=None):
                 seam = settings.get("seam_min_mask")      # 旧名兼容
             latent, _pinned_tokens, _pinned_ticks = apply_latent_continue(
                 latent, start_anchor, seam_min_mask=seam)
-            # 逐 step 掩码是**可选**的（H3 Chain Settings 的 seam_remask）。
+            # 逐 step 掩码是**可选**的（H3 链路设置 的 seam_remask）。
             # 默认关：它改变的是成片本身，开着会让既有会话的段全部重渲，
             # 而这不该由一次升级替用户决定。参数从 latent 上读（不是重算），
             # 保证和上面写进 noise_mask 的是同一套。
@@ -880,7 +880,7 @@ def _render_segment_once(settings, segment, start_anchor=None, end_anchor=None):
         if (isinstance(start_anchor, dict)
             and start_anchor.get("video_latent") is not None) else 0)
     if face_note:
-        log("face refine: %s", face_note)
+        log("face_refine: %s", face_note)
 
     audio = vae_decode_audio(settings["audio_vae"], sampled)
 

@@ -11,7 +11,19 @@ them in a session folder is what makes the pack usable:
 * **Repair.** The repair node needs the previous segment's tail and the tail the
   *next* segment already continued from. Both are on disk.
 
-Everything lives under ``output/h3_continuous/<session>/``.
+布局（**全包只有 ``output_root()`` 这一处碰 ComfyUI 的输出目录**）::
+
+    <ComfyUI 输出目录>/h3_continuous/<剧本名>/<版本名>/     现行
+    <ComfyUI 输出目录>/h3_continuous/<会话名>/              升级前的单层布局
+
+剧本名取 PACK 头部的 Project（或「H3 链路设置」上显式填的「剧本名称」），
+版本名取「会话名」控件；版本名留空时自动 ``r1``/``r2``…，所以同一部剧本每次
+**全新渲染**（复用关掉）都开一个新文件夹，上一版的产出原封不动还在。
+
+★ 老的单层目录**原位沿用、不搬**。缓存键算的是内容而不是路径，但段文件躺在
+  哪个目录是断点续渲的立足点：换了根，已渲的 18 段对新一轮而言不存在，
+  等于凭空一次全量重渲。所以 ``resolve_session_dir`` 先认旧目录，只有旧目录
+  没有产出（或本次明确要重开一轮）才落到两层布局。
 """
 
 import hashlib
@@ -24,27 +36,176 @@ import folder_paths
 ROOT = "h3_continuous"
 MANIFEST_VERSION = 2
 
+# 剧本名与会话名都拿不到时的兜底目录。**全包只有这一个兜底常量** —— 以前
+# Director 兜到 ``my_chain``、存档节点兜到 ``h3_pack``，同一份没带 session_name
+# 的分镜 JSON 会写进两个不同目录，面板因此查不到自己刚存的档。
+UNNAMED = "h3_pack"
+# 自动版本号的词头：<剧本>/r1、<剧本>/r2 …
+VERSION_PREFIX = "r"
+
 
 def sanitize(name):
     """Normalise a session name into a safe directory name.
 
-    ★ 必须保留 CJK。会话名常带中文项目名（``曹贼的性价比_v18_en_v10``），
-      而「落盘目录」走本函数、「面板/查找用的目录名」走
-      ``common.safe_session_name`` —— 两处算法不一致时，渲染写进
-      ``v18_en_v10``、面板去查 ``曹贼的性价比_v18_en_v10``，于是
-      ``done=0``、断点续渲每次都从第 1 段重来。
+    ★ **这是全包唯一的归一化实现**：会话名、剧本名、面板查找名、存档目录名
+      全部走它（``common.safe_session_name`` 只是"按候选顺序挑第一个非空
+      再交给本函数"的包装）。以前 common 里另抄了一份正则、两边靠 import 期
+      的 monkey-patch 对齐，那是**导入顺序相关**的：任何只导入 ``session``
+      而未触发 ``common`` 的路径都会拿到另一套规则，同一个名字算出两个目录 ——
+      渲染写 ``v18_en_v10``、面板查 ``曹贼的性价比_v18_en_v10``，于是
+      ``done=0``、断点续渲每次都从第 1 段重来。现在没有第二套可对齐。
 
-      曾经靠 ``common`` 在 import 时把本函数替换成 ``safe_session_name``
-      来统一（``_install_session_sanitize_alias``）。但那是**导入顺序相关**的补丁：
-      任何只导入 ``session`` 而未触发 ``common`` 的路径都会拿到丢 CJK 的旧行为，
-      目录再次分叉。所以这里直接在源码层面对齐（截断长度也统一为 60），
-      那条补丁退化为无害的幂等保险。
+    ★ 必须保留 CJK：会话名与剧本名常常就是中文片名
+      （``曹贼的性价比_v18_en_v10``），保留它 = 磁盘上那个文件夹名就是人
+      看得懂的片名。
     """
     # \w 在 Python 3 下是 Unicode 的，已包含 CJK；不用额外列 \u4e00-\u9fff。
     name = re.sub(r"[^\w.-]+", "_", (name or "").strip(), flags=re.UNICODE)
     name = re.sub(r"\.{2,}", "_", name)  # never let a session name walk up a directory
-    name = name.strip("._") or "session"
+    name = name.strip("._") or UNNAMED
     return name[:60]
+
+
+def output_root():
+    """全包唯一的产出根。
+
+    ComfyUI Desktop 的 ``--output-directory`` 是**可变的**（这台机器上它就换过
+    几次），所以任何写死的输出根都会在某次改设置之后把产出分到两棵树里 ——
+    表现就是老问题：面板说「会话目录不存在」、断点渲染从第 1 段重来。
+    只有这一个函数碰 ``folder_paths``，其余模块（cleanup / json_io / director /
+    routes）一律经由它。
+    """
+    return folder_paths.get_output_directory()
+
+
+def store_root():
+    """``<输出目录>/h3_continuous``，节点包全部产出的总根。"""
+    return os.path.join(output_root(), ROOT)
+
+
+# ``seg_01.mp4`` / ``seg_01.tail.wav`` / ``seg_01.frames.mkv`` … 都算段产物。
+_SEG_FILE_RE = re.compile(r"^seg_\d+([._].+)?$")
+
+
+def is_session_dir(path):
+    """这个目录本身是一个会话的产出目录吗（而不是「剧本」那层分组夹）？
+
+    判据只看产物，不看名字：有 manifest.json、有任一 ``seg_NN.*``、或者有和
+    目录同名的成片，就算。剧本夹里只有 ``r1``/``r2`` 子目录，没有这些文件，
+    于是不会被误当成会话 —— 一旦误认，清理扫描会把整部剧本的产出当"没成片
+    的中间文件"扫掉。
+    """
+    if not os.path.isdir(path):
+        return False
+    try:
+        names = os.listdir(path)
+    except OSError:
+        return False
+    here = os.path.basename(os.path.normpath(path))
+    for name in names:
+        if name == "manifest.json" or _SEG_FILE_RE.match(name):
+            return True
+        if name == here + ".mp4":
+            return True
+    return False
+
+
+def iter_session_dirs(root=None):
+    """列出总根下所有会话目录：新的两层（``<剧本>/<版本>``）与老的单层都认。
+
+    深度刻意封在 2 —— 再深没有意义，而且会让清理扫描走进用户的其它目录。
+    """
+    root = root or store_root()
+    out = []
+    if not os.path.isdir(root):
+        return out
+    try:
+        entries = sorted(os.listdir(root))
+    except OSError:
+        return out
+    for entry in entries:
+        path = os.path.join(root, entry)
+        if not os.path.isdir(path):
+            continue
+        if is_session_dir(path):
+            out.append(path)
+            continue
+        try:
+            subs = sorted(os.listdir(path))
+        except OSError:
+            continue
+        for sub in subs:
+            leaf = os.path.join(path, sub)
+            if os.path.isdir(leaf) and is_session_dir(leaf):
+                out.append(leaf)
+    return out
+
+
+def script_of(session_dir, root=None):
+    """会话目录归属的剧本夹名；老的单层布局没有这一层，返回 ''。"""
+    parent = os.path.dirname(os.path.normpath(str(session_dir)))
+    if os.path.normcase(parent) == os.path.normcase(root or store_root()):
+        return ""
+    return os.path.basename(parent)
+
+
+def next_version(script_dir, fresh=False):
+    """剧本目录下下一个该用的版本名。
+
+    ``fresh``（复用关掉）才**另开一页**：``r1`` 渲完了，照同一部剧本再渲一版
+    就落到 ``r2``，上一版一个字节都不动。``fresh=False`` 时接在最新那一版上
+    —— 断点续渲要的就是这个：任何情况下都不能因为版本名换了而整条重渲。
+    """
+    highest = 0
+    if os.path.isdir(script_dir):
+        try:
+            for sub in os.listdir(script_dir):
+                match = re.match(r"^%s(\d+)$" % VERSION_PREFIX, sub)
+                if match and os.path.isdir(os.path.join(script_dir, sub)):
+                    highest = max(highest, int(match.group(1)))
+        except OSError:
+            pass
+    if highest == 0:
+        return "%s1" % VERSION_PREFIX
+    return "%s%d" % (VERSION_PREFIX, highest + (1 if fresh else 0))
+
+
+def resolve_session_dir(version="", script="", fresh=False):
+    """``(会话名, 剧本名)`` -> ``(目录, 生效的剧本名, 生效的版本名)``。
+
+    三条规矩，按优先级：
+
+    1. **旧单层目录原位沿用**（除非本次明确重开一轮）。升级前
+       ``h3_continuous/<会话名>/`` 是唯一布局，里面有已渲好的段；把它并进两层
+       布局的话，本轮新段写进新目录、旧段留在旧目录，断点续渲立刻退化成整条
+       重渲。所以旧目录只要有产出，就一直用旧目录。
+    2. **知道剧本名** -> ``h3_continuous/<剧本名>/<版本名>/``。版本名留空（或跟
+       剧本名撞成同一个词）就按 :func:`next_version` 自动取 ``r1``/``r2``…
+    3. **只有会话名**（源视频切分、手搓 JSON，没处取剧本名）-> 维持单层
+       ``h3_continuous/<会话名>/``。
+    """
+    v = sanitize(version) if str(version or "").strip() else ""
+    s = sanitize(script) if str(script or "").strip() else ""
+    store = store_root()
+
+    if not fresh:
+        for cand in (v, s):
+            if not cand:
+                continue
+            legacy = os.path.join(store, cand)
+            if is_session_dir(legacy):
+                return legacy, "", cand
+
+    if not s and not v:
+        return os.path.join(store, UNNAMED), "", UNNAMED
+    if not s:
+        # 只有会话名（源视频切分、手搓 JSON，剧本名没处取）：维持单层，
+        # 不硬造 ``<会话名>/<会话名>/`` 这种套娃目录。
+        return os.path.join(store, v), "", v
+    if not v or v == s:
+        # 版本没填，或者跟剧本名撞成同一个词 —— 都交给自动版本号。
+        v = next_version(os.path.join(store, s), fresh)
+    return os.path.join(store, s, v), s, v
 
 
 def digest(value):
@@ -180,7 +341,7 @@ def segment_key(settings, segment, handoff, previous_key):
         payload["seam_redraw"] = round(float(seam), 4)
     if RENDER_PIPELINE_ID:
         payload["pipe"] = RENDER_PIPELINE_ID
-    # 二采精修（H3 Refine）：同样只在**接了 refine 且给了噪声表**时才并入。
+    # 二采精修（H3 二采精修）：同样只在**接了 refine 且给了噪声表**时才并入。
     # 没接时 payload 保持字节一致 —— 既有会话不会因为多出这个功能而全量重渲。
     # 接了之后改任何一个二采参数都会正确触发重渲（二采改的是成片本身）。
     refine = settings.get("refine")
@@ -197,7 +358,7 @@ def segment_key(settings, segment, handoff, previous_key):
             "seed_mode": refine.get("seed_mode"),
             "seed": int(refine.get("seed") or 0),
         }
-    # 脸部修复（H3 FaceRefine）：与 refine 同一条规则 —— 只在接了且给了噪声表时
+    # 脸部修复（H3 脸部修复）：与 refine 同一条规则 —— 只在接了且给了噪声表时
     # 才并入。它改的是本段解码后的像素（贴回的人脸特写），段间锚点仍来自未修的
     # latent，所以**不会**连带影响下一段；改修脸参数只需要本段重渲。
     # 注意 detector / confidence / crop_factor 这些也必须进键：换检测器框出来的
@@ -246,15 +407,54 @@ def signature_from_record(record):
 
 
 class Session:
-    def __init__(self, name):
-        self.name = sanitize(name)
-        self.dir = os.path.join(folder_paths.get_output_directory(), ROOT, self.name)
+    """一个会话的磁盘目录。
+
+    ``Session(会话名)`` 与升级前完全等价（单层）。传了 ``script`` 才走
+    ``<剧本>/<版本>`` 两层，并且只在目标目录还没有产出时才生效 —— 见
+    :func:`resolve_session_dir` 第 1 条规矩。
+    """
+
+    def __init__(self, name, script=None, fresh=False):
+        self.dir, self.script, version = resolve_session_dir(
+            name, script=script or "", fresh=fresh)
+        # 目录名就是版本名，成片名跟着目录走（``<版本>.mp4``）。以前成片名取
+        # ``sanitize(name)``，一旦目录被旧布局截胡，两者就会分叉 —— 面板和清理
+        # 都是按"目录同名 mp4"认成片的，那里用 basename、这里用 name，
+        # 成片就永远认不出来。现在两边由同一个表达式推出。
+        self.name = version
         os.makedirs(self.dir, exist_ok=True)
         # 断点续渲的"链条完整性"开关。见 ``note_render`` / ``cached``：
         # 磁盘补齐的记录是靠"文件还在"判定命中的，一旦本次运行真的重渲了
         # 某一段，它后面所有补齐的段都不能再算命中 —— 否则会出现"第 3 段
         # 是新渲的、第 4 段却接着老的第 3 段尾巴"这种接不上的片子。
         self.resume_intact = True
+
+    @classmethod
+    def from_dir(cls, path):
+        """直接认领一个**已经算好的**会话目录（chain 里带着它走）。
+
+        两层布局以后，光凭"会话名"三个字推不出目录 —— 还差剧本名那一层。
+        chain 里既然已经带了 ``dir``，就照它来，不再重新解析一遍：重算的每一次
+        机会都是一次分叉（渲染写 ``<剧本>/r2``、读档去 ``<剧本>/r1``）。
+        """
+        self = cls.__new__(cls)
+        self.dir = os.path.normpath(str(path))
+        self.name = os.path.basename(self.dir)
+        self.script = script_of(self.dir)
+        self.resume_intact = True
+        return self
+
+    @classmethod
+    def from_settings(cls, settings, fresh=False):
+        """按 settings 里 carries 的 (会话名, 剧本名) 打开会话。
+
+        ★ **所有构造点都必须走这里**：Director 主循环、修复分支、渲染节点、
+          时间线行都得到同一个目录。以前五处各自 ``Session(settings["session_name"])``，
+          剧本名一旦参与进来，漏传的那处就会算出另一个目录，
+          修好的段和渲染的段分居两地。
+        """
+        return cls(str((settings or {}).get("session_name") or ""),
+                   script=(settings or {}).get("script_name"), fresh=fresh)
 
     # --- paths -----------------------------------------------------------------
     def segment_path(self, index):
@@ -284,7 +484,13 @@ class Session:
         return data
 
     def save(self, records, extra=None):
-        data = {"version": MANIFEST_VERSION, "session": self.name, "segments": records}
+        data = {"version": MANIFEST_VERSION, "session": self.name,
+                "segments": records}
+        if self.script:
+            # 只记剧本名，**不记绝对路径**：整棵 output 树是可以被用户搬走/改
+            # --output-directory 的，manifest 里一旦出现绝对路径就变成第二次
+            # "目录分叉"的源头。
+            data["script"] = self.script
         data.update(extra or {})
         tmp = self.manifest_path + ".tmp"
         with open(tmp, "w", encoding="utf-8") as f:
@@ -409,10 +615,9 @@ class Session:
                         os.remove(_tp)
                 except OSError:
                     pass
-                import logging
-                logging.getLogger(__name__).warning(
-                    "[H3 Continuous] reconcile: seg_%02d 采纳前 OCR 命中烧字 %s"
-                    " —— 已删除，本段将重渲", i + 1, _qc_hits)
+                from .common import warn  # 局部 import：common 顶部就 import session，模块级会成环
+                warn("reconcile: seg_%02d 采纳前 OCR 命中烧字 %s"
+                     " —— 已删除，本段将重渲", i + 1, _qc_hits)
                 continue
             has_tail = os.path.exists(self.tail_path(i))
             _len = self.probe_segment_frames(i)

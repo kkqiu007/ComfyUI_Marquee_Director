@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Offline checks for the H3 FaceRefine port. No GPU, no ComfyUI server.
+"""Offline checks for the H3FaceRefine port. No GPU, no ComfyUI server.
 
 Run from the ComfyUI root (so ``comfy``/``comfy_extras`` import)::
 

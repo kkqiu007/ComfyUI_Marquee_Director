@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""HTTP glue for the H3 Director frontend panels.
+"""HTTP glue for the H3Director frontend panels.
 
 为什么要有这一层
 ----------------
@@ -185,7 +185,7 @@ def _pack_preview(text: str, session_name: str = "") -> dict:
                                             flags=re.S | re.I)):
         issues = list(issues) + [
             "面板这里显示的是**源文**（含中文）。①-A 与 ①-B 之间的「剧本英译」"
-            "节点会在注入 H3 Director 前把它改写成英文单版（SKILL §1.3，"
+            "节点会在注入「H3 导演」前把它改写成英文单版（SKILL §1.3，"
             "台词 <d>…</d> 保留原语言）；英译结果与逐块情况见那个节点的"
             "「英译报告」输出口，以及 ①-B 的「解析报告」。"]
     if declared is not None and declared != len(segs):
@@ -374,11 +374,13 @@ def _session_dirs():
     try:
         import folder_paths
 
-        roots = [os.path.join(folder_paths.get_output_directory(), "h3_continuous")]
+        from . import session as _sess
+        # 当前真实落盘根 = 渲染写它的那个根，同一个函数算的，不会再分叉。
+        roots = [_sess.store_root()]
         # 历史遗留根：与当前 output_directory 同源推导（<base_path>/output）。
         base = getattr(folder_paths, "base_path", "") or ""
         if base:
-            legacy = os.path.join(base, "output", "h3_continuous")
+            legacy = os.path.join(base, "output", _sess.ROOT)
             if os.path.normcase(legacy) not in [os.path.normcase(r) for r in roots]:
                 roots.append(legacy)
     except Exception:
@@ -389,31 +391,31 @@ def _session_dirs():
 def _find_session(name: str):
     """按会话名找目录。
 
-    **必须用 session.sanitize 本尊**。这里原来抄了半份正则（只有
-    ``[^A-Za-z0-9._-]+``，缺了后面的 ``strip("._")``），于是中文会话名
-    ``曹贼的性价比_v18_en`` 被算成 ``_v18_en``，而 Director 真正建的目录是
-    ``v18_en``（前导下划线被 strip 掉了）——差一个字符，永远找不到，
-    时间线模块就会一直显示「会话目录不存在」。
+    ★ **必须用 session.sanitize 本尊**。这里原来抄了半份正则（只有
+      ``[^A-Za-z0-9._-]+``，缺了后面的 ``strip("._")``），于是中文会话名
+      ``曹贼的性价比_v18_en`` 被算成 ``_v18_en``，而 Director 真正建的目录是
+      ``v18_en``（前导下划线被 strip 掉了）——差一个字符，永远找不到，时间线
+      模块就会一直显示「会话目录不存在」。
+
+    ★ 直接从 ``session`` 取，不绕 ``common``：``common.sanitize`` 只是同一个对象
+      的转发，而 common 顶部要 import torch。面板这条 HTTP 路径没有理由为了一个
+      纯字符串函数把整条 torch 依赖挂上（离线测试也因此能单独跑 routes）。
+      「只有一套实现」这件事由 :func:`_session_name_homogeneous` 持续守着。
     """
-    try:
-        from .session import sanitize
-    except Exception as exc:                                     # pragma: no cover
-        # ★ 兜底必须与 session.sanitize **同源**。以前这里内联了一套
-        #   ``[^A-Za-z0-9._-]+`` 的 ASCII 规则，把 CJK 全压成下划线 ——
-        #   与落盘侧（保留 CJK）**相反**：一进这条兜底路径目录就分叉，
-        #   渲染写 ``v18_en_v10``、面板查 ``曹贼的性价比_v18_en_v10``，
-        #   表现为「断点渲染又从第 1 段开始」+ 修复节点报 no handoff clip。
-        #   ``common.safe_session_name`` 就是同源实现（保留 CJK / 压非法字符 /
-        #   截断 60），直接复用它。
-        log("routes: 导入 session.sanitize 失败（%s），改用同源的 safe_session_name",
-            exc)
-        sanitize = safe_session_name
+    from .session import sanitize
 
     raw = (name or "").strip()
     candidates = []
     for cand in (raw, sanitize(raw)):
         if cand and cand not in candidates:
             candidates.append(cand)
+    # ★ 这个名字来自 HTTP 查询参数，会直接拼进路径。**不许往上走**。
+    #   ``<总根>/<剧本名>/<版本名>`` 之后面板可以填 "剧本/版本" 这种带分隔的
+    #   精确名，所以不能一律禁止分隔符，但 ".." 与绝对路径必须挡掉：
+    #   _session_state 会把命中目录列出来并回给前端。
+    candidates = [c for c in candidates
+                  if not os.path.isabs(c)
+                  and ".." not in os.path.normpath(c).split(os.sep)]
     # 兜底：目录名被截断到 64 字符时，按前缀再找一次
     if raw and len(raw) > 64:
         candidates.append(sanitize(raw)[:64])
@@ -426,20 +428,65 @@ def _find_session(name: str):
     roots = _session_dirs()
     for root in roots:
         for cand in candidates:
+            # 1) 老的单层布局：<总根>/<会话名>
             path = os.path.join(root, cand)
             if os.path.isdir(path):
                 return path
-        # 最后再放宽：不区分大小写 + 去下划线比一遍
+            # 2) 现行两层：<总根>/<剧本名>/<版本名>。先按版本名找，再放宽到
+            #    "用户填的是剧本名" —— 那种情况下取最新的一版，面板才有东西可显示。
+            hit = _nested_session(root, cand)
+            if hit:
+                return hit
+        # 最后再放宽：不区分大小写 + 去下划线比一遍（两种布局都试）
         if flat:
             try:
                 for entry in os.listdir(root):
-                    if not os.path.isdir(os.path.join(root, entry)):
+                    path = os.path.join(root, entry)
+                    if not os.path.isdir(path):
                         continue
                     if entry.lower().replace("_", "") == flat:
-                        return os.path.join(root, entry)
+                        return path
+                    hit = _nested_session(root, entry, match_parent=True)
+                    if hit:
+                        return hit
             except OSError:
                 pass
     return None
+
+
+def _nested_session(root, name, match_parent=False):
+    """在 ``<总根>/<剧本名>/`` 下面找版本目录。
+
+    ``match_parent=False``：``name`` 是版本名，找 ``<root>/<任意剧本>/<name>``，
+    多个剧本命中时取修改时间最新的那个（用户同时在两部剧本里用了 ``r1`` 这种
+    通用版本名，这是常事）。
+    ``match_parent=True``：``name`` 是**剧本夹名**，返回该剧本下最新的一版 ——
+    面板收到的是剧本名时也该有东西可显示，而不是"会话目录不存在"。
+    """
+    try:
+        parents = [name] if match_parent else os.listdir(root)
+    except OSError:
+        return None
+    best, best_mtime = None, -1.0
+    for parent in parents:
+        base = os.path.join(root, parent)
+        if not os.path.isdir(base):
+            continue
+        if match_parent:
+            leaves = [os.path.join(base, sub) for sub in sorted(os.listdir(base))
+                      if os.path.isdir(os.path.join(base, sub))]
+        else:
+            leaves = [os.path.join(base, name)]
+        for leaf in leaves:
+            try:
+                if not os.path.isdir(leaf):
+                    continue
+                m = os.path.getmtime(leaf)
+            except OSError:
+                continue
+            if m > best_mtime:
+                best, best_mtime = leaf, m
+    return best
 
 
 def _ffprobe_seconds(path):
@@ -565,6 +612,34 @@ def _load_panel_meta(path: str) -> dict:
 _panel_meta_cache = {}
 
 
+def _view_subfolder(path):
+    """会话目录相对 **ComfyUI 输出根** 的路径（``/view?subfolder=`` 要的正是它）。
+
+    ★ 以前这里写的是 ``relpath(path, dirname(dirname(path)))`` —— 单层布局下
+      分母正好是输出根，两层布局（``<输出根>/h3_continuous/<剧本>/<版本>``）下
+      分母变成了 ``h3_continuous``，算出来的 subfolder 少一层，
+      于是每一段的预览图 404，面板只剩一排空白缩略图。相对基准只有一个正解：
+      ``session.output_root()``。
+    """
+    try:
+        from . import session as _sess
+
+        root = _sess.output_root()
+    except Exception:
+        root = os.path.dirname(os.path.dirname(os.path.normpath(path)))
+    return os.path.relpath(path, root).replace("\\", "/")
+
+
+def _script_of(session_dir):
+    """会话目录所属的剧本夹名；老单层布局或 helper 不可用时返回 ''。"""
+    try:
+        from . import session as _sess
+
+        return _sess.script_of(session_dir)
+    except Exception:
+        return ""
+
+
 def _session_state(name: str) -> dict:
     path = _find_session(name)
     if not path:
@@ -591,8 +666,7 @@ def _session_state(name: str) -> dict:
             "index": index,
             "file": fn,
             "url": "/view?filename=%s&subfolder=%s&type=output"
-                   % (fn, os.path.relpath(path, os.path.dirname(
-                       os.path.dirname(path))).replace("\\", "/")),
+                   % (fn, _view_subfolder(path)),
             "mtime": round(os.path.getmtime(full), 3),
             "size": os.path.getsize(full),
             "seconds": (rec or {}).get("seconds") or _ffprobe_seconds(full),
@@ -616,24 +690,30 @@ def _session_state(name: str) -> dict:
     return {
         "ok": True,
         "session": os.path.basename(path),
+        # 剧本名（两层布局的上一级夹）；老的单层布局为空字符串。面板用它把
+        # 同一部剧本的几个版本归到一起。
+        "script": _script_of(path),
         "dir": path,
         "segments": segs,
         "done": done,
         "joined": (os.path.basename(joined) if os.path.exists(joined) else ""),
         "manifest_segments": len(records),
-        # 会话名归一化是否已收敛到单一实现（session.sanitize is common.safe_session_name）。
+        # 落盘名与查找名是否共用**同一个** sanitize 函数对象。
         # 这两侧一旦分叉，渲染写 A 目录、面板查 B 目录，表现为「断点渲染又从第 1
-        # 段开始」以及修复节点抛 "segment 1 has no handoff clip"。留着这个字段，
-        # 下次面板/断点行为异常时一眼就能排除/坐实这个根因。
+        # 段开始」以及修复节点抛 "segment 1 has no handoff clip"。以前靠 import
+        # 期的 monkey-patch 缝合（顺序相关，随时会解），现在 common 里已经没有
+        # 第二套正则，这个字段退化成"哪天有人再抄一份正则"的哨兵。
         "name_homogeneous": _session_name_homogeneous(),
     }
 
 
 def _session_name_homogeneous() -> bool:
-    """True = 落盘名与查找名用同一套规则（见 common._install_session_sanitize_alias）。"""
+    """True = 只有一个归一化实现，且 common 用的就是它本尊。"""
     try:
+        from . import common as _common
         from . import session as _sess
-        return getattr(_sess, "_SANITIZE_IS_ALIAS", False)
+
+        return getattr(_common, "sanitize", None) is _sess.sanitize
     except Exception:
         return False
 

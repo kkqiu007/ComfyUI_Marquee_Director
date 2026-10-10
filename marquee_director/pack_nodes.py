@@ -59,8 +59,12 @@ PACK_TOOLTIP = (
     "吃「手写 JSON」和「分镜提示词」两条路线。"
 )
 
-# 会话名算法搬到 common 了 —— PACK 解析器、Director、/h3/pack_preview
-# 三处必须算出同一个结果，否则面板查的会话和落盘的会话对不上（时间线空）。
+# 报错与日志里的人话名字 = display_name，同一个词只写一次。
+PARSE_LABEL = "H3 分镜提示词 PACK"
+
+# 会话名 / 剧本名的算法**全包只有一份**（session.sanitize，common 只是转发 +
+# 按候选顺序挑）。PACK 解析器、Director、/h3/pack_preview 三处必须算出同一个
+# 结果，否则面板查的会话和落盘的会话对不上（时间线空）。
 _safe_session_name = safe_session_name
 
 
@@ -87,7 +91,7 @@ def _ref_slot_line(segments):
     if not slots:
         return ""
     slots.sort()
-    return "参考图 %s（共 %d 张）→ 按这个顺序接到 H3 Director 的「参考图覆盖」" % (
+    return "参考图 %s（共 %d 张）→ 按这个顺序接到「H3 导演」的「参考图覆盖」" % (
         "、".join(str(n) for n in slots), len(slots))
 
 
@@ -130,16 +134,16 @@ def _looks_like_pack(text) -> bool:
 
 
 class H3PromptPackParser(io.ComfyNode):
-    """PACK 文本 → shots_json（Direct H3 Director 输入）。"""
+    """PACK 文本 → shots_json（接 ``H3Director`` 的 shots_json 口）。"""
 
     @classmethod
     def define_schema(cls):
         return io.Schema(
             node_id="H3PromptPackParser",
-            display_name="H3 分镜提示词 PACK",
+            display_name=PARSE_LABEL,
             category=CATEGORY,
             description="把 SKILL 规范格式的 H3 分镜提示词 PACK 解析成 shots_json，"
-                        "直接接 H3 Director 的 shots_json 入口。按 minimax-h3-"
+                        "直接接「H3 导演」的 shots_json 入口。按 minimax-h3-"
                         "shot-segment（英文单版）规范化：六段字段补全、no-text "
                         "首句补全、1.6 秒回放句补全、配乐 MUSIC block 自动判定、"
                         "任务模式推断、<Picture N> 逐镜参考图解析，并校验 §1.3 "
@@ -178,9 +182,13 @@ class H3PromptPackParser(io.ComfyNode):
                             "判据时把 N/A 换成 MUSIC block。修过的项会在 report "
                             "里单列（与 issues 分开显示）。"),
                 io.String.Input(
-                    "session_name", display_name="会话名", default="",
+                    "session_name", display_name="会话名（版本）", default="",
                     multiline=False, optional=True, advanced=True,
-                    tooltip="留空则取 PACK 头部的 Project。"),
+                    tooltip="落盘文件夹的**第二层**：<剧本名>/<这里填的名字>。"
+                            "留空就自动 r1、r2……同一部剧本想再渲一版、又不想"
+                            "覆盖上一版，就在这里起个名字（或者把「复用」关掉，"
+                            "让节点包自己翻页）。\n"
+                            "第一层「剧本名」取 PACK 头部的 Project。"),
                 io.Combo.Input(
                     "on_issue", display_name="发现问题",
                     options=ISSUE_OPTIONS, default="warn", optional=True,
@@ -206,8 +214,8 @@ class H3PromptPackParser(io.ComfyNode):
                 io.String.Output(
                     "pack_info", display_name="PACK信息",
                     tooltip="JSON：头部（项目/模式/总时长/段数/画幅）+ 每段时长"
-                            "+ 需要接的几个参考图槽位。接到 H3 Director 的 "
-                            "pack_info 入口，Director 就能在自己的面板上显示"
+                            "+ 需要接的几个参考图槽位。接到「H3 导演」的 "
+                            "pack_info 入口，导演面板就能显示"
                             "这份 PACK 的概要，并和画布尺寸对账。"),
             ],
         )
@@ -263,9 +271,15 @@ class H3PromptPackParser(io.ComfyNode):
             raise ValueError("H3 分镜提示词 PACK：没有解析到任何分镜。%s"
                              % ("；".join(issues) if issues else ""))
 
-        name = _safe_session_name(session_name,
-                                  meta.get("Project"), meta.get("项目"))
-        board = pp.to_shots_json(segments, session_name=name)
+        # 两层落盘名的两个来源，都在这里定死，下游只读不算：
+        #   剧本名 = PACK 头部的 Project（中文片名原样保留）
+        #   会话名（版本）= 控件优先，留空 = Project（Director 那侧再把它折成 rN）
+        # ★ 名字**必须在这一处算**：面板 /h3/pack_preview 和渲染走的是同一个
+        #   common.safe_session_name，任何一侧自己算一遍就会分叉成两个目录，
+        #   表现为「断点渲染又从第 1 段开始」。
+        script = _safe_session_name(meta.get("Project"), meta.get("项目"))
+        name = _safe_session_name(session_name, script)
+        board = pp.to_shots_json(segments, session_name=name, script_name=script)
         # parse_pack 只在正文上跑配乐判据，并把结果放进 meta（见 prompt_pack）
         music_hit = tuple(meta.pop("music_hit", ()) or ())
 
@@ -288,13 +302,14 @@ class H3PromptPackParser(io.ComfyNode):
 
         info = pp.pack_info_json(segments, meta, {
             "session_name": name,
+            "script_name": script,
             "issues": list(issues),
             "fixes": fixes,
             "music_hit": list(music_hit),
         })
         payload = json.dumps(board, ensure_ascii=False, indent=2)
-        log("H3PromptPackParser: %d segment(s), session=%s, %d issue(s)",
-            len(segments), name, len(issues))
+        log("%s: %d segment(s), 剧本=%s, 会话=%s, %d issue(s)",
+            PARSE_LABEL, len(segments), script, name, len(issues))
         return io.NodeOutput(payload, report, len(segments),
                              json.dumps(info, ensure_ascii=False))
 

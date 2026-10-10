@@ -4,7 +4,10 @@ The handoff is frame arithmetic on a latent, and frame arithmetic is exactly the
 kind of thing that is silently three frames wrong for a month. These build synthetic
 AV latents of every legal shape and assert the slice lands where it should.
 
-    python tools/test_latent_handoff.py --comfy /path/to/ComfyUI
+    python tools/test_latent_handoff.py
+
+ComfyUI's own root is worked out from this file's location; pass
+``--comfy /path/to/ComfyUI`` (or ``H3_COMFY_ROOT``) when it lives elsewhere.
 """
 
 import argparse
@@ -12,9 +15,14 @@ import os
 import sys
 
 
+def _comfy_root():
+    # tools/ 在 <ComfyUI>/custom_nodes/ComfyUI_Marquee_Director/tools/ 下。
+    return os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+
+
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--comfy", default=os.environ.get("H3_COMFY_ROOT"),
+    ap.add_argument("--comfy", default=os.environ.get("H3_COMFY_ROOT") or _comfy_root(),
                     help="ComfyUI checkout, for comfy.nested_tensor and the H3 constants")
     args = ap.parse_args()
     if args.comfy:

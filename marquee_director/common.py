@@ -13,7 +13,7 @@ import torch
 FPS = 24
 AUDIO_LATENT_FPS = 40
 
-# 二采精修（H3 Refine）的种子来源与采样器哨兵值。放在 common 是因为它们被
+# 二采精修（H3 二采精修）的种子来源与采样器哨兵值。放在 common 是因为它们被
 # 三方共用：refine_nodes 出控件、engine 消费、session 算缓存键 —— 写三份字面量
 # 迟早有一处拼错，而拼错的后果是缓存键静默失效（每次都全量重渲）。
 REFINE_FOLLOW_SAMPLER = "跟随一采采样器"
@@ -42,33 +42,36 @@ except ImportError as exc:  # pragma: no cover - install-time guard
 from comfy.ldm.minimax.model import FRAME_RESCALE  # noqa: E402
 
 
-import re as _re
+# 全包日志前缀。**只有下面 log() / warn() 两个函数打前缀**，模块里不要再自己
+# 拼第三种。选这个名字是因为它在 ComfyUI 控制台里和前端面板打的
+# ``[H3 Director]`` 同一个词，一条故障线 grep 一个关键词就够；以前同时存在
+# [H3 Continuous]、[Marquee]、[H3ScriptTranslate] 和前端 [H3 Director] 四种。
+#
+# 消息正文里保留**小写角色标签**（``join audio:`` / ``face_refine:`` /
+# ``cleanup:`` …），它说明是哪一个子系统在说话；但**不再重复自报节点名**
+# （以前有 ``H3Director:``、``FaceRefine 需要 …`` 这种），因为前缀已经说明
+# 这个包在说话，而节点名随时会改（2026-10-10 就改了一轮）。
+LOG_PREFIX = "[H3 Director]"
 
-# 会话名保留中日韩 / 字母数字 / . -，其余压成 _。
-# 这是**全包唯一的会话名归一化实现**，session.sanitize 直接复用它（见文件末尾
-# 的 _install_session_sanitize_alias）。以前这里和 session.py 各有一套正则：
-# 这一套留 CJK，session.py 那套 ``[^A-Za-z0-9._-]`` 把 CJK 全压成下划线 ——
-# 于是同一个 "曹贼的性价比_v18_en_v10" 在这一侧是原样，在落盘侧变成
-# "v18_en_v10"，面板查的目录和渲染写的目录是两个不同的根。
-_SAFE_NAME_RE = _re.compile(r"[^\w\u4e00-\u9fff.-]+")
+# 会话名 / 剧本名保留中日韩 / 字母数字 / . -，其余压成 _。
+#
+# ★ **归一化只有一套实现**：``session.sanitize``。这里不再自己抄一份正则。
+#   以前 common 和 session 各有一套，谁在前谁生效（靠一个 import 期的
+#   monkey-patch 缝合），后果是同一个名字在两侧算出不同目录 —— 渲染写 A、
+#   面板查 B，表现为「断点渲染又从第 1 段开始」+ 修复节点报
+#   ``segment 1 has no handoff clip``。现在按名调用，导入顺序不再有影响。
+from .session import UNNAMED, sanitize
 
 
 def safe_session_name(*candidates):
-    """会话名（也是落盘的文件夹名）：保留中日韩 / 字母数字 / . -，其余压成 _。
+    """会话名 / 剧本名（也就是落盘的文件夹名）。
 
-    放在 common 是因为**同一个会话名会被五处用到**，必须算出同一个结果：
-      1. H3PromptPackParser —— 解析 PACK 时定下会话名，写进 shots_json；
-      2. H3Director —— 拿它当 chain 的 session（``settings["session_name"]``）；
-      3. H3RepairSegmentNode / H3ExtendSession —— 修复/续接时定位会话目录；
-      4. /h3/pack_preview + /h3/session —— 面板拿它去查「这个会话渲到第几段」；
-      5. session.Session 落盘目录名。
-
-    ★ 这一侧**保留 CJK 是刻意的**：PACK 头部的 Project 常常就是中文片名
-      （「曹贼的性价比」），保留它=磁盘上那个目录名就是人看得懂的片名。真正
-      的危险是"两侧算法不一致"——那会让渲染写 A 目录、面板查 B 目录，表现为
-      「断点渲染又从第 1 段开始」以及修复节点抛
-      ``segment 1 has no handoff clip``（因为从没渲过第 1 段，自然没有 tail）。
-      所以 session.sanitize 必须与本函数同源，见下方的 monkey-patch 说明。
+    同一个名字会被好几处用到，必须算出同一个结果：
+      1. H3PromptPackParser —— 解析 PACK 时定下剧本名与会话名，写进 shots_json；
+      2. H3Director —— 拿它们定位 ``h3_continuous/<剧本>/<版本>/``；
+      3. H3RepairSegmentNode / 选择性重渲 —— 修复时定位会话目录；
+      4. /h3/pack_preview + /h3/session —— 面板查「这个会话渲到第几段」；
+      5. ``session.Session`` 落盘目录名。
 
     候选顺序**必须**与 pack_nodes / routes 里的调用点一致（控件 → Project），
     否则解析器和预览会算出两个名字。
@@ -77,40 +80,24 @@ def safe_session_name(*candidates):
         text = str(raw or "").strip()
         if not text:
             continue
-        cleaned = _SAFE_NAME_RE.sub("_", text).strip("_.")
-        if cleaned:
-            return cleaned[:60]
-    return "h3_pack"
-
-
-def _install_session_sanitize_alias():
-    """把 ``session.sanitize`` 指到本函数，保证"落盘名"与"查找名"同源。
-
-    为什么不是直接改 session.py：session.sanitize 被 Session.__init__ 在
-    **每次构造实例时**调用，而它原本的正则 ``[^A-Za-z0-9._-]`` 会丢 CJK。
-    只改一处、保留两处的写法迟早会再次跑偏；这里做的是"单一实现 + 别名"，
-    从根上消掉分歧。
-
-    单独调用（离线测试）也安全：导入 session 失败时静默跳过，不阻断 common。
-    """
-    try:
-        from . import session as _session_mod
-    except Exception:                                            # pragma: no cover
-        try:
-            import session as _session_mod                       # 直接 / 独立加载
-        except Exception:
-            return
-    if getattr(_session_mod, "_SANITIZE_IS_ALIAS", False):
-        return
-    _session_mod.sanitize = safe_session_name
-    _session_mod._SANITIZE_IS_ALIAS = True
-
-
-_install_session_sanitize_alias()
+        cleaned = sanitize(text)
+        if cleaned and cleaned != UNNAMED:
+            return cleaned
+    return UNNAMED
 
 
 def log(msg, *args):
-    logging.info("[H3 Continuous] " + msg, *args)
+    logging.info(LOG_PREFIX + " " + msg, *args)
+
+
+def warn(msg, *args):
+    """和 :func:`log` 同一个前缀，只是 WARNING 级。
+
+    单独一个函数而不是 ``logging.warning`` 直调：那样每个模块会各自再拼一遍前缀，
+    正是这条要消灭的东西。回退路径（边车读不出来、跳过精修…）都走这里，
+    级别够高又不至于让一次可恢复的降级看起来像渲染失败。
+    """
+    logging.warning(LOG_PREFIX + " " + msg, *args)
 
 
 _CLIP_GUIDES = None

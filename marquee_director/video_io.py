@@ -4,9 +4,15 @@ Segments are held on disk as ordinary mp4s so they can be scrubbed, dragged into
 an editor, or handed back to the repair node. They are written at CRF 10 -- near
 enough to lossless that a re-anchored tail measures the same ~30 dB as a plain VAE
 round trip, which is the accuracy the seamless join depends on.
+
+"Near enough" is doing work in that sentence, though: the join decodes those mp4s
+and encodes them *again* at CRF 14, so the finished film carries two generations of
+loss per segment while the raw decode only ever saw one. ``lossless_frames`` on
+``save_clip`` puts a bit-exact FFV1 sidecar next to the mp4 and ``load_clip`` reads
+that instead, dropping the film back to the single encode it was always going to
+need. Audio already solved this with the WAV sidecar; this is the video half.
 """
 
-import logging
 import math
 import os
 from fractions import Fraction
@@ -20,7 +26,8 @@ from comfy_api.input_impl import VideoFromComponents, VideoFromFile
 from comfy_api.util import VideoCodec, VideoComponents, VideoContainer
 
 from . import audio_master
-from .common import FPS
+from . import frames_cache
+from .common import FPS, log, warn
 
 SEGMENT_CRF = 10.0
 
@@ -68,7 +75,7 @@ def _weld_seam_fades(pieces, rate):
                 0.5 - 0.5 * torch.cos(math.pi * (w_out - t) / (w_out + 1)))
             welded += 1
     if welded:
-        logging.info("[H3 Continuous] join audio: seam weld on %d join(s) "
+        log("join audio: seam weld on %d join(s) "
                      "(%.0f ms cosine fade per side)",
                      sum(1 for _ in pieces[1:]), SEAM_WELD_MS)
     return pieces
@@ -108,7 +115,7 @@ def load_latent_tail(path):
     try:
         payload = comfy.utils.load_torch_file(target, safe_load=True)
     except Exception as exc:  # a truncated sidecar must not kill a whole chain
-        logging.warning("[H3 Continuous] could not read %s (%s); falling back to the "
+        warn("could not read %s (%s); falling back to the "
                         "pixel handoff", os.path.basename(target), exc)
         return None
     video = payload.get("video")
@@ -142,7 +149,7 @@ def _master_audio(audio):
     except Exception as exc:
         # A finished render is worth more than a loud one: anything unexpected
         # leaves the soundtrack exactly as the model produced it.
-        logging.warning("[H3 Continuous] segment mastering skipped (%s: %s)",
+        warn("segment mastering skipped (%s: %s)",
                         type(exc).__name__, exc)
         return audio
     if mastered is waveform:          # _master_tensor declines rather than raise
@@ -153,7 +160,7 @@ def _master_audio(audio):
 
 
 def save_clip(path, images, audio, fps=FPS, crf=SEGMENT_CRF, exact_audio=False,
-              master_audio=True):
+              master_audio=True, lossless_frames=False):
     """Write a clip.
 
     ``exact_audio`` adds a sidecar WAV -- see ``_wav_path``.
@@ -163,6 +170,14 @@ def save_clip(path, images, audio, fps=FPS, crf=SEGMENT_CRF, exact_audio=False,
     listenable when it is opened on its own. Pass ``False`` for a handoff tail:
     that file is the next segment's conditioning input, not an excerpt, and
     mastering it would move the condition.
+
+    ``lossless_frames`` adds the FFV1 sidecar next to the mp4 -- see
+    ``frames_cache``. The invariant that makes that sidecar safe to read
+    preferentially is enforced here: **a clip file and its sidecar are always
+    written together or not at all.** Turning the option off re-saves a segment
+    without deleting the old sidecar would leave ``load_clip`` serving last
+    take's pixels for this take's mp4 -- a silently wrong render, not a
+    degraded one.
     """
     os.makedirs(os.path.dirname(path), exist_ok=True)
     if audio is not None and master_audio:
@@ -174,6 +189,18 @@ def save_clip(path, images, audio, fps=FPS, crf=SEGMENT_CRF, exact_audio=False,
     os.replace(tmp, path)
     if exact_audio and audio is not None:
         save_wav(_wav_path(path), audio)
+    if lossless_frames:
+        try:
+            frames_cache.write(path, images, fps=fps)
+        except Exception as exc:
+            # The mp4 is on disk and correct, so the segment is fine -- losing
+            # the sidecar costs the join one generation of loss, nothing more.
+            warn("lossless frame cache skipped for %s "
+                            "(%s: %s)", os.path.basename(path),
+                            type(exc).__name__, exc)
+            frames_cache.remove(path)
+    else:
+        frames_cache.remove(path)
     return path
 
 
@@ -236,7 +263,22 @@ def save_wav(path, audio):
 
 
 def load_clip(path, prefer_wav=False):
-    """Whole clip back as (IMAGE, AUDIO)."""
+    """Whole clip back as (IMAGE, AUDIO).
+
+    The lossless FFV1 sidecar wins whenever it is there: it carries the exact
+    frames the mp4 was encoded from, so reading it removes the segment's own
+    generation of H.264 loss from everything downstream -- the join, and the
+    pixel handoff a repair anchors on. Absent, incomplete or unreadable, this is
+    the mp4 path unchanged; the frame count is checked against the mp4 because a
+    truncated Matroska decodes *shorter* rather than louder.
+    """
+    frames = None
+    if os.path.exists(frames_cache.frames_path(path)):
+        frames = frames_cache.read_if_present(path, expect_frames=frame_count(path))
+    if frames is not None:
+        if prefer_wav and os.path.exists(_wav_path(path)):
+            return frames, read_audio(_wav_path(path))
+        return frames, read_audio(path)
     components = VideoFromFile(path).get_components()
     audio = components.audio
     if audio is not None and not isinstance(audio, dict):
@@ -324,7 +366,7 @@ def drift_profile(parts, strength, window_seconds=2.0, fps=FPS, clamp=0.25):
     gains = target.view(1, -1) / smooth.clamp_min(1e-4)
     gains = 1.0 + (gains - 1.0) * float(strength)
     gains = gains.clamp(1.0 - clamp, 1.0 + clamp)
-    logging.info("[H3 Continuous] drift stabiliser: gain %.4f..%.4f across %d frames",
+    log("drift stabiliser: gain %.4f..%.4f across %d frames",
                  float(gains.min()), float(gains.max()), gains.shape[0])
     return gains
 
@@ -447,7 +489,7 @@ def resolve_join_points(parts, fps=FPS):
                          for j in range(skip + 1, min(len(heads), skip + 25))]
                 inner_base = float(np.median(inner)) if inner else 0.0
         except Exception as exc:  # 诊断失败不影响出片
-            logging.warning("[H3 Continuous] 接缝诊断跳过段 %d (%s)", idx + 1, exc)
+            warn("接缝诊断跳过段 %d (%s)", idx + 1, exc)
 
         if seam_diff is not None:
             # 只记录，不判定。段内本来就有硬切（实测段内 p99 可达 0.18，比接缝
@@ -456,7 +498,7 @@ def resolve_join_points(parts, fps=FPS):
             note = {"segment": idx + 1, "skip_frames": skip,
                     "seam_diff": round(seam_diff, 5),
                     "inner_median": round(inner_base or 0.0, 5)}
-            logging.info("[H3 Continuous] 段%d 接缝差异 %.4f（段内中位数 %.4f，"
+            log("段%d 接缝差异 %.4f（段内中位数 %.4f，"
                          "注意段内硬切天然更大，判定请看 tools/check_joins.py）",
                          idx + 1, seam_diff, inner_base or 0.0)
             notes.append(note)
@@ -499,7 +541,7 @@ def join(parts, out_path, fps=FPS, crf=14.0, stabilize=0.0):
     except (AttributeError, TypeError) as exc:
         # Streaming leans on save_to only touching .shape and iteration. If a future
         # ComfyUI indexes or moves the batch instead, fall back to the honest way.
-        logging.warning("[H3 Continuous] streamed join failed (%s); "
+        warn("streamed join failed (%s); "
                         "joining in memory instead", exc)
         components = VideoComponents(images=frames.materialize(), audio=audio,
                                      frame_rate=Fraction(fps))
@@ -603,7 +645,7 @@ def _join_audio(parts, fps):
     if rate is None:
         return None
 
-    logging.info("[H3 Continuous] join audio: %d/%d segment(s) from WAV sidecar "
+    log("join audio: %d/%d segment(s) from WAV sidecar "
                  "(no second AAC generation), %d from mp4",
                  from_sidecar, len(parts), len(parts) - from_sidecar)
 
@@ -626,7 +668,7 @@ def _join_audio(parts, fps):
                 else:
                     piece = _master_tensor(piece, rate, audio_master.master_segment)
             except Exception as exc:
-                logging.warning("[H3 Continuous] segment mastering skipped (%s: %s)",
+                warn("segment mastering skipped (%s: %s)",
                                 type(exc).__name__, exc)
         filled.append(piece)
     # 接缝焊接：相邻段交界处的原位微淡入淡出（长度不变，只杀拼接咔哒声）。
@@ -634,7 +676,7 @@ def _join_audio(parts, fps):
     waveform = torch.cat(filled, dim=-1)
 
     if audio_master.ENABLED and matched:
-        logging.info("[H3 Continuous] join audio: %d/%d segment(s) already at "
+        log("join audio: %d/%d segment(s) already at "
                      "delivery level (mastered when saved), %d matched here",
                      matched, len(pieces), len(pieces) - matched)
 
@@ -655,7 +697,7 @@ def _join_audio(parts, fps):
         except Exception as exc:
             # Losing a finished render to an audio polish step would be a bad
             # trade, so anything unexpected leaves the mix exactly as it was.
-            logging.warning("[H3 Continuous] audio mastering skipped (%s: %s)",
+            warn("audio mastering skipped (%s: %s)",
                             type(exc).__name__, exc)
 
     return {"waveform": waveform, "sample_rate": rate}

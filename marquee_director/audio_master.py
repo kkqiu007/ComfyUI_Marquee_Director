@@ -116,13 +116,12 @@ the delivered track about 1 dB above the number asked for -- that is how a
 "-2 dBTP" master decodes at -1.0 dBTP with no error anywhere to warn you.
 """
 
-import logging
 import os
 
 import numpy as np
 from scipy.signal import lfilter, resample_poly
 
-log = logging.getLogger(__name__)
+from .common import log, warn
 
 # ---------------------------------------------------------------------------
 # Tunables. Module constants rather than node widgets on purpose: adding an
@@ -761,7 +760,7 @@ def master(waveform, sample_rate, target_lufs=TARGET_LUFS,
     # changed, and without it in the log there is no way to tell from a render
     # whether the running process picked the change up. The pass that runs on
     # the film reports ``hp None``, which also distinguishes the two callers.
-    log.info("[H3 Continuous] audio master: %.1f -> %.1f LUFS "
+    log("audio master: %.1f -> %.1f LUFS "
              "(target %.1f, %+.1f dB, peak %.2f dBTP, hp %s, shape %s)%s",
              before, after, target_lufs, applied_db,
              20.0 * np.log10(max(float(np.abs(y).max()), 1e-12)),
