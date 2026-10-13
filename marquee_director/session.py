@@ -339,6 +339,13 @@ def segment_key(settings, segment, handoff, previous_key):
         seam = settings.get("seam_min_mask")          # 旧名兼容
     if seam is not None and abs(float(seam) - SEAM_REDRAW_DEFAULT) > 1e-6:
         payload["seam_redraw"] = round(float(seam), 4)
+    # TeaCache 阈值（H3 链路设置）：**等于 0（默认=关）时不并入** ——
+    # H3ChainSettings 现在总是传出这个键，无条件并入会让所有既有会话的段
+    # 全量重渲。开了之后改阈值会正确触发重渲：它改变成片本身（被跳过的
+    # 步输出的是复用值，不是真实 forward 的结果）。
+    tc = settings.get("teacache_thresh")
+    if tc is not None and float(tc) > 0.0:
+        payload["teacache_thresh"] = round(float(tc), 4)
     if RENDER_PIPELINE_ID:
         payload["pipe"] = RENDER_PIPELINE_ID
     # 二采精修（H3 二采精修）：同样只在**接了 refine 且给了噪声表**时才并入。

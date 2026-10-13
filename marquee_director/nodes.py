@@ -284,6 +284,27 @@ class H3ChainSettingsNode(io.ComfyNode):
                             "★ 会话名留空时，全新渲染（复用关掉）会在剧本夹里自动开 "
                             "r1/r2…，上一版产出一个字节都不动 —— 这就是「同一部剧本的多条 "
                             "take 分开放」的入口。"),
+                # TeaCache 时间步缓存（融合 Icyoung/ComfyUI-MiniMaxH3-TeaCache，MIT）：
+                # 输入 rel-L1 累积量低于阈值时复用上一步输出，跳过真实的 DiT forward。
+                # 上游实测 H3 20 步采样 306s → 102s（3.0×），只走官方
+                # set_model_unet_function_wrapper，不改 comfy/ 源码。
+                # ★ 必须挂在列表**最末尾**（script_name 之后）：本节点全 required 段，
+                #   widget 顺序即 schema 顺序，插在中间会让已存工作流的
+                #   widgets_values 整体错位。
+                # 0 = 关（默认）：不 clone model、不挂 wrapper，行为与加这个控件之前
+                # 逐比特一致；开了之后进 segment_key，改阈值会正确触发重渲。
+                io.Float.Input("teacache_thresh", default=0.0, min=0.0,
+                               max=0.5, step=0.01, round=False, advanced=True,
+                               tooltip="TeaCache 时间步缓存的 rel-L1 阈值。0 = 关。\n\n"
+                                       "相邻时间步的 DiT 输出高度相似，累积输入差低于"
+                                       "这个值时直接复用上一步输出、跳过真实 forward，"
+                                       "上游实测 20 步采样约 3 倍加速。\n\n"
+                                       "越大越快、漂移风险越高；0.1–0.2 是常用区间。\n"
+                                       "步数守卫：≥12 步用上游默认（前 2 步/后 2 步"
+                                       "不跳）；6–11 步收紧为前 1 步/后 1 步；少于 6 步"
+                                       "（如 turbo 4 步链）自动不启用。\n"
+                                       "★ 它改变成片本身：开关与阈值都进 segment_key，"
+                                       "切换会让相关段重渲。"),
             ],
             outputs=[H3Settings.Output(display_name="settings")],
         )
@@ -292,7 +313,7 @@ class H3ChainSettingsNode(io.ComfyNode):
     def execute(cls, model, clip, vae, audio_vae, sampler, sigmas, width, height,
                 chain_seed, session_name, ref_image_size, handoff_mode="latent",
                 drift_arrest=0.0, seam_redraw=0.10, seam_remask=False,
-                script_name="") -> io.NodeOutput:
+                script_name="", teacache_thresh=0.0) -> io.NodeOutput:
         return io.NodeOutput({
             "model": model, "clip": clip, "vae": vae, "audio_vae": audio_vae,
             "sampler": sampler, "sigmas": sigmas,
@@ -302,6 +323,7 @@ class H3ChainSettingsNode(io.ComfyNode):
             "handoff_mode": handoff_mode, "drift_arrest": float(drift_arrest),
             "seam_redraw": float(seam_redraw),
             "seam_remask": bool(seam_remask),
+            "teacache_thresh": float(teacache_thresh or 0.0),
         })
 
 

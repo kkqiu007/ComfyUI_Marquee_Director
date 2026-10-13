@@ -57,6 +57,7 @@ from .common import (
 # 延迟到模块尾部导入：face_refine 在模块层要建 comfy_api 的节点类，而本模块
 # 又被 nodes.py 在模块层导入。放在这里能确保 .common / comfy_extras 都已就绪。
 from .face_refine import apply_face_refine  # noqa: E402  (见上)
+from . import teacache as teacache_mod  # noqa: E402  (TeaCache 时间步缓存)
 
 
 def _reference_conditioning(settings, segment):
@@ -711,17 +712,24 @@ def refine_samples(settings, samples, positive, seed):
         return samples, ""
 
     passes = max(1, int(pack.get("passes") or 1))
-    model = pack.get("model") or settings["model"]
+    base_model = pack.get("model") or settings["model"]
     sampler = _refine_sampler(settings, pack)
     refine_seed = _refine_seed(pack, seed)
 
-    guider = Guider_Basic(model)
-    guider.set_conds(positive)
-    try:
-        for i in range(passes):
-            # A fresh noise object per pass: two passes sharing one seed would
-            # start from literally the same noise, which is not "more refining",
-            # it is the same step twice.
+    notes = []
+    for i in range(passes):
+        # A fresh noise object per pass: two passes sharing one seed would
+        # start from literally the same noise, which is not "more refining",
+        # it is the same step twice.
+        #
+        # TeaCache：每个 pass 是一次独立的 sample()，state 必须新建 ——
+        # 共享 state 会让第二个 pass 的 step_idx 接着第一个往下数，
+        # end_step 的负偏移整体算错，缓存打到不该打的步上。
+        # 阈值 = 0（默认）时 wrap() 原样返回同一个 model，行为不变。
+        model, tc_state = teacache_mod.wrap(base_model, settings)
+        guider = Guider_Basic(model)
+        guider.set_conds(positive)
+        try:
             out = SamplerCustomAdvanced.execute(
                 noise=Noise_RandomNoise(refine_seed + i),
                 guider=guider,
@@ -731,8 +739,12 @@ def refine_samples(settings, samples, positive, seed):
             )[0]
             samples = out["samples"]
             del out
-    finally:
-        del guider
+        finally:
+            del guider
+            note = teacache_mod.counts_note(tc_state)
+            if note:
+                notes.append("pass %d：%s" % (i + 1, note))
+                log("refine teacache: pass %d %s", i + 1, note)
 
     if hasattr(sigmas, "shape"):
         shape = "x".join(str(int(s)) for s in sigmas.shape)
@@ -744,6 +756,8 @@ def refine_samples(settings, samples, positive, seed):
     note = "%d pass(es), sigmas %s, %s" % (
         passes, shape,
         "跟随一采模型" if pack.get("model") is None else "二采模型")
+    if notes:
+        note += "；teacache " + "；".join(notes)
     return samples, note
 
 
@@ -834,7 +848,14 @@ def _render_segment_once(settings, segment, start_anchor=None, end_anchor=None):
 
     # 接了逐 step 掩码就用带钩子的那份 clone（它是 model.clone()，权重是同一套，
     # 只是多了一个 model_options 钩子）；没接就是原来的 model，一分不差。
-    guider = Guider_Basic(remask_model or settings["model"])
+    # TeaCache 同理：阈值 > 0 时这里再 clone 一份挂上时间步缓存 wrapper，
+    # 钩子只活在这个 clone 上，随本段一起销毁；阈值 = 0（默认）时 wrap()
+    # 原样返回上面那个 model，一个 clone 都不做。
+    # ★ 挂在 remask clone 的**下游**（包着它），这样两个钩子同时生效时
+    #   TeaCache 的复用判断看到的是已经打过 remask 钩子的模型的输出。
+    model, tc_state = teacache_mod.wrap(remask_model or settings["model"],
+                                        settings)
+    guider = Guider_Basic(model)
     guider.set_conds(positive)
 
     try:
@@ -850,6 +871,10 @@ def _render_segment_once(settings, segment, start_anchor=None, end_anchor=None):
         # 活到下一次 gc，等于每段往内存里留一份模型。
         uninstall_prefix_remask(remask_model)
         remask_model = None
+        tc_note = teacache_mod.counts_note(tc_state)
+        tc_state = None
+        if tc_note:
+            log("teacache: %s", tc_note)
 
     samples = sampled["samples"]
     # ★ 二采必须排在**切尾巴和解码之前**（借鉴 MiniMaxH3_Director 的 refine 口）。

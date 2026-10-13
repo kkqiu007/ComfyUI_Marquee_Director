@@ -1096,7 +1096,8 @@
         0.05,
         0.1,
         false,
-        ""
+        "",
+        0.0
       ],
       "widgets_values_named": {
         "width": 480,
@@ -1108,7 +1109,8 @@
         "drift_arrest": 0.05,
         "seam_redraw": 0.1,
         "seam_remask": false,
-        "script_name": ""
+        "script_name": "",
+        "teacache_thresh": 0.0
       },
       "color": "#3f5159",
       "bgcolor": "#222d33"

@@ -91,6 +91,28 @@ Chain any number of MiniMax H3 renders into **one unbroken take**.
 > 依赖：`ultralytics` + `ComfyUI/models/ultralytics/bbox/` 下的 YOLO 权重
 > （本机已装 `face_yolov8m.pt`）。**检测不到脸的段原样放过**，不报错也不改画面。
 >
+> **TeaCache 时间步缓存**（`H3 链路设置` 上的 `teacache_thresh`，advanced）融合
+> `Icyoung/ComfyUI-MiniMaxH3-TeaCache`（MIT）。相邻时间步的 DiT 输出高度相似，
+> 输入 rel-L1 累积量低于阈值时直接复用上一步输出、跳过真实 forward。上游实测
+> H3 20 步采样总墙钟 306.22s → 102.08s（**3.0×**），A/B 观感无差。它只走 ComfyUI
+> 官方的 `set_model_unet_function_wrapper`（`comfy/samplers.py` 的
+> `calc_cond_batch` 消费），**不改 comfy/ 一行**；本包的内建版还把
+> `total_steps` 改成从 sigmas 表真实长度推导（上游要求手填、且必须与调度器一致），
+> 并按步数设守卫：≥12 步沿用上游（前 2 步/后 2 步不跳），6–11 步收紧为前 1/后 1，
+> 少于 6 步（turbo 4 步链）自动不启用。
+> **默认 0 = 关**：不 clone model、不挂 wrapper，行为与加这个控件之前逐比特一致。
+> 开了之后它**改变成片本身**，所以开关与阈值都进 `segment_key` —— 改阈值会正确
+> 触发相关段重渲，不会拿到旧路径的产物。每段采样结束日志会报
+> 「teacache: 真实 N 步 + 复用 M 步」，加速有没有生效一眼可查。
+>
+> 2026-10-13 生态调研记录：`loopforge0/ComfyUI-H3-Continuous`（本包分叉前的上游）
+> 与 `luxu1999/…ChainDirector`、`xiaolibai-sys/…MiniMaxH3`、
+> `comfyui-h3-motion-context`、`ComfyUI-MiniMaxH3-TimelineDirector` 等均已比对，
+> 其余可借鉴点（per-segment LoRA、latent 直切、音频在接缝处收尾、二采/FFV1/remask）
+> 本包早已吸收；`yichengup/ComfyUI-YCNodes-MiniMax-H3` 的六个采样级补丁
+> （Prompt Relay / Distance Attention / 动态 CFG / Sigma Refiner / Tiled Sampler）
+> 作用于官方采样节点链，与本包的渲染路径正交，用外接节点即可，不入包。
+>
 > 被取代的旧节点已删除，只服务于它们的样例工作流与开发脚本一并移除。
 > 现行样例工作流：`workflows/h3_director_unlimited_storyboard.json`。
 
@@ -370,6 +392,15 @@ activation peak, which is the part 8 GB actually runs out of.
 
 If you hit out-of-memory partway through a long chain, drop `unload_every` to `1` so the
 models are released after every segment instead of every two.
+
+**Sampling itself can be made ~3× faster.** On **H3 链路设置**, set
+`teacache_thresh`（advanced，default 0 = off）to `0.15`: adjacent timesteps reuse the
+previous DiT output while the accumulated rel-L1 input delta stays under the threshold.
+Measured upstream at 20 steps: 306 s → 102 s per shot. It changes the picture slightly
+(a skipped step is a reused one), so it goes into the segment cache key — flip it on and
+the affected segments re-render once, then cache normally. Guards: ≥12 steps keep the
+upstream window (first 2 / last 2 never skipped), 6–11 steps tighten to first 1 / last 1,
+and below 6 steps (turbo 4-step chains) it stays off by itself.
 
 ---
 
