@@ -640,7 +640,7 @@ def _script_of(session_dir):
         return ""
 
 
-def _session_state(name: str) -> dict:
+def _session_state(name: str, planned_segs=None) -> dict:
     path = _find_session(name)
     if not path:
         return {"ok": False, "error": "会话目录不存在：%s" % name,
@@ -687,6 +687,19 @@ def _session_state(name: str) -> dict:
         else:
             break
     joined = os.path.join(path, "%s.mp4" % os.path.basename(path))
+    # ★ 段数漂移探测（2026-10-14）：磁盘段号是**渲染顺序号**，它与面板的
+    #   「本批次分镜序号」同义的前提是 PACK 版本没变。用户改过 PACK（切分点
+    #   漂移，实测旧版 S04a/S04b → 新版 S07a/S07b）后，磁盘 21 段 vs 面板 20
+    #   段，seg_NN 与面板第 NN 段不再对应 —— 段块视频张冠李戴，doneSet 还会
+    #   多出幽灵段让进度条虚高（截图实况：已渲 20/20，磁盘却有 seg_21）。
+    #   manifest 可能已被清理扫掉（用户实况就没有 manifest），没有键可逐一
+    #   比对，所以由调用方把面板当前段数带进来，两边一对即可判定。
+    planned = None
+    if planned_segs is not None:
+        try:
+            planned = max(0, int(planned_segs))
+        except (TypeError, ValueError):
+            planned = None
     return {
         "ok": True,
         "session": os.path.basename(path),
@@ -698,6 +711,11 @@ def _session_state(name: str) -> dict:
         "done": done,
         "joined": (os.path.basename(joined) if os.path.exists(joined) else ""),
         "manifest_segments": len(records),
+        # 磁盘段总数 / 面板计划段数 / 是否漂移。drift=True 时前端必须**显式
+        # 警示**而不是假装对齐（处置见前端的 absorbSession）。
+        "disk_count": len(segs),
+        "planned_segs": planned,
+        "drift": bool(planned is not None and planned != len(segs)),
         # 落盘名与查找名是否共用**同一个** sanitize 函数对象。
         # 这两侧一旦分叉，渲染写 A 目录、面板查 B 目录，表现为「断点渲染又从第 1
         # 段开始」以及修复节点抛 "segment 1 has no handoff clip"。以前靠 import
@@ -1024,8 +1042,12 @@ def register() -> bool:
     @routes.get("/h3/session")
     async def h3_session(request):
         name = request.query.get("name", "")
+        # 面板当前分镜段数（刷新时带上）：用于段数漂移探测，见
+        # _session_state 里 drift 字段的注释。
+        planned = request.query.get("segs", "")
         try:
-            return web.json_response(_session_state(name))
+            return web.json_response(
+                _session_state(name, planned if planned else None))
         except Exception as exc:                              # pragma: no cover
             return web.json_response({"ok": False, "error": str(exc),
                                       "segments": []}, status=500)

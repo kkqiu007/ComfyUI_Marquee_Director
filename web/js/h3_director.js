@@ -4907,6 +4907,8 @@ function buildTimelinePanel(node, state) {
   let activeIndex = -1;
   let doneSet = new Set();
   let railSpans = [];          // 每段的轨道块（小马按段跑 + 填充都要用）
+  // 段数漂移警示文案（磁盘段数 ≠ 当前分镜段数时非空）——刷新后显示在状态栏
+  let panelDriftHint = "";
 
   /* ---- 小马：只朝一个方向跑，并且**只在当前这一段的轨道区间里跑** ---- */
   /* 以前是 ping-pong（撞到边界就掉头），看起来像"来回踱步"；后来改成一律
@@ -5712,21 +5714,47 @@ function buildTimelinePanel(node, state) {
 
   /** 把 /h3/session 的返回灌进 state.rendered / doneSet。
    *
+   *  ``total`` 是面板当前分镜段数。磁盘段号是**渲染顺序号**，与面板段序号同义
+   *  的前提是 PACK 版本没变；用户改过 PACK（切分点漂移）后，磁盘 21 段 vs
+   *  面板 20 段，seg_NN 与面板第 NN 段不再对应 —— 直接把 index 灌进
+   *  rendered/doneSet 会 dual bug：越界的第 21 段成"幽灵已渲"（进度条虚高），
+   *  而 1..20 的视频其实是旧版的张冠李戴。幽灵段在这里剔除；张冠李戴无法
+   *  在无 manifest 时自动纠正（manifest 可能已被清理扫掉），由 drift 警示
+   *  明确告知用户"缩略图可能错位，需重跑该会话"。
+   *
    *  ★ 刷新与「断点渲染」按钮原本各写了一份同样的三行（取 url → 拼缓存键 →
    *    填 doneSet），两处都还在拼 ``Date.now()``。合成一处后缓存键只有一种
    *    口径，mtime 键改一次两处同时生效 —— 不会再出现「刷新后视频是新的、
    *    点断点又退回旧缓存」这种前后不一致。
    */
-  function absorbSession(data) {
+  function absorbSession(data, total) {
     const rows = data.segments || [];
+    const limit = (typeof total === "number" && total > 0) ? total : Infinity;
     state.rendered.clear();
+    const idxs = [];
+    let dropped = 0;
     rows.forEach((s) => {
-      if (s.url) {
-        state.rendered.set(s.index,
-          s.url + "&t=" + (s.mtime != null ? s.mtime : "0"));
-      }
+      if (!s.url) return;
+      if (s.index > limit) { dropped++; return; }   // 幽灵段：磁盘有、面板没有
+      state.rendered.set(s.index,
+        s.url + "&t=" + (s.mtime != null ? s.mtime : "0"));
+      idxs.push(s.index);
     });
-    doneSet = new Set(rows.map((s) => s.index));
+    doneSet = new Set(idxs);
+    const drift = !!data.drift;
+    if (drift || dropped) {
+      console.warn("[H3 Director] 段数漂移：磁盘 %d 段 vs 当前分镜 %d 段"
+        + "（改了 PACK？切分段 a/b 会改变段号对应）。%s"
+        + (dropped ? "已剔除 " + dropped + " 个越界段。" : ""),
+        Number(data.disk_count || rows.length), Number.isFinite(limit) ? limit : -1,
+        "缩略图与标尺/段号可能错位 —— 需要对齐就重跑该会话"
+        + "（段缓存按内容判定，会自动从变化段起重渲）。");
+    }
+    panelDriftHint = drift
+      ? ("⚠ 磁盘 " + (data.disk_count != null ? data.disk_count : rows.length)
+         + " 段 ≠ 当前分镜 " + (Number.isFinite(limit) ? limit : "?")
+         + " 段（PACK 改过？）：已渲缩略图与段号可能错位，重跑该会话可对齐")
+      : "";
   }
 
   /** 拉一次 /h3/session，把「磁盘上已渲好的段」同步进时间线。
@@ -5739,14 +5767,18 @@ function buildTimelinePanel(node, state) {
    *    命中缓存、``<video>`` 也不必重建（时间线 render() 的签名因此稳定，
    *    分段视频不会每 4 秒闪一次）。重渲那一段 mtime 变 → URL 变 → 破缓存
    *    生效，用户照样立刻看到新画面。这就是破缓存该有的粒度。
+   *  ★ ``segs`` 参数（2026-10-14）：把面板当前段数带给后端做段数漂移探测，
+   *    见 absorbSession。丢这个参数 = 放弃幽灵段剔除与 drift 警示。
    */
   async function refreshRendered(silent) {
     try {
+      const planned = state.segments();
       const res = await api.fetchApi(
-        "/h3/session?name=" + encodeURIComponent(sessionName()));
+        "/h3/session?name=" + encodeURIComponent(sessionName())
+        + "&segs=" + encodeURIComponent(planned.length));
       const data = await res.json();
       state.done = Number(data.done || 0);
-      absorbSession(data);
+      absorbSession(data, planned.length);
       render();
       if (silent) return;
       /* ★★ 第 41 轮：渲染途中**绝不能**碰小马。
@@ -5765,6 +5797,11 @@ function buildTimelinePanel(node, state) {
       // 蹄印收干净、四蹄回到静态站姿。一定要在 render() 之后 ——
       // state.segments() 要从刚重建过的 segsRow 拿。
       const segs = state.segments();
+      if (panelDriftHint) {
+        // 段数漂移：优先说清错位风险，别让「已渲 N/M」盖住它
+        setPony(false, panelDriftHint);
+        return;
+      }
       setPony(false, segs.length
         ? "✓ 刷新：已渲 " + doneSet.size + " / " + segs.length + " 段"
         : "✓ 刷新：磁盘上没有已完成的段");
@@ -5820,13 +5857,18 @@ function buildTimelinePanel(node, state) {
     e.stopPropagation();
     let done = 0;
     try {
+      const segs = state.segments();
       const res = await api.fetchApi(
-        "/h3/session?name=" + encodeURIComponent(sessionName()));
+        "/h3/session?name=" + encodeURIComponent(sessionName())
+        + "&segs=" + encodeURIComponent(segs.length));
       const data = await res.json();
       done = Number(data.done || 0);
       state.done = done;
-      absorbSession(data);
+      absorbSession(data, segs.length);
       render();
+      if (panelDriftHint) {
+        setPony(false, panelDriftHint);
+      }
     } catch (err) { /* 会话还不存在：从第 1 段开始，正常 */ }
 
     const total = (state.segments() || []).length || 0;
