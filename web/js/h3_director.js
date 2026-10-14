@@ -916,6 +916,11 @@ const CSS = `
  * 标尺、段块、轨道三线共用同一宽度，全部包在一个 overflow-x:auto 的
  * 轨道里，滚动天然同步，不需要 JS 逐帧同步 scrollLeft。 */
 .h3d-timeline-wrap { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+/* 段数漂移横幅：磁盘段数 ≠ 当前分镜段数时常驻（状态栏提示会被覆盖，这里躲不掉） */
+.h3d-driftbar { flex: none; padding: 3px 8px; border-radius: 4px;
+                font-size: 10px; line-height: 1.5; color: #ffd27d;
+                background: rgba(255, 178, 44, .10);
+                border: 1px solid rgba(255, 178, 44, .38); }
 .h3d-timeline-track {
   display: flex; flex-direction: column; gap: 3px;
   min-width: 0;
@@ -2193,15 +2198,22 @@ function refreshTokenViews() {
   });
 }
 
-/* ---- 时间标尺自适应刻度（A2）---- */
-function rulerStep(totalSec, px) {
+/* ---- 时间标尺自适应刻度（A2）---- */function rulerStep(totalSec, px) {
   const pxPerSec = px / Math.max(0.001, totalSec);
   const steps = [0.5, 1, 2, 5, 10, 15, 30, 60];
   for (const s of steps) if (s * pxPerSec >= 46) return s;   // 标签不挤在一起
   return steps[steps.length - 1];
 }
 
+/* 标尺刻度字。★ 2026-10-14：≥60s 不再折算成 "1m20s" —— 分钟格式让长轴的
+   刻度读起来"最多到一分钟就没了"（用户原话），而且与缩略图视频的真实秒数
+   对不上号。时间线总长通常只有几分钟，纯秒反而最好对账。 */
 function fmtRuler(sec) {
+  return (Math.round(sec * 10) / 10) + "s";
+}
+
+/* 末端总览用的分钟格式（"3m2s"）：总长度一眼可读，不对账逐格用它。 */
+function fmtRulerLong(sec) {
   sec = Math.round(sec * 10) / 10;
   if (sec >= 60) {
     const m = Math.floor(sec / 60);
@@ -4824,6 +4836,12 @@ function buildTimelinePanel(node, state) {
 
   // ★ 把标尺、段块、轨道包进同一个横向滚动轨道，三线天然同步滚动
   const timelineWrap = h("div", "h3d-timeline-wrap");
+  // 段数漂移横幅（2026-10-14）：磁盘段数与当前分镜段数不一致时常驻显示。
+  // 状态栏红字用户基本看不见（渲染完就被别的文案盖掉），时间线区域内的
+  // 常驻条才躲不掉 —— 这正是"标尺与缩略图总时间对不上"最可能的上游成因。
+  const driftBar = h("div", "h3d-driftbar");
+  driftBar.style.display = "none";
+  timelineWrap.appendChild(driftBar);
   const timelineTrack = h("div", "h3d-timeline-track");
   timelineTrack.appendChild(ruler);
   timelineTrack.appendChild(segsRow);
@@ -5339,10 +5357,10 @@ function buildTimelinePanel(node, state) {
     const filmSec = segs.reduce((a, s) => a + (Number(s && s.new_seconds) || 0), 0);
     const end = h("div", "h3d-rul-end");
     end.appendChild(h("i"));
-    const endLabel = fmtRuler(total);
+    const endLabel = fmtRulerLong(total);
     const endLbl = h("span", null,
       (filmSec > 0 && Math.abs(filmSec - total) > 0.05)
-        ? endLabel + " · 成片 " + fmtRuler(filmSec) : endLabel);
+        ? endLabel + " · 成片 " + fmtRulerLong(filmSec) : endLabel);
     end.appendChild(endLbl);
     ruler.appendChild(end);
     // 动态游标：与本行刻度同一个坐标系（rail-line 全局 px——三线 cell 边界
@@ -5839,6 +5857,16 @@ function buildTimelinePanel(node, state) {
          + " 段 ≠ 当前分镜 " + (Number.isFinite(limit) ? limit : "?")
          + " 段（PACK 改过？）：已渲缩略图与段号可能错位，重跑该会话可对齐")
       : "";
+    // 时间线区域内的常驻横幅：状态栏提示会被后续文案覆盖，这里躲不掉
+    if (driftBar) {
+      if (drift) {
+        driftBar.textContent = panelDriftHint;
+        driftBar.style.display = "";
+      } else {
+        driftBar.style.display = "none";
+        driftBar.textContent = "";
+      }
+    }
   }
 
   /** 拉一次 /h3/session，把「磁盘上已渲好的段」同步进时间线。
