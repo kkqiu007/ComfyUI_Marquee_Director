@@ -182,6 +182,11 @@ Two steps, about 42 GB of downloads, and a `git clone`. There is nothing to
 You need **ComfyUI 0.34.0 or newer**. *Settings → About* shows your version. Older
 builds have no MiniMax H3 nodes at all, so nothing here will load.
 
+> ★ 2026-10-14 上游对标（comfyanonymous/ComfyUI）：0.36 之后官方自己做了两件对
+> 小显存机器直接有益的事 —— 释放 embedding 临时量降低 H3 峰值显存、VAE offload
+> 修复与 `qk_norm_scale` 卸载崩溃修复。新版 ComfyUI 即使不为本包升级也是净收益；
+> 本包段间的死槽清理与预取队列清理与之叠加，不是替代。
+
 ### 1. Get the nodes
 
 ```bash

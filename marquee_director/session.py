@@ -387,6 +387,25 @@ def segment_key(settings, segment, handoff, previous_key):
             "feather": int(face.get("feather") or 0),
             "blend": round(float(face.get("blend") or 0.0), 4),
             "seam_fade": face.get("seam_fade"),
+            # ★ 质量闭环 + 强度插值十键（2026-10-14 补收）。face_refine 的节点
+            #   execute 一直都下发它们，注释也写着"全部进 pack、pack 参与缓存键"，
+            #   但这里只收了上面 14 个 —— 漏收的后果不是报错，而是**静默复用缓存**：
+            #   resume 开着调修脸强度 / 质检阈值，缓存键不变，段被判"未变"直接
+            #   复用旧段，成片与新设置不符且零提示。这些键全部直接改变本段像素
+            #   （强度决定贴回多柔，identity/detail/stability 判据决定多版尝试里
+            #   保留哪一版），必须进键。
+            #   注意键只在"接了修脸且给了噪声表"时存在 —— 没接的面无此键，
+            #   既有会话的 payload 保持字节一致，不会因此全量重渲。
+            "quality_check": bool(face.get("quality_check")),
+            "max_attempts": int(face.get("max_attempts") or 0),
+            "identity_floor": round(float(face.get("identity_floor") or 0.0), 4),
+            "detail_floor": round(float(face.get("detail_floor") or 0.0), 4),
+            "stability_floor": round(float(face.get("stability_floor") or 0.0), 4),
+            "adaptive_denoise": bool(face.get("adaptive_denoise")),
+            "strength_small_face": round(float(face.get("strength_small_face") or 0.0), 4),
+            "strength_large_face": round(float(face.get("strength_large_face") or 0.0), 4),
+            "face_px_small": int(face.get("face_px_small") or 0),
+            "face_px_large": int(face.get("face_px_large") or 0),
         }
     return hashlib.sha1(json.dumps(payload, sort_keys=True).encode()).hexdigest()[:20]
 

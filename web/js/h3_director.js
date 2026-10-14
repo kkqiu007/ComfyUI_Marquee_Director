@@ -6545,8 +6545,11 @@ function buildPlanPanel(node, state) {
   // ===== 左栏：分镜提示词（整段六段式实时编辑） =====
   // 借鉴工作流 bilingual-pack 逻辑：英文版 EN 给 Director 直接渲染，中文版 ZH
   // 作为对照源 / 可编辑后写回中文版块。每段把六段式正文（subject_definitions
-  // … non_diegetic_music）整体放进**一个**文本框，编辑后通过 /h3/pack_apply_block
-  // 原样整块回写整份 PACK（rebuild_pack_block 按 lang 命中对应版块）。
+  // … non_diegetic_music）整体放进**一个**文本框，编辑后**纯前端**替换该段正文
+  // 并写回 PACK 源（doWrite → h3WritePackSource / override 模式写
+  // h3WritePackOverride）→ 触发 input → 重解析 → 面板刷新，不经过后端。
+  // ★ 服务端 /h3/pack_apply_block / /h3/pack_rebuild 是给 curl / 外部脚本的
+  //   等价 HTTP 能力，面板**不调用**（改纯前端路径后这两个端点就没接线了）。
   let edLang = "en";              // 当前编辑语言侧（en / zh）
   let editorEls = null;           // {en: textarea, zh: textarea}
   /* ★ 当前文本框里装的到底是「哪一段 / 哪一语言」的内容。

@@ -802,6 +802,9 @@ def register() -> bool:
         except Exception as exc:                              # pragma: no cover
             return web.json_response({"ok": False, "error": str(exc)}, status=400)
 
+    # 面板不调用以下端点（纯前端路径取代了 pack_rebuild / pack_apply_block，
+    # loras / input_images / dump_refs / cleanup 是 curl / 外部脚本能力，
+    # dump_refs 的 docstring 明说"调试用"）。保留原因：外部工具与人工排查看。
     @routes.post("/h3/pack_rebuild")
     async def h3_pack_rebuild(request):
         """实时编辑器写回：body={"text": 原PACK, "segments":[{"index":n,"fields":{}}], "lang": "en"|"zh"|null}
@@ -846,6 +849,7 @@ def register() -> bool:
 
     @routes.get("/h3/loras")
     async def h3_loras(request):
+        """LoRA 下拉数据源。面板不调用（外部署名 / curl 用），数据源不变。"""
         try:
             return web.json_response(_loras_cached())
         except Exception as exc:                              # pragma: no cover
@@ -854,6 +858,7 @@ def register() -> bool:
 
     @routes.get("/h3/input_images")
     async def h3_input_images(request):
+        """input 目录图片列表。面板不调用（早期「选已有」按钮已移除）。"""
         try:
             return web.json_response({"ok": True, "images": _input_images_cached()})
         except Exception as exc:                              # pragma: no cover
@@ -1027,7 +1032,9 @@ def register() -> bool:
 
     @routes.post("/h3/cleanup")
     async def h3_cleanup(request):
-        """清会话目录：只留分镜分段视频 + 完整拼接视频。
+        """清会话目录：只留分镜分段视频 + 完整拼接视频。面板不调用
+        （自动清理走 cleanup.install 的 atexit / 启动补清 / 定时巡检；这个
+         端点是手动 curl 立刻清一次用）。
 
         body: {"force": true}   —— force 会无视"正在渲染"的守卫（慎用）
         query: ?dry=1           —— 只列出会删什么，不真删
