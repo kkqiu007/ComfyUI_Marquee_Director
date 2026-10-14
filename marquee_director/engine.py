@@ -47,6 +47,7 @@ from .common import (
     REFINE_SEED_OFFSET,
     audio_latent_frames,
     assert_clip_guides_supported,
+    clear_prefetch_queues,
     evict_dead_loaded_models,
     free_ram_bytes,
     log,
@@ -789,8 +790,8 @@ def render_segment(settings, segment, start_anchor=None, end_anchor=None):
     也最容易崩的一步：实测 3070 8GB 在**第 5 段**这里 OOM，前 4 段都正常，整条
     链跑了 50 分钟才死，前 4 段全部白烧。
 
-    单段的 OOM 不该毁掉整条链。这里在进入条件编码前先清一次死槽与缓存碎片
-    （成本几乎为零），失败后再**强制释放显存并原样重试一次**。
+    单段的 OOM 不该毁掉整条链。这里在进入条件编码前先清一次死槽、预取队列与
+    缓存碎片（成本几乎为零），失败后再**强制释放显存并原样重试一次**。
 
     只退显存、不做 ``cleanup_models()`` 的整包内存清理：本包权重约 49 GB 而对
     象机内存约 40 GB，把权重从内存里丢掉就得从磁盘整包重读，实测会在重载阶段
@@ -798,6 +799,7 @@ def render_segment(settings, segment, start_anchor=None, end_anchor=None):
     ``free_between_segments`` 的护栏说明）。重试只此一次，再失败就如实抛出。
     """
     evict_dead_loaded_models()
+    clear_prefetch_queues()
     comfy.model_management.soft_empty_cache()
     try:
         return _render_segment_once(settings, segment, start_anchor, end_anchor)
@@ -808,6 +810,7 @@ def render_segment(settings, segment, start_anchor=None, end_anchor=None):
             str(exc).strip().splitlines()[0][:160])
         comfy.model_management.unload_all_models()
         evict_dead_loaded_models()
+        clear_prefetch_queues()
         comfy.model_management.soft_empty_cache()
         return _render_segment_once(settings, segment, start_anchor, end_anchor)
 
@@ -931,7 +934,10 @@ def take_tail(images, audio, handoff, fps=FPS):
 def free_between_segments(unload_models=False):
     """段间清理：默认清显存；``unload_models=True`` 时显存 + 内存一起清。
 
-    顺序照 ComfyUI_MiniMaxH3_Director 的 cleanup_segment_vram。
+    顺序照 ComfyUI_MiniMaxH3_Director 的 cleanup_segment_vram，另加本包自己的
+    内存护栏（见下）。除护栏外还多一步 ``clear_prefetch_queues``：循环内的每一段
+    都要再过一次 26 GB 文本编码器，预取队列不清会让后续段的权重读取退化成同步
+    host-to-device 拷贝。
 
     关键在**死槽必须先清**：``is_dead()`` 的 LoadedModel 会一直占着
     ``current_loaded_models``，而 ``unload_all_models()`` 碰不到它们，被钉住的
@@ -988,9 +994,12 @@ def free_between_segments(unload_models=False):
             #   真正让 RAM 释放的是 cleanup_models()（pop + del 断引用）配合 gc。
             # 所以这里**故意不调** cleanup_models()，内存里的权重得以保留。
             mm.unload_all_models()
+            clear_prefetch_queues()
             mm.soft_empty_cache()
             return
         # 真的清内存：先退显存，再断引用 + 多轮 gc 把权重从 RAM 放掉。
+        # （清 prefetch 队列统一放在函数末尾那次收尾里做，两条卸载路径都
+        #  会落到那里；guard 的早退分支够不到，所以在它自己return前补一次。）
         mm.unload_all_models()
         mm.cleanup_models()
         evict_dead_loaded_models()
@@ -1000,6 +1009,7 @@ def free_between_segments(unload_models=False):
         mm.soft_empty_cache()
         log("已卸载模型：显存 + 内存均已释放（约 %.1f GB 权重），下一段将从磁盘重载。",
             need / 2 ** 30)
+    clear_prefetch_queues()
     mm.soft_empty_cache()
 
 

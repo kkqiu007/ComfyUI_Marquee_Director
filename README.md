@@ -576,6 +576,36 @@ re-render everything after this one — the node will tell you what that invalid
 
 ---
 
+## 导演包：把一部剧交给别人 / 换台机器
+
+分镜提示词 PACK 与「这个剧本该喂哪几张参考图」分散在两个地方：PACK 原文在一个
+文本框里，参考图在画布的一排 **LoadImage** 节点上。**导出导演包**把两者连同样
+由服务端按存档节点同源函数生成的 `storyboard.json` 打成一个 `.hpack.zip`，
+**导入导演包**拆回来 —— 借鉴 `AIMixer/ComfyUI_MiniMaxH3_Director` 的 `director/pack.py`，
+包格式与安全纪律（zip 路径穿越 / 条目数 / 解压总量 / 单文件大小 / 扩展名白名单）
+照搬它的做法，测试见 `tests/test_pack_io.py`。
+
+包结构（ASCII 路径 —— Windows 下中文条目名会在某些解压工具里乱码，故统一英文）：
+
+```
+pack.json            格式 / 版本 / 剧本名 / 会话名 / 段数 / 时间戳 / 槽位表
+storyboard.json      与「H3 剧本存档」同款，「H3 剧本读档」直接吃
+script.txt           PACK 原文（六段格式源文本）
+refs/Picture1..N     参考图，槽位号 = 提示词里的 <Picture N> = ref_image_(N-1) 口
+```
+
+两个按钮在导演面板「功能规划」那一行的工具栏右侧。**导出**收集当前 PACK 原文与
+各 `ref_image` 槽位实际接的图（后端只认 tensor，认不到文件名，所以由面板读
+LoadImage 的 `widgets_values`）；zip 经 `/h3/pack_download` **分块流式**下发
+（Windows 上 FileResponse 会给 200 + 空 body，浏览器存出 0 字节坏包）。
+**导入**解到 `input/h3_director_packs/<包名>/`，`storyboard.json` 写进它真正的
+会话目录（`h3_continuous/<剧本名>/<版本名>/`，与渲染产物同目录），参考图按槽位
+**自动回填 LoadImage 节点**（节点上可 Ctrl+Z 撤销）；没接线槽的图会在提示里报
+`written/total`，剩下的自己拖。成片与分段 mp4 **不进包** —— 那是 GB 级产物，
+包的意义是“复现一份渲染所需的最小材料”。
+
+---
+
 ## Writing the prompts
 
 H3's reference format wants six sections: `subject_definitions`, `summary`,
@@ -839,6 +869,12 @@ unloading altogether.
 > support detected and enabled`), so on a small box `0` is both safer and faster: the
 > per-segment hygiene — `gc`, dead-slot eviction, `soft_empty_cache` — still runs every
 > segment, it simply never throws the weights away.
+>
+> ★ 2026-10-14 起段间清理多一步 `comfy.model_prefetch.cleanup_prefetch_queues()`
+> （借鉴 `AIMixer/ComfyUI_MiniMaxH3_Director` 的 `vram_cleanup`）。节点自己的
+> finally 只清一次预取队列，而 Director 在**一次执行内循环每一段**、每段都要再过
+> 26 GB 文本编码器；队列不清，后续段对权重的读取会退化成同步 host-to-device 拷贝。
+> 拿不到该入口的旧 ComfyUI 上静默跳过，不影响其它清理。
 >
 > If you do want periodic unloading (for example a machine with 64 GB+ of RAM), raise it
 > gradually and watch the reload, not the VRAM number.

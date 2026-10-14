@@ -6520,6 +6520,23 @@ function buildPlanPanel(node, state) {
   }
   const btnReset = h("button", "h3d-btn", "重选");
   if (!parserMode) barTop.appendChild(btnReset);   // parser 上没有「未选」态，重选无意义
+
+  /* 导演包导入 / 导出（end 处 h3ExportPack / h3ImportPack 实现）。
+   * 借鉴 ComfyUI_MiniMaxH3_Director 的 pack 能力：那边的导演台把「剧本 + 素材」
+   * 打进 zip 换机复现；本包的参考图是工作流里的 LoadImage 节点，所以导出由
+   * 面板收集（PACK 原文 + LoadImage 文件名）交服务端打包，导入后由面板把
+   * input/h3_director_packs/ 下的图写回对应槽位的 LoadImage。 */
+  const btnExport = h("button", "h3d-btn", "导出导演包");
+  btnExport.title = "把 PACK 原文 + 分镜 JSON + 参考图打成一个 .hpack.zip"
+    + "（换机 / 分享剧本时用）";
+  btnExport.onclick = () => h3ExportPack(node);
+  barTop.appendChild(btnExport);
+  const btnImport = h("button", "h3d-btn", "导入导演包");
+  btnImport.title = "导入 .hpack.zip：分镜写回会话目录（读档节点可读），"
+    + "参考图自动回填 LoadImage 节点";
+  btnImport.onclick = () => h3ImportPack(node);
+  barTop.appendChild(btnImport);
+
   body.appendChild(barTop);
 
   // 两栏布局
@@ -7901,4 +7918,164 @@ if (typeof document !== "undefined") {
 if (typeof console !== "undefined") {
   console.log("%c[h3-director] v2026-09-14-B plan-merge-active",
     "color:#4fff8f;font-weight:bold;");
+}
+
+/* ------------------------------------------------------------------ */
+/* 导演包导入 / 导出（借鉴 ComfyUI_MiniMaxH3_Director/director/pack.py） */
+/* ------------------------------------------------------------------ */
+/* 为什么由面板发起（而不是后端一把梭）：本包的参考图是工作流里的 LoadImage
+ * 节点，后端（路由）只认 tensor，拿不到文件名；LoadImage 的 widgets_values[0]
+ * 就是 input 相对路径，只有前端读得到。所以导出由面板收集文本与文件名、
+ * POST 给 /h3/pack_export 由服务端打包（storyboard 也用服务端
+ * pp.to_shots_json 生成，与存档节点同规格）；导入后由面板把
+ * input/h3_director_packs/ 下的图写回对应槽位的 LoadImage 节点。        */
+
+/** 轻提示：优先 ComfyUI 官方 toast，退化 console。 */
+function h3PackToast(severity, summary, detail) {
+  try {
+    if (app && app.extensionManager && app.extensionManager.toast
+        && typeof app.extensionManager.toast.add === "function") {
+      app.extensionManager.toast.add({
+        severity: severity, summary: summary, detail: detail || "",
+        life: severity === "error" ? 9000 : 4500,
+      });
+      return;
+    }
+  } catch (e) { /* 落到 console */ }
+  console.log("[H3 Director][pack] " + summary + (detail ? " — " + detail : ""));
+}
+
+/** 画布上的 H3Director 节点（面板挂在 Director / Parser 上都可能）。 */
+function h3DirectorNode() {
+  return findNodeByClass("H3Director");
+}
+
+/** LoadImage 在节点上的 widget（不同版本可能叫 image / 第一个 widget）。 */
+function h3LoadImageWidget(node) {
+  const ws = (node && node.widgets) || [];
+  return ws.find((x) => x && x.name === "image") || ws[0] || null;
+}
+
+/** Director 的 ``ref_image_N`` 口 → 上游 LoadImage 的文件名。
+ *  返回 ``{槽位号(1 起): input 相对路径}``；没有接线 / 找不到图返回 {}。 */
+function h3PackRefSlots(director) {
+  const out = {};
+  if (!director || !director.inputs || !app || !app.graph) return out;
+  const links = app.graph.links || {};
+  const originId = (link) =>
+    (link.origin_id != null ? link.origin_id : link.origin_slot_node);
+  for (const inp of director.inputs) {
+    const m = /^ref_images\.ref_image_(\d+)$/.exec(inp.name || "");
+    if (!m || inp.link == null) continue;
+    const link = links[inp.link];
+    if (!link) continue;
+    const src = (typeof app.graph.getNodeById === "function")
+      ? app.graph.getNodeById(originId(link)) : null;
+    if (!src) continue;
+    const w = h3LoadImageWidget(src);
+    const fn = w && w.value != null ? String(w.value) : "";
+    if (fn) out[parseInt(m[1], 10) + 1] = fn;
+  }
+  return out;
+}
+
+/** 把导入包里的图写回 Director 各 ref_image 槽位的 LoadImage 节点。
+ *  返回 ``{written, total}``——total 是包里的槽位数，written 是真正写进去的。 */
+function h3WritePackRefs(slots) {
+  const director = h3DirectorNode();
+  if (!director || !app || !app.graph) return { written: 0, total: (slots || []).length };
+  const links = app.graph.links || {};
+  const originId = (link) =>
+    (link.origin_id != null ? link.origin_id : link.origin_slot_node);
+  const bySlot = {};
+  for (const s of slots || []) bySlot[Number(s && s.slot)] = String((s && s.path) || "");
+  let written = 0;
+  for (const inp of director.inputs || []) {
+    const m = /^ref_images\.ref_image_(\d+)$/.exec(inp.name || "");
+    if (!m || inp.link == null) continue;
+    const path = bySlot[parseInt(m[1], 10) + 1];
+    if (!path) continue;
+    const link = links[inp.link];
+    if (!link) continue;
+    const src = (typeof app.graph.getNodeById === "function")
+      ? app.graph.getNodeById(originId(link)) : null;
+    if (!src) continue;
+    const w = h3LoadImageWidget(src);
+    if (!w) continue;
+    if (String(w.value) !== path) {
+      w.value = path;
+      if (typeof w.callback === "function") {
+        try { w.callback(path, app.canvas, src, [0, 0], null); } catch (e) { /* 忽略 */ }
+      }
+    }
+    written++;
+    try { src.setDirtyCanvas(true, true); } catch (e) { /* 忽略 */ }
+  }
+  return { written: written, total: Object.keys(bySlot).length };
+}
+
+/** 导出：PACK 原文 + LoadImage 文件 → /h3/pack_export → 浏览器下载 zip。 */
+async function h3ExportPack(node) {
+  const script = h3PackText();
+  if (!script || !script.trim()) {
+    h3PackToast("warn", "导出失败：读不到 PACK 原文",
+      "上游 H3PromptPackParser 的 pack_text 口没接文本框，或文本框为空。");
+    return;
+  }
+  const parser = h3FindParser();
+  const session = parser ? readStr(parser, "session_name", "") : "";
+  const refs = h3PackRefSlots(h3DirectorNode());
+  const nRef = Object.keys(refs).length;
+  try {
+    const res = await api.fetchApi("/h3/pack_export", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ script: script, session_name: session, refs: refs }),
+    });
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error || "导出失败");
+    const a = document.createElement("a");
+    a.href = "/h3/pack_download?name=" + encodeURIComponent(data.name);
+    a.download = data.name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    h3PackToast("success", "导演包已导出（" + (data.bytes / 1e6).toFixed(1) + " MB）",
+      "含 PACK 原文、分镜 JSON 与 " + nRef + " 张参考图。");
+  } catch (err) {
+    h3PackToast("error", "导出导演包失败", (err && err.message) || String(err));
+  }
+}
+
+/** 导入：选 .zip → /h3/pack_import → 参考图回填 LoadImage + toast 报路径。 */
+function h3ImportPack(node) {
+  const inp = document.createElement("input");
+  inp.type = "file";
+  inp.accept = ".zip,.hpack.zip,application/zip";
+  inp.style.display = "none";
+  document.body.appendChild(inp);
+  inp.onchange = async () => {
+    const file = inp.files && inp.files[0];
+    inp.remove();
+    if (!file) return;
+    const fd = new FormData();
+    fd.append("file", file, file.name);
+    try {
+      const res = await api.fetchApi("/h3/pack_import", { method: "POST", body: fd });
+      const data = await res.json();
+      if (!data.ok) throw new Error(data.error || "导入失败");
+      const r = h3WritePackRefs(data.slots);
+      const tail = data.script
+        ? ("PACK 原文 " + data.script.length + " 字符已随包导入"
+           + "（需要时从分镜提示词编辑器粘回文本框）。")
+        : "（这个包里没有 PACK 原文。）";
+      h3PackToast("success", "导演包已导入",
+        "分镜 JSON 已写入 " + (data.storyboard_path || "会话目录")
+        + "，用「H3 剧本读档」选它即可复跑；参考图回填 " + r.written
+        + "/" + r.total + " 个 LoadImage 槽位。" + tail);
+    } catch (err) {
+      h3PackToast("error", "导入导演包失败", (err && err.message) || String(err));
+    }
+  };
+  inp.click();
 }

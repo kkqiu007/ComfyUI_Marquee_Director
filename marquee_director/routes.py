@@ -1055,6 +1055,131 @@ def register() -> bool:
         except Exception as exc:                              # pragma: no cover
             return web.json_response({"ok": False, "error": str(exc)}, status=500)
 
+    # ------------------------------------------------------------------
+    # 导演包（PACK 剧本 + 参考图）导入 / 导出
+    # 借鉴 ComfyUI_MiniMaxH3_Director 的 pack.py：zip 安全 + StreamResponse
+    # 分块（Windows 上 FileResponse 会给空 body）+ TTL 清理临时导出。
+    # ------------------------------------------------------------------
+    @routes.post("/h3/pack_export")
+    async def h3_pack_export(request):
+        """打包当前剧本与参考图。
+
+        body: {"script": "PACK原文", "session_name": "控件值",
+               "storyboard": "分镜JSON文本（可省——省了就用 script 现解析）",
+               "meta": {...}, "refs": {"1": "in/m.png", ...}}
+        参考图路径是 **input 相对路径**（LoadImage 的 widgets_values 原样）。
+
+        storyboard 由服务端生成（pp.to_shots_json，与存档节点同源）：面板
+        /h3/pack_preview 下发的是 segments 而不是 shots_json 原文，前端拼不出
+        与读档节点完全同规格的那一份。
+        """
+        from . import pack as pack_mod
+
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        body = body if isinstance(body, dict) else {}
+        try:
+            storyboard = str(body.get("storyboard") or "")
+            script = str(body.get("script") or "")
+            if not storyboard.strip() and script.strip():
+                storyboard, _script, _sess = pack_mod.storyboard_from_pack_text(
+                    script, str(body.get("session_name") or ""))
+            if not storyboard.strip():
+                raise pack_mod.PackError(
+                    "没有可分镜的内容：PACK 原文为空，storyboard 也没给。")
+            path = pack_mod.build_pack(
+                meta=body.get("meta") or {},
+                storyboard=storyboard,
+                script=script,
+                refs=body.get("refs") or {})
+            return web.json_response({"ok": True, "name": path.name,
+                                      "bytes": path.stat().st_size})
+        except pack_mod.PackError as exc:
+            return web.json_response({"ok": False, "error": str(exc)}, status=400)
+        except Exception as exc:                              # pragma: no cover
+            return web.json_response({"ok": False, "error": str(exc)}, status=500)
+
+    @routes.get("/h3/pack_download")
+    async def h3_pack_download(request):
+        """下载导出的 zip。★ 必须分块 StreamResponse：Windows 上
+        FileResponse/sendfile 会 200 + 空 body，存出来是 0 字节损坏包。"""
+        from . import pack as pack_mod
+
+        name = request.query.get("name", "")
+        if pack_mod.PACK_SUFFIX not in name or "/" in name or "\\" in name:
+            return web.Response(status=400, text="Bad pack name.")
+        path = pack_mod._export_root() / name
+        if not path.is_file():
+            return web.Response(status=404, text="Pack not found or expired.")
+        size = path.stat().st_size
+        if size <= 0:
+            return web.Response(status=404, text="Pack is empty.")
+        resp = web.StreamResponse(status=200, headers={
+            "Content-Type": "application/zip",
+            "Content-Disposition": 'attachment; filename="%s"' % name,
+            "Content-Length": str(size),
+            "Cache-Control": "no-store",
+        })
+        await resp.prepare(request)
+        try:
+            with path.open("rb") as fh:
+                while True:
+                    chunk = fh.read(pack_mod.ZIP_STREAM_CHUNK)
+                    if not chunk:
+                        break
+                    await resp.write(chunk)
+            await resp.write_eof()
+            return resp
+        finally:
+            pack_mod.purge_exports(keep=name)
+
+    @routes.post("/h3/pack_import")
+    async def h3_pack_import(request):
+        """导入 .hpack.zip（multipart，字段名 file）。
+
+        参考图复制进 input/h3_director_packs/<包名>/，storyboard.json 落到
+        会话目录；返回槽位表供前端改写 LoadImage。
+        """
+        from . import pack as pack_mod
+
+        try:
+            reader = await request.multipart()
+        except Exception:
+            reader = None
+        if reader is None:
+            return web.json_response(
+                {"ok": False, "error": "请以 multipart 上传 .hpack.zip。"},
+                status=400)
+
+        staging = None
+        try:
+            async for part in reader:
+                if part.name != "file":
+                    continue
+                staging = pack_mod._export_root() / ("up_%d%s" % (
+                    int(time.time() * 1000), pack_mod.PACK_SUFFIX))
+                with staging.open("wb") as out:
+                    while True:
+                        chunk = await part.read_chunk(1024 * 1024)
+                        if not chunk:
+                            break
+                        out.write(chunk)
+                break
+            if staging is None or not staging.is_file():
+                return web.json_response(
+                    {"ok": False, "error": "上传里没有 file 字段。"}, status=400)
+            result = pack_mod.import_pack(staging)
+            return web.json_response({"ok": True, **result})
+        except pack_mod.PackError as exc:
+            return web.json_response({"ok": False, "error": str(exc)}, status=400)
+        except Exception as exc:                              # pragma: no cover
+            return web.json_response({"ok": False, "error": str(exc)}, status=500)
+        finally:
+            if staging is not None:
+                staging.unlink(missing_ok=True)
+
     _registered = True
     return True
 

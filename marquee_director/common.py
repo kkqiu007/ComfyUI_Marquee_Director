@@ -299,6 +299,33 @@ def evict_dead_loaded_models() -> int:
     return evicted
 
 
+def clear_prefetch_queues() -> bool:
+    """清 ComfyUI 的模型预取队列（借鉴 MiniMaxH3_Director 的 vram_cleanup）。
+
+    节点自己的 ``finally`` 只清一次 prefetch queue，而本包的 Director 在**一次
+    执行内循环每一段**（单段节点也是每执行一次就要重新过一次 26 GB 的文本
+    编码器）。队列不清，后续段对 text encoder 权重的读取会退化成同步的
+    host-to-device 拷贝 —— 上游在它的段间清理里明确修掉了这一项，本包此前
+    没有。
+
+    只清队列、不碰权重：``cleanup_prefetch_queues`` 删的是排队的拷贝请求，
+    已驻留的模型权重与 ``current_loaded_models`` 都不受影响。
+
+    版本兼容：拿不到 ``comfy.model_prefetch`` 或该函数不存在时静默返回
+    False（老 ComfyUI 没有这个入口），调用方不需要自己 try。
+    """
+    try:
+        import comfy.model_prefetch as mp
+
+        fn = getattr(mp, "cleanup_prefetch_queues", None)
+        if fn is None:
+            return False
+        fn()
+        return True
+    except Exception:
+        return False
+
+
 def free_ram_bytes():
     """当前可用物理内存（字节）。取不到就返回 None，让调用方自己决定。
 
