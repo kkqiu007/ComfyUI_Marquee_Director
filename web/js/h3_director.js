@@ -1101,6 +1101,21 @@ const CSS = `
 /* 格子窄到放不下字（段数很多时）：只留刻度线，数字全隐 */
 .h3d-rul-cell.is-tiny .h3d-rul-len,
 .h3d-rul-cell.is-tiny .h3d-rul-maj > span { display: none; }
+/* ── 动态游标（2026-10-14，用户报「标尺没有动态跟随分镜」）──────────────
+   一根跟随渲染进度的时间游标：与轨道小马同源同一个 _x（rail-line 全局 px，
+   三线 cell 边界逐像素一致），小马跑到哪儿它就在标尺同一位置画一根线，并
+   读出当前累计秒数。渲染中它实时跟当前段走；空闲时停在小马所在的「已渲
+   前沿」，同样对得起"标尺=时间轴语义"。z-index 压在段分界线(2)与玻璃 rim
+   (3)之上，不吃指针事件。 */
+.h3d-rul-cursor { position: absolute; top: 0; bottom: 0; width: 0;
+                  border-left: 2px solid var(--h3d-acc);
+                  z-index: 4; pointer-events: none; }
+.h3d-rul-cursor > span { position: absolute; left: 4px; top: 1px;
+                         font-size: 9px; line-height: 10px;
+                         color: var(--h3d-acc); font-weight: 600;
+                         font-variant-numeric: tabular-nums;
+                         text-shadow: 0 1px 2px rgba(0, 0, 0, .65);
+                         white-space: nowrap; }
 
 /* 轨道：小马脚下这条线 —— 两层叠在一起：
  *   .base = 暗虚线（未渲染），.fill = 实线（已跑到），宽和亮度由 JS 按进度给。
@@ -4909,6 +4924,8 @@ function buildTimelinePanel(node, state) {
   let railSpans = [];          // 每段的轨道块（小马按段跑 + 填充都要用）
   // 段数漂移警示文案（磁盘段数 ≠ 当前分镜段数时非空）——刷新后显示在状态栏
   let panelDriftHint = "";
+  // 标尺上的动态游标元素（paintRuler 每次重建时换新，详见其后的注释）
+  let rulerCursor = null;
 
   /* ---- 小马：只朝一个方向跑，并且**只在当前这一段的轨道区间里跑** ---- */
   /* 以前是 ping-pong（撞到边界就掉头），看起来像"来回踱步"；后来改成一律
@@ -5028,6 +5045,8 @@ function buildTimelinePanel(node, state) {
         clearHoofs();
       }
       pony.wrap.style.left = Math.round(_x) + "px";
+      // 标尺动态游标：跟小马同一个 x 走（渲染中 = 该段实时位置）
+      paintRulerCursor(_x);
       _hoofAcc += PONY_SPEED;
       if (_hoofAcc >= HOOF_STEP) { _hoofAcc = 0; dropHoof(_x); }
       // 脚下的线跟着小马走：跑到哪儿，实线就长到哪儿、亮到哪儿
@@ -5068,6 +5087,13 @@ function buildTimelinePanel(node, state) {
       _x = Math.round(span() * frac);
       clearHoofs();
       pony.wrap.style.left = _x + "px";
+      // 游标同步停到「已渲前沿」对应的秒数；0 段（无时间轴）时隐藏
+      if (!segs.length) {
+        if (rulerCursor) rulerCursor.style.display = "none";
+      } else {
+        if (rulerCursor) rulerCursor.style.display = "";
+        paintRulerCursor(_x);
+      }
       ponyGait(pony, 0);
       _progress = 1;
       paintRail(1);   // 停下来了：当前段（如果有）算跑满，其余按 done 画
@@ -5289,6 +5315,34 @@ function buildTimelinePanel(node, state) {
     end.appendChild(h("i"));
     end.appendChild(h("span", null, fmtRuler(total)));
     ruler.appendChild(end);
+    // 动态游标：与本行刻度同一个坐标系（rail-line 全局 px——三线 cell 边界
+    // 逐像素一致）。小马每帧移动时由 paintRulerCursor() 摆它的位置。
+    rulerCursor = h("div", "h3d-rul-cursor");
+    rulerCursor.appendChild(h("span", null, ""));
+    ruler.appendChild(rulerCursor);
+  }
+
+  /** 把动态游标摆到 ``x``（rail-line 全局 px，三线坐标同源）。
+   *
+   *  ★ 为什么不在别处换算秒数：ruler 的格子按 ``segWidthFor`` 画、rail 的
+   *    rail-seg 也用同一个 ``segWidthFor``，两行的同一秒占同样 px —— 所以
+   *    小马在 rail 里的 px 位置就是标尺上的秒位置，直接除 (PX_PER_SEC×zoom)
+   *    即当前累计秒数。0 段时隐藏（`span()==0`，没时间轴可跟）。
+   *  ★ ``x`` 传的是小马**左边界**（rail 坐标），游标线压小马中心：+PONY_W/2，
+   *    否则看着像"游标在小马后面半个身位"，跟用户直觉对不上。 */
+  let _cursorSec = -1;      // 上次写进 label 的秒数，避免每帧白写 textContent
+  function paintRulerCursor(x) {
+    if (!ruler || !rulerCursor) return;
+    const cx = x + PONY_W / 2;          // 对准小马中心
+    const pxPerSec = PX_PER_SEC * timelineZoom;
+    const sec = pxPerSec > 0 ? Math.max(0, Math.round(cx / pxPerSec)) : 0;
+    const sec2 = pxPerSec > 0 ? Math.round(cx / pxPerSec * 10) / 10 : 0;
+    if (sec2 !== _cursorSec) {
+      _cursorSec = sec2;
+      const label = rulerCursor.firstChild;
+      if (label) label.textContent = sec + "s";
+    }
+    rulerCursor.style.left = Math.round(cx) + "px";
   }
 
   /** 时间线重绘。外层只负责把 renderInner 的异常接住并**显式报出来**。
