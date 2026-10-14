@@ -1097,7 +1097,8 @@ const CSS = `
 .h3d-rul-end > span { position: absolute; right: 3px; bottom: 3px;
                       font-size: 8.5px; line-height: 10px; color: #b9b9b9;
                       text-shadow: var(--h3d-txt-shadow);
-                      white-space: nowrap; font-variant-numeric: tabular-nums; }
+                      white-space: nowrap; font-variant-numeric: tabular-nums;
+                      z-index: 5; }
 /* 格子窄到放不下字（段数很多时）：只留刻度线，数字全隐 */
 .h3d-rul-cell.is-tiny .h3d-rul-len,
 .h3d-rul-cell.is-tiny .h3d-rul-maj > span { display: none; }
@@ -4851,9 +4852,28 @@ function buildTimelinePanel(node, state) {
     const contentW = track.scrollWidth || viewW;
     const newScroll = oldScroll + (contentW - viewW) * centerRatio - viewW * centerRatio;
     track.scrollLeft = Math.max(0, Math.min(newScroll, contentW - viewW));
+    // 缩放后若正在渲某一段，把它收回复见（缩放可能把它甩出视口）
+    if (_running && activeIndex >= 1) scrollSegIntoView(activeIndex);
   }
   function zoomBy(factor, centerRatio) {
     setZoom(timelineZoom * factor, centerRatio);
+  }
+  /** 把第 ``idx`` 段滚进视口中央（渲染中段切换时调）。
+   *
+   *  ★ 为什么需要：20 段的时间线比节点宽得多，正在渲的那段经常在**视口外** ——
+   *    小马、标尺游标、段块高亮全画在看不见的地方，用户看到的就是"标尺没有
+   *    动态跟随渲染分镜"。段切换时替用户把那一截搬进来，比让小马自己跑出
+   *    视野再让用户手动找强。
+   *  ★ 只动 scrollLeft，不重建 DOM —— render() 不会碰 scrollLeft，两者不冲突。 */
+  function scrollSegIntoView(idx) {
+    const track = timelineTrack;
+    const el = railSpans[idx - 1];
+    if (!track || !el || !el.offsetWidth) return;
+    const center = (el.offsetLeft || 0) + el.offsetWidth / 2;
+    const view = track.clientWidth || 0;
+    const max = Math.max(0, (track.scrollWidth || 0) - view);
+    const target = center - view / 2;
+    track.scrollLeft = Math.max(0, Math.min(target, max));
   }
   function fitZoom() {
     const segs = state.segments();
@@ -5311,9 +5331,19 @@ function buildTimelinePanel(node, state) {
       ruler.appendChild(rc);
     });
     // 收尾：最右端终点线 + 总时长
+    // ★ 双口径（2026-10-14，用户报「标尺没有显示渲染分镜总时长」）：
+    //   total = Σ(new+handoff) = **生成**时间轴（标尺格与段块缩略图就是这个
+    //   长度）；另给 Σnew = **成片**净时长（拼接时各段回放重叠被裁掉）。两个
+    //   数字差的就是全链的 handoff 重叠，进度条「成片 141.2s」用的是后者——
+    //   只显示一个口径，看的人总会拿它去对另一个。
+    const filmSec = segs.reduce((a, s) => a + (Number(s && s.new_seconds) || 0), 0);
     const end = h("div", "h3d-rul-end");
     end.appendChild(h("i"));
-    end.appendChild(h("span", null, fmtRuler(total)));
+    const endLabel = fmtRuler(total);
+    const endLbl = h("span", null,
+      (filmSec > 0 && Math.abs(filmSec - total) > 0.05)
+        ? endLabel + " · 成片 " + fmtRuler(filmSec) : endLabel);
+    end.appendChild(endLbl);
     ruler.appendChild(end);
     // 动态游标：与本行刻度同一个坐标系（rail-line 全局 px——三线 cell 边界
     // 逐像素一致）。小马每帧移动时由 paintRulerCursor() 摆它的位置。
@@ -6024,6 +6054,9 @@ function buildTimelinePanel(node, state) {
       const wasDone = doneSet.has(d.index);
       activeIndex = d.index;
       render();
+      // 视口跟随：正在渲的这段搬进视口中央（它在视口外的话，小马/游标/高亮
+      // 全都看不见 —— 用户看到的就是"没有动态跟随"）
+      scrollSegIntoView(d.index);
       setPony(true, "第 " + d.index + "/" + d.total + " 段 · " + d.shot_id
         + " · " + d.frames + " 帧 · " + (d.task || "")
         + " · 参考图 " + d.refs + " 张"
