@@ -13,6 +13,17 @@ Pack name: `ComfyUI_Marquee_Director`
 
 Chain any number of MiniMax H3 renders into **one unbroken take**.
 
+> **许可提示 / License notice**：本仓库**禁止未经授权的商业销售与商业使用**。
+> 个人、学习、研究、评测等非商业用途免费；任何商业用途须事先取得版权人
+> kkqiu007 的**书面授权**，请通过本仓库 GitHub Issues 申请。上游 MIT /
+> Apache-2.0 代码原有的权利不受影响。详见 [License](#license) 与
+> [LICENSE](LICENSE)。这不是 OSI 认证的开源许可证。
+>
+> Free for personal, educational and research use. **No commercial sale or
+> commercial use without prior written authorization from kkqiu007** (request
+> via GitHub Issues). Upstream MIT / Apache-2.0 rights are unaffected. See
+> [License](#license). Not an OSI-approved open-source license.
+
 ## 节点命名与产出目录（唯一对照表）
 
 `node_id` 是工作流 JSON 里 `"type"` 的那个字符串，也是画布搜索、`/h3/*` 路由和
@@ -58,6 +69,11 @@ Chain any number of MiniMax H3 renders into **one unbroken take**.
 > `H3 二采精修` 借鉴 `ComfyUI_MiniMaxH3_Director` 的 `refine` 外接形态：接到
 > `H3 导演` 的 `refine` 口才生效，不接就是原来的一采成片。二采发生在每段
 > **一采之后、解码之前**，段间锚点因此也来自二采结果 —— 接缝不会出现画质跳变。
+>
+> 它上面还有一个 **`二采前清显存`**（advanced，默认关）。同一段里一采的 UNET 还
+> 驻留着，二采紧接着就开始；一旦接了另一套 **`二采模型`**，两套 UNET 会同时占着
+> 显存，8GB 卡上峰值就在这里。勾上会把一采那套先卸掉，代价是每段多一次加载。
+> 这是显存策略不是渲染参数，**不进缓存键** —— 勾与不勾产出的段逐像素相同。
 >
 > 同样借鉴来的还有 `H3 链路设置` 上的 **逐 step 重绘掩码**（`seam_remask`，
 > advanced）。默认**关**：整段采样用同一张 `noise_mask`；打开后回放区的重绘余量
@@ -413,7 +429,7 @@ and below 6 steps (turbo 4-step chains) it stays off by itself.
 
 | Setting | Where | What it does |
 | --- | --- | --- |
-| `seconds` | Render Segment | Length of this shot. Snapped up to H3's 17k+5 grid (8 s → 192 frames). Trained range ≈ 5–15 s. |
+| `seconds` | Render Segment | Length of this shot. Snapped up to H3's both-clocks grid `39 + 51n` — 8 s → 192 frames, 11 s → 294 frames. Trained range ≈ 5–15 s. |
 | `handoff_seconds` | Render Segment, advanced | How much of **this** shot's ending the **next** one opens on. Snapped down to 5 / 22 / 39 / 56 frames. Set to 0 on the last shot of a take. |
 | `seed_override` | Render Segment, advanced | 0 derives from the chain seed. Set it to re-roll one shot. |
 | `model` | Render Segment | Optional. A MODEL for this shot only, overriding the Settings one — this is where a per-shot LoRA goes. |
@@ -895,6 +911,45 @@ unloading altogether.
 the manifest — written after every segment, not just at the end — so fixing the problem
 and re-queueing resumes from the segment that failed.
 
+**Three things render fine and are still wrong.** ComfyUI's core only snaps the frame
+count onto the `17k+5` grid (`align_frame_count`) and the canvas onto multiples of 32
+(`adapt_canvas`). Its `length` socket accepts up to 3600 and `adapt_canvas` resolves any
+aspect ratio at all, so the following three limits are enforced nowhere and fail
+silently. The run report names each one. **The first two are advisory only; the third
+now rewrites the segment length** — see the note under the third item.
+
+- **Canvas outside `1:4 – 4:1`.** That is the aspect range the released checkpoint was
+  trained over (diffusers' `MINIMAX_H3_MIN/MAX_ASPECT_RATIO`). A 8:1 canvas still
+  samples — composition and anatomy are what break, and you only see it in the finished
+  cut. Landscape is `960×544`, portrait `544×960`.
+- **A segment longer than 362 frames.** The trained ceiling is 362 (15.083 s); core's
+  3600-frame socket is not. Longer is untested rather than forbidden. Split it into two
+  segments joined by a handoff instead.
+- **A segment length that is on the video grid but not on the audio clock.** Video is
+  24 fps and the audio latent is 40 Hz, so the two only divide exactly when the frame
+  count is a multiple of 3. `158` frames is `6.583 s` of picture but `263` audio steps —
+  `6.575 s`. Each seam is off by 8.3 ms, in the same direction, and it accumulates;
+  lip-sync tolerance is around 100 ms. Only **39, 90, 141, 192, 243, 294, 345** frames
+  satisfy both clocks below the ceiling (362 itself does not), and above the ceiling the
+  grid simply continues `+51` at a time.
+
+  > **Changed 2026-10-18 — this one is no longer advisory.** Segment lengths used to be
+  > snapped to `17k+5` only, and a real 10-shot chain was rendering with 8 of 10 shots
+  > off the audio clock for a cumulative **+41.67 ms** of seam drift. Segment length now
+  > goes through `chain_length` (`39 + 51n`) in `common.py`, mirrored on the parse side
+  > by `chain_seconds` in `prompt_pack.py` so the prompt timeline and the real frame
+  > count stay one source. **Cost:** a segment may now gain up to **50 frames ≈ 2.08 s**
+  > (it was 16 frames ≈ 0.67 s). On the 汴京军议 v9 chain this moved 2090 → 2277
+  > generated frames (+7.79 s) and the accumulated seam drift to exactly **0.00 ms**.
+  > Because every frame count changed, **existing segment caches no longer match and the
+  > chain re-renders.** Handoff/replay windows deliberately stayed on the `17k+5` grid —
+  > a 1.6 s replay is 39 frames, already on both grids, and forcing a custom 2.0 s
+  > replay onto the chain grid would stretch it to 90 frames.
+
+The warning text is `分镜 N：…`; the rules live in `marquee_director/common.py`
+(`chain_length`, `on_both_clocks`, `chain_lengths`, `audio_clock_error_ms`,
+`MIN_ASPECT_RATIO`) and are covered by `tests/test_h3_limits.py`.
+
 ---
 
 ## Under the hood
@@ -940,6 +995,12 @@ existing workflows and already-rendered material keep working.
 The original, unrenamed pack is still available upstream. If you want to credit or cite
 the method, cite it there.
 
+**Licensing note:** the non-commercial terms of this repository apply to its own
+contributions and to the repository distributed as a whole. They do not withdraw
+the MIT rights already granted for the upstream pack, nor the Apache-2.0 rights
+for code from the other sources credited here; their copyright and license
+notices are preserved. See [License](#license).
+
 The notes below come with that history.
 
 ---
@@ -962,12 +1023,13 @@ numbers above.
 
 ---
 
-Four capabilities here are borrowed from
+Five capabilities here are borrowed from
 [`AIMixer/ComfyUI_MiniMaxH3_Director`](https://github.com/AIMixer/ComfyUI_MiniMaxH3_Director),
 Apache-2.0: the external **`H3 二采精修`** second-pass form, **`H3 脸部修复`** (which that
 pack itself adapts from `ComfyUI-H3-FaceRefine`, MIT, Carasibana), the per-step seam redraw
-mask **`seam_remask`**, and the lossless segment cache
-(`marquee_director/frames_cache.py`, after its `lib/frames_ffv1.py`). Reimplemented rather
+mask **`seam_remask`**, the lossless segment cache
+(`marquee_director/frames_cache.py`, after its `lib/frames_ffv1.py`), and the opt-in
+**`二采前清显存`** (`clear_vram`, after its `clear_vram_before_refine`). Reimplemented rather
 than copied — the frame cache here goes through PyAV instead of a spawned `ffmpeg`, and
 stores 16-bit planar RGB because PyAV's `ffv1` encoder refuses 8-bit `rgb24`/`gbrp` — but
 the ideas, and in places the constant choices, are theirs.
@@ -976,4 +1038,37 @@ the ideas, and in places the constant choices, are theirs.
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+**禁止未经授权的商业销售。** 本仓库采用自定义的
+[Marquee Director Non-Commercial License](LICENSE)（**非** OSI 认证的开源许可证）：
+
+| 用途 | 是否允许 |
+| --- | --- |
+| 个人、学习、研究、评测等非商业用途：使用、复制、修改、分发 | ✅ 免费，须保留署名与许可声明 |
+| **出售本软件、收费分发、打包进付费产品/服务、付费托管 / SaaS 等商业用途** | ❌ **须事先取得 kkqiu007 的书面授权** |
+| 用本软件生成的图片、视频、音频等输出物 | ✅ 不受本许可证限制 |
+
+**商业授权申请**：在本仓库
+[GitHub Issues](https://github.com/kkqiu007/ComfyUI_Marquee_Director/issues)
+提交申请（或经 GitHub 私下联系仓库所有者）。授权由版权人自行决定，可能另签商业
+许可协议并收取费用；fork、star、提问回复或提交 PR 都不构成默示授权。
+
+**上游权利不受影响**：本仓库派生自 MIT 许可的
+`loopforge0/ComfyUI-H3-Continuous`（© 2026 Greg Henry），并借鉴 Apache-2.0 的
+`AIMixer/ComfyUI_MiniMaxH3_Director` 等实现。上述限制**只适用于本仓库自有贡献及
+本仓库整体分发**，不能、也不试图撤销上游 MIT / Apache-2.0 已授予的权利；上游代码
+仍按其原许可使用，其版权与许可声明（MIT 全文见 [LICENSE](LICENSE) 附录）必须保留。
+
+完整条款见 [LICENSE](LICENSE)；以英文条款为准，文件内附中文摘要。
+
+### English summary
+
+Free for non-commercial use (personal, educational, research and evaluation).
+**Any commercial use — including selling the software, paid distribution,
+bundling it into paid products or services, and paid hosting — requires prior
+written authorization from kkqiu007**, requested via
+[GitHub Issues](https://github.com/kkqiu007/ComfyUI_Marquee_Director/issues);
+a separate commercial license and fees may apply. Output generated by the
+software is not restricted. Upstream MIT (© 2026 Greg Henry) and Apache-2.0
+rights are unaffected and their notices are preserved. This is **not** an
+OSI-approved open-source license. The English text in [LICENSE](LICENSE)
+governs.

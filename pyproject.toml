@@ -2,6 +2,10 @@
 name = "comfyui-marquee-director"
 description = "Marquee Director: chain MiniMax H3 renders into one unbroken take. Each segment opens on an exact replay of the last, pinned with AddGuide. Derived from loopforge0/ComfyUI-H3-Continuous (MIT)."
 version = "2.0.0"
+# 自定义非商业许可证：商业销售 / 商业使用须事先取得 kkqiu007 的书面授权
+# （申请入口见 LICENSE 与 README）。上游 MIT（© 2026 Greg Henry）及 Apache-2.0
+# 的权利不受影响，其声明保留在 LICENSE 附录。注意：这不是 OSI 认证的开源许可证，
+# 若要发布到 registry.comfy.org，请先确认该平台对许可证的要求。
 license = { file = "LICENSE" }
 requires-python = ">=3.10"
 dependencies = []

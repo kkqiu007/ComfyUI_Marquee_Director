@@ -1,3 +1,137 @@
+Marquee Director Non-Commercial License
+======================================
+Version 1.0 — 10 November 2026
+
+Copyright (c) 2026 kkqiu007 and the ComfyUI_Marquee_Director contributors
+
+IMPORTANT — READ FIRST
+----------------------
+This is NOT an OSI-approved open-source license. Free use is granted for
+non-commercial purposes only. Any commercial use, including any commercial
+sale of the Software, requires prior written authorization from the copyright
+holder.
+
+This repository is a derivative work. It is based on
+`loopforge0/ComfyUI-H3-Continuous` (MIT License, Copyright (c) 2026 Greg
+Henry) and acknowledges capabilities reimplemented from
+`AIMixer/ComfyUI_MiniMaxH3_Director` (Apache-2.0) and others (see the Credits
+section of README.md). The upstream MIT license text is reproduced verbatim in
+the Appendix below.
+
+SCOPE. The Additional Terms in Sections 1-8 govern the original contributions
+made in this repository by kkqiu007 and its contributors (the "Marquee
+Director Contributions") and this repository distributed as a whole. They do
+NOT withdraw, narrow, or override any right already granted by the MIT or
+Apache-2.0 licenses for the upstream code itself: those upstream portions
+remain available under their original licenses, and their copyright and
+license notices must be preserved. Anyone who wishes to use only the upstream
+portions may do so under the upstream terms.
+
+1. Definitions
+--------------
+"Software" means this repository's source code, scripts, workflows,
+documentation and associated files, including the Marquee Director
+Contributions and any modifications or derivative works of them.
+
+"Commercial Use" means any use intended for or directed toward commercial
+advantage or monetary compensation, including but not limited to: selling,
+licensing, sublicensing, renting or leasing the Software; distributing it for
+a fee; bundling or embedding it in a product, distribution, template pack or
+service that is sold, subscription-based, ad-supported or otherwise
+monetized; offering the Software as a hosted, managed or SaaS service for a
+fee; or providing the Software to third parties in the course of a commercial
+activity.
+
+"Non-Commercial Use" means personal, private, educational, research,
+evaluation, hobby and other uses that are not Commercial Use.
+
+"Output" means images, video, audio, text or other content produced by running
+the Software. Output is not subject to this license, except to the extent it
+contains substantial portions of the Software itself (for example source code
+or bundled workflow files). This license does not restrict what you do with
+your Output.
+
+2. Non-commercial grant
+-----------------------
+Subject to the conditions below, the copyright holder grants you a free,
+worldwide, non-exclusive, royalty-free permission to use, copy, modify, merge,
+publish and distribute the Software for Non-Commercial Use, provided that:
+
+  (a) you include this license and all copyright, attribution and upstream
+      license notices in every copy or substantial portion of the Software;
+  (b) you mark modified files with a prominent notice of the change and the
+      date;
+  (c) you do not remove or obscure any attribution, and you pass these same
+      terms on to further recipients of the Software;
+  (d) you do not use the names or trademarks of the authors to endorse or
+      promote derived products without prior written permission.
+
+3. Commercial use requires authorization — NO COMMERCIAL SALE WITHOUT A LICENSE
+-------------------------------------------------------------------------------
+You may NOT conduct any Commercial Use of the Software — in particular you may
+NOT sell copies of the Software, sell a modified or bundled version, charge
+for its distribution, sublicense it, or include it in a paid product or
+service — without prior written authorization from the copyright holder.
+
+Authorization is granted at the holder's sole discretion, may be subject to a
+separate written commercial license agreement and fees, and is not implied by
+silence, by a fork or star, by an issue reply, or by any contribution.
+
+To request commercial authorization, open an issue at
+https://github.com/kkqiu007/ComfyUI_Marquee_Director/issues (or contact the
+repository owner privately through GitHub).
+
+Nothing in this Section restricts the rights granted by upstream licenses to
+the upstream portions of the code.
+
+4. Redistribution
+-----------------
+You may redistribute the Software for Non-Commercial Use under the terms of
+this license, and you may not impose any further restrictions on the rights
+granted here. Any redistribution that forms part of a Commercial Use requires
+authorization under Section 3.
+
+5. No implied rights; reservation
+---------------------------------
+All rights not expressly granted are reserved. No patent or trademark license
+is granted except as required to exercise the rights in Section 2. For the
+avoidance of doubt, the MIT grant in the Appendix remains in full force for
+the upstream code to which it applies, and any code incorporated from
+Apache-2.0 sources remains governed by Apache-2.0.
+
+6. Term and termination
+-----------------------
+This license terminates automatically if you breach any of its terms. Upon
+termination you must cease all use and discontinue distribution of copies.
+Termination does not affect rights you independently hold under the upstream
+licenses for upstream portions, nor any separate commercial license agreement.
+
+7. Disclaimer and limitation of liability
+-----------------------------------------
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+8. 中文摘要（仅作说明，不具法律效力）
+------------------------------------
+本仓库可免费用于个人、学习、研究、评测等非商业用途。任何商业用途——尤其是出售
+本软件、收费分发、打包进付费产品/服务、提供付费托管——都必须事先取得版权人
+kkqiu007 的书面授权；请通过本仓库 GitHub Issues 申请，商业许可可另行签订并收费。
+上游 loopforge0/ComfyUI-H3-Continuous（MIT，© 2026 Greg Henry）及 Apache-2.0
+来源代码的权利不受本条款影响，其版权与许可声明必须保留。运行本软件生成的图片、
+视频、音频等输出物不受本许可证限制。中英文表述如有差异，以英文条款为准。
+
+
+APPENDIX — UPSTREAM MIT LICENSE (verbatim; must be retained)
+============================================================
+The following license applies to the upstream code derived from
+`loopforge0/ComfyUI-H3-Continuous`. This notice is preserved as required by
+the MIT License and is not superseded by the Additional Terms above.
+
 MIT License
 
 Copyright (c) 2026 Greg Henry
