@@ -121,7 +121,7 @@ import os
 import numpy as np
 from scipy.signal import lfilter, resample_poly
 
-from .common import log, warn
+from .common import log
 
 # ---------------------------------------------------------------------------
 # Tunables. Module constants rather than node widgets on purpose: adding an
@@ -147,6 +147,23 @@ from .common import log, warn
 #: rather than up. The delivery spec is a floor for loudness normalisation, not
 #: a ceiling to sit exactly on.
 TARGET_LUFS = -13.0
+
+#: 按段设定响度（2026-10-18 起）
+#: ---------------------------------------------------------------------------
+#: 「语气语速都平缓、没有感情节奏」的节点侧根因：旧逻辑把**每一段**都归一化到
+#: 同一个 ``TARGET_LUFS``，于是对话段和战场段听感一样响、一样平。修复方式是给
+#: 不同性质的片段维持不同的交付响度，让成片有「轻—重」的呼吸：
+#:
+#:   * 战场 / 强冲击 / 重配乐  -> BATTLE_LUFS   （更响、更有压迫感）
+#:   * 对话 / 静默 / 私密     -> DIALOGUE_LUFS （更轻、更近、留白）
+#:   * 中性片段               -> DEFAULT_LUFS  （= TARGET_LUFS 兜底）
+#:
+#: 判定见 ``profile_target``：用片段自身的低频冲击能量占比来分档，不依赖模型是否
+#: 写对提示词，也不改变缓存契约（目标写在每段旁边的 ``.lufs`` 伴生文件里，拼接时
+#: 原样读回，save 与 join 永远一致）。
+BATTLE_LUFS = -8.0
+DIALOGUE_LUFS = -16.0
+DEFAULT_LUFS = TARGET_LUFS
 
 #: True-peak ceiling.
 #:
@@ -570,7 +587,89 @@ def measure_lufs(waveform, fs):
     return float(-0.691 + 10.0 * np.log10(np.mean(z[keep])))
 
 
-def is_mastered(waveform, sample_rate, target_lufs=TARGET_LUFS,
+def _band_energy_ratio(waveform, sample_rate, f_lo, f_hi):
+    """Return the share of a (channels, samples) signal's energy in [f_lo, f_hi].
+
+    Used by ``profile_target`` to tell impact-heavy audio (boot on a door, a
+    percussion bed, a slammed panel) from clean dialogue, which the model leaves
+    almost empty below 150 Hz. Mono-summed, rfft only -- this is a classifier,
+    not a measurement, so a coarse band is fine.
+    """
+    if not np.isfinite(np.asarray(waveform, dtype=np.float64)).all():
+        return 0.0
+    mono = np.mean(np.asarray(waveform, dtype=np.float64), axis=0)
+    n = mono.shape[-1]
+    if n < 16:
+        return 0.0
+    spec = np.abs(np.fft.rfft(mono))
+    freqs = np.fft.rfftfreq(n, 1.0 / float(sample_rate))
+    band = (freqs >= f_lo) & (freqs <= f_hi)
+    total = float(spec.sum())
+    if total <= 0.0:
+        return 0.0
+    return float(spec[band].sum()) / total
+
+
+def profile_target(waveform, sample_rate):
+    """Pick the delivery loudness for one segment from the audio itself.
+
+    Returns ``BATTLE_LUFS``, ``DIALOGUE_LUFS`` or ``DEFAULT_LUFS``. The split is
+    the low-frequency impact share: a raw segment that carries a door thud or a
+    percussion bed sits at ~40-50% energy below 150 Hz, while dialogue sits at
+    under 3% (see the module docstring's measurement). A wide no-man's-land
+    between 6% and 20% keeps the two classes from ever flipping on a borderline
+    take, and the chosen target is written next to the segment so the join reads
+    back the *same* number instead of re-classifying the already-mastered audio.
+    """
+    if not ENABLED:
+        return TARGET_LUFS
+    x = np.asarray(waveform, dtype=np.float64)
+    if x.ndim == 3:
+        x = x[0]
+    if x.ndim != 2 or x.shape[-1] == 0:
+        return TARGET_LUFS
+    low = _band_energy_ratio(x, sample_rate, 20.0, 150.0)
+    if low >= 0.20:
+        return BATTLE_LUFS
+    if low <= 0.06:
+        return DIALOGUE_LUFS
+    return DEFAULT_LUFS
+
+
+#: 规范交付档位，与「离档位多近算已母带化」的吸附容差。
+CANONICAL_TARGETS = (BATTLE_LUFS, DEFAULT_LUFS, DIALOGUE_LUFS)
+MASTERED_SNAP_LU = 2.0
+
+
+def snap_target(waveform, sample_rate, tolerance=MASTERED_SNAP_LU):
+    """信号已贴近某个规范档位时返回该档位，否则 ``None``。
+
+    这是 ``.lufs`` 伴生缺失时的**第一**回退（旧版本产物，或成片后清理扫掉了
+    伴生再重建音轨）。没有它，join 只能对**已母带化**的音频跑
+    ``profile_target``，而实测定量证明那会分错档：v17 重建里一条裁剪后
+    -14.3 LUFS 的中性段被判成战场档、回来烫了 +5.9 dB，三条对白档段被拉高
+    +3.4 dB —— 高通与 tonal shaping 已经改过频谱，分类器看到的不再是它
+    被训练判定的那种原始信号。
+
+    吸附逻辑：离某档 ≤ ``tolerance`` 就视为「已母带化到那一档」，守卫会
+    原样放行（或仅做电平校正）；离所有档都远才是原始段，交给
+    ``profile_target`` 正常分类。2.0 LU 足够吸收裁剪漂移 + 一代 AAC 解码
+    （v17 实测最大 1.4），而相邻档位间距 ≥3.0（DEFAULT↔DIALOGUE）——
+    落在两档吸附区交叠里的信号由最近者胜出，残余校正不超过 tolerance。
+    """
+    x = np.asarray(waveform, dtype=np.float64)
+    if x.ndim == 3:
+        x = x[0]
+    if x.ndim != 2 or x.shape[-1] == 0:
+        return None
+    current = measure_lufs(x, sample_rate)
+    if not np.isfinite(current):
+        return None
+    nearest = min(CANONICAL_TARGETS, key=lambda t: abs(t - current))
+    return nearest if abs(current - nearest) <= tolerance else None
+
+
+def is_mastered(waveform, sample_rate, target_lufs=None,
                 tolerance=MASTERED_TOLERANCE_LU):
     """True when ``waveform`` already sits at the target, within ``tolerance``.
 
@@ -578,7 +677,13 @@ def is_mastered(waveform, sample_rate, target_lufs=TARGET_LUFS,
     one that is still raw -- including a segment an older build left on disk.
     A signal that cannot be measured counts as *not* mastered, so the safe
     direction is to master it.
+
+    ``target_lufs`` is the per-segment target: when ``None`` it is classified from
+    the signal itself via ``profile_target``, so the join (which passes the target
+    read from the clip's ``.lufs`` companion) and the save pass always agree.
     """
+    if target_lufs is None:
+        target_lufs = profile_target(waveform, sample_rate)
     current = measure_lufs(waveform, sample_rate)
     if not np.isfinite(current):
         return False
@@ -646,7 +751,8 @@ def limiter(x, fs, ceil=LIMITER_CEIL,
 def master(waveform, sample_rate, target_lufs=TARGET_LUFS,
            ceiling_dbtp=CEILING_DBTP, hp_hz=HIGHPASS_HZ,
            limiter_ceil=LIMITER_CEIL, pre_limit=True,
-           max_gain_db=_MAX_TOTAL_GAIN_DB, shape_tone=True):
+           max_gain_db=_MAX_TOTAL_GAIN_DB, shape_tone=True,
+           normalize=True):
     """Return the waveform mastered to ``target_lufs``.
 
     ``waveform`` is a (channels, samples) float array; ``sample_rate`` an int.
@@ -734,24 +840,40 @@ def master(waveform, sample_rate, target_lufs=TARGET_LUFS,
     # floor up into the join. See ``_MAX_TOTAL_GAIN_DB`` for why it is 30 and not
     # 18 -- at 18 the real render's quietest segment had 1.8 dB of margin.
     applied_db = 0.0
-    for _ in range(_MAX_GAIN_PASSES):
-        current = measure_lufs(y, sample_rate)
-        if not np.isfinite(current):
-            break
-        error = float(np.clip(target_lufs - current,
-                              -max_gain_db - applied_db,
-                              max_gain_db - applied_db))
-        if abs(error) < _GAIN_TOLERANCE_LU:
-            break
-        y *= 10.0 ** (error / 20.0)
-        applied_db += error
-        y = limiter(y, sample_rate, ceil)
+    if normalize:
+        for _ in range(_MAX_GAIN_PASSES):
+            current = measure_lufs(y, sample_rate)
+            if not np.isfinite(current):
+                break
+            error = float(np.clip(target_lufs - current,
+                                  -max_gain_db - applied_db,
+                                  max_gain_db - applied_db))
+            if abs(error) < _GAIN_TOLERANCE_LU:
+                break
+            y *= 10.0 ** (error / 20.0)
+            applied_db += error
+            y = limiter(y, sample_rate, ceil)
 
     # The limiter guarantees peak <= ceil, so this only ever catches the case
     # where the loop bailed out on a measurement failure or hit the gain cap.
-    peak = float(np.abs(y).max())
-    if peak > ceil:
-        y *= ceil / peak
+    #
+    # ★ 钳制必须在**真峰**域（2026-10-18 实机取证）：旧实现看的是
+    #   ``abs(y).max()`` —— 一个采样峰 ceiling 戴着 dBTP 的标签。两条路径上
+    #   这是真缺口：① gain 循环中途 bail（测量失败/增益帽）时，留下的信号
+    #   只被采样峰钳住，inter-sample 峰照穿；② ``normalize=False`` +
+    #   ``pre_limit=False``（join 的成片趟）时限幅器**从头到尾没跑过**，
+    #   若某段经 ``_join_audio`` 的异常路径带着原始峰值进成片，没有任何一道
+    #   真峰保障。v17 成片恰好没事（全部段在 save 时已被真峰限幅，拼接不
+    #   产生新峰），但那是运气好，不是结构对。
+    #   先 limiter（只花峰值、不花响度），残余才整轨缩 —— 旧实现直接整轨
+    #   缩，正是 gain-cap 场景下白扔响度的那种让法。
+    tp = true_peak(y, sample_rate)
+    if tp > ceil:
+        y = limiter(y, sample_rate, ceil)
+        tp = true_peak(y, sample_rate)
+        if tp > ceil:                 # limiter 释放尾的残余
+            y *= ceil / tp
+            tp = ceil
 
     after = measure_lufs(y, sample_rate)
     short = "" if not np.isfinite(after) else (
@@ -760,21 +882,32 @@ def master(waveform, sample_rate, target_lufs=TARGET_LUFS,
     # changed, and without it in the log there is no way to tell from a render
     # whether the running process picked the change up. The pass that runs on
     # the film reports ``hp None``, which also distinguishes the two callers.
+    # ``peak`` is now the measured **true** peak (was ``abs(y).max()`` wearing
+    # a dBTP label) -- same number the clamp above enforced, so the log and
+    # the mechanism can no longer disagree about the domain.
     log("audio master: %.1f -> %.1f LUFS "
-             "(target %.1f, %+.1f dB, peak %.2f dBTP, hp %s, shape %s)%s",
+             "(target %.1f, %+.1f dB, peak %.2f dBTP, hp %s, shape %s)%s%s",
              before, after, target_lufs, applied_db,
-             20.0 * np.log10(max(float(np.abs(y).max()), 1e-12)),
+             20.0 * np.log10(max(tp, 1e-12)),
              "off" if hp_hz is None else "%.0f Hz" % hp_hz,
-             "on" if (shape_tone and SHAPE_ENABLED) else "off", short)
+             "on" if (shape_tone and SHAPE_ENABLED) else "off", short,
+             "" if normalize else " [no normalize]")
 
     y = np.clip(y, -1.0, 1.0).astype(np.float32, copy=False)
     return y[0] if squeeze else y
 
 
-def master_segment(waveform, sample_rate, target_lufs=TARGET_LUFS,
+def master_segment(waveform, sample_rate, target_lufs=None,
                    hp_hz=HIGHPASS_HZ, ceiling_dbtp=CEILING_DBTP,
                    shape_tone=True):
     """Master **one segment** before the segments are joined.
+
+    ``target_lufs`` defaults to ``None`` -- the per-segment delivery loudness is
+    then classified from the audio itself via ``profile_target`` (battlefield /
+    impact audio is mastered louder, dialogue quieter; see the module-level
+    ``BATTLE_LUFS`` / ``DIALOGUE_LUFS`` constants). The chosen target is written
+    next to the clip by ``video_io.save_clip`` so the join reads back the *same*
+    number and never re-classifies the already-mastered audio.
 
     Why this has to happen per segment and not once at the end
     ---------------------------------------------------------
@@ -839,6 +972,8 @@ def master_segment(waveform, sample_rate, target_lufs=TARGET_LUFS,
     segment would then be pinned to audio the film never contained. Both tail
     writes in ``nodes.py`` therefore pass ``master_audio=False``.
     """
+    if target_lufs is None:
+        target_lufs = profile_target(waveform, sample_rate)
     return master(waveform, sample_rate, target_lufs=target_lufs,
                   ceiling_dbtp=ceiling_dbtp, hp_hz=hp_hz,
                   shape_tone=shape_tone)

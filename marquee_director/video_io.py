@@ -126,7 +126,12 @@ def load_latent_tail(path):
 
 
 def _master_audio(audio):
-    """Return ``audio`` brought to delivery level, or the input if that fails.
+    """Bring ``audio`` to delivery level, returning ``(audio_or_input, target)``.
+
+    ``target`` is the per-segment loudness this take was mastered to (see
+    ``audio_master.profile_target``) -- the caller writes it next to the clip so
+    the join reads back the *same* number and never re-classifies the already
+    mastered audio. When mastering is skipped, ``target`` is ``None``.
 
     The soundtrack is mastered **here**, at save time, and not only at the join.
     The finished film is not the reason -- the join handles that either way. The
@@ -139,24 +144,26 @@ def _master_audio(audio):
     next segment's conditioning input rather than an excerpt for listening.
     """
     if not audio_master.ENABLED or not isinstance(audio, dict):
-        return audio
+        return audio, None
     waveform = audio.get("waveform")
     rate = int(audio.get("sample_rate") or 0)
     if waveform is None or rate <= 0 or not hasattr(waveform, "ndim"):
-        return audio
+        return audio, None
     try:
-        mastered = _master_tensor(waveform, rate, audio_master.master_segment)
+        target = audio_master.profile_target(waveform, rate)
+        mastered = _master_tensor(waveform, rate, audio_master.master_segment,
+                                  target_lufs=target)
     except Exception as exc:
         # A finished render is worth more than a loud one: anything unexpected
         # leaves the soundtrack exactly as the model produced it.
         warn("segment mastering skipped (%s: %s)",
                         type(exc).__name__, exc)
-        return audio
+        return audio, None
     if mastered is waveform:          # _master_tensor declines rather than raise
-        return audio
+        return audio, None
     out = dict(audio)
     out["waveform"] = mastered
-    return out
+    return out, target
 
 
 def save_clip(path, images, audio, fps=FPS, crf=SEGMENT_CRF, exact_audio=False,
@@ -180,13 +187,22 @@ def save_clip(path, images, audio, fps=FPS, crf=SEGMENT_CRF, exact_audio=False,
     degraded one.
     """
     os.makedirs(os.path.dirname(path), exist_ok=True)
+    lufs_target = None
     if audio is not None and master_audio:
-        audio = _master_audio(audio)
+        audio, lufs_target = _master_audio(audio)
     components = VideoComponents(images=images, audio=audio, frame_rate=Fraction(fps))
     tmp = path + ".tmp.mp4"
     VideoFromComponents(components).save_to(
         tmp, format=VideoContainer.MP4, codec=VideoCodec.H264, crf=crf)
     os.replace(tmp, path)
+    # 把这段的母带响度目标写进 .lufs 伴生文件：拼接时原样读回，save 与 join
+    # 永远用同一个目标，避免对已母带化的音频二次分档、重复处理。
+    # 本次没母带化（无音频/开关关/跳过）时必须**清掉**上一 take 的残留 ——
+    # 与帧边车同一条原则：旧伴生会把上一 take 的目标钉在这一 take 的音频上。
+    if lufs_target is not None:
+        _write_lufs_target(path, lufs_target)
+    else:
+        _drop_lufs_target(path)
     if exact_audio and audio is not None:
         save_wav(_wav_path(path), audio)
     if lossless_frames:
@@ -213,6 +229,46 @@ def _wav_path(path):
     float PCM and read that instead.
     """
     return os.path.splitext(path)[0] + ".wav"
+
+
+def _lufs_path(path):
+    """Companion that records the per-segment delivery loudness.
+
+    Written by ``save_clip`` whenever a segment is mastered, read by the join so
+    it can match each piece against the *same* target it was saved with. Without
+    it the join would re-classify the already-mastered audio -- whose spectrum
+    the chain has reshaped -- and could double-process a segment.
+    """
+    return os.path.splitext(path)[0] + ".lufs"
+
+
+def _write_lufs_target(path, target_lufs):
+    """Persist the per-segment loudness target next to the clip."""
+    try:
+        with open(_lufs_path(path), "w", encoding="utf-8") as fh:
+            fh.write("%.3f" % float(target_lufs))
+    except OSError as exc:
+        warn("could not write lufs target for %s (%s)",
+                        os.path.basename(path), exc)
+
+
+def _read_lufs_target(path):
+    """Read the per-segment loudness target, or None when absent/garbled."""
+    p = _lufs_path(path)
+    if not os.path.exists(p):
+        return None
+    try:
+        return float(open(p, "r", encoding="utf-8").read().strip())
+    except (OSError, ValueError):
+        return None
+
+
+def _drop_lufs_target(path):
+    """Remove a stale companion; absence is the normal case, so never raise."""
+    try:
+        os.remove(_lufs_path(path))
+    except OSError:
+        pass
 
 
 _LAYOUTS = {1: "mono", 2: "stereo", 3: "2.1", 4: "quad", 5: "5.0", 6: "5.1",
@@ -551,6 +607,29 @@ def join(parts, out_path, fps=FPS, crf=14.0, stabilize=0.0):
     return out_path, frames.total
 
 
+def _resample_waveform(waveform, sr_in, sr_out):
+    """(batch, ch, samples) float tensor: ``sr_in`` → ``sr_out``，dtype/device 保留。
+
+    ★ scipy 而不是 torchaudio（2026-10-18 第三轮自查，借鉴 ComfyUI 核心
+      2026-09-22 提交 b16023b「Remove torchaudio dependency」的方向）：核心已
+      把 torchaudio 从依赖里拿掉，本 venv 里它还在，但 requirements 不再钉它
+      —— 下一次 Desktop 重建环境它就没了，届时 ``import torchaudio`` 会在
+      join 遇到混合采样率段时把整条成片路径打崩，报错点离根因十万八千里。
+      scipy 已是 ``audio_master`` 的硬依赖；``resample_poly``（Kaiser 窗
+      sinc，多相 FIR）与 ``torchaudio.functional.resample`` 同类，44100→32000
+      这种整数比化简后直接可用。
+    """
+    from math import gcd
+
+    from scipy.signal import resample_poly
+
+    g = gcd(int(sr_in), int(sr_out)) or 1
+    x = waveform.detach().cpu().numpy()
+    y = resample_poly(x, int(sr_out) // g, int(sr_in) // g, axis=-1)
+    out = torch.from_numpy(np.ascontiguousarray(y))
+    return out.to(device=waveform.device, dtype=waveform.dtype)
+
+
 def _master_tensor(waveform, rate, entry, **kwargs):
     """Run one of ``audio_master``'s numpy entry points on a ComfyUI waveform.
 
@@ -568,18 +647,22 @@ def _master_tensor(waveform, rate, entry, **kwargs):
     return out.unsqueeze(0) if batched else out
 
 
-def _is_mastered_tensor(waveform, rate):
+def _is_mastered_tensor(waveform, rate, target_lufs=None):
     """True when a ComfyUI waveform already sits at the delivery target.
 
-    Same shape handling as ``_master_tensor``, and deliberately total: an
-    unmeasurable signal answers *no*, so the caller masters it. That is the safe
-    direction -- the cost of mastering twice is a little shaping, the cost of not
-    mastering is a segment 8 LU down in the finished film.
+    ``target_lufs`` is the per-segment target read from the clip's ``.lufs``
+    companion (or classified at save time); passing it keeps this check and the
+    mastering pass in agreement so a segment is never shaped twice. Same shape
+    handling as ``_master_tensor``, and deliberately total: an unmeasurable
+    signal answers *no*, so the caller masters it. That is the safe direction --
+    the cost of mastering twice is a little shaping, the cost of not mastering is
+    a segment 8 LU down in the finished film.
     """
     try:
         batched = waveform.ndim == 3
         signal = waveform[0] if batched else waveform
-        return audio_master.is_mastered(signal.detach().cpu().numpy(), rate)
+        return audio_master.is_mastered(signal.detach().cpu().numpy(), rate,
+                                        target_lufs=target_lufs)
     except Exception:
         return False
 
@@ -624,14 +707,13 @@ def _join_audio(parts, fps):
         kept = max(0, frame_count(path) - skip)
         want_seconds = kept / float(fps)
         if clip_audio is None:
-            pieces.append((None, want_seconds))
+            pieces.append((path, None, want_seconds))
             continue
         if rate is None:
             rate = int(clip_audio["sample_rate"])
         waveform = clip_audio["waveform"]
         if int(clip_audio["sample_rate"]) != rate:
-            import torchaudio
-            waveform = torchaudio.functional.resample(
+            waveform = _resample_waveform(
                 waveform, int(clip_audio["sample_rate"]), rate)
         start = int(round(skip / float(fps) * rate))
         want = int(round(want_seconds * rate))
@@ -640,7 +722,7 @@ def _join_audio(parts, fps):
             cut = torch.cat(
                 [cut, torch.zeros(cut.shape[:-1] + (want - cut.shape[-1],), dtype=cut.dtype)],
                 dim=-1)
-        pieces.append((cut, want_seconds))
+        pieces.append((path, cut, want_seconds))
 
     if rate is None:
         return None
@@ -649,13 +731,38 @@ def _join_audio(parts, fps):
                  "(no second AAC generation), %d from mp4",
                  from_sidecar, len(parts), len(parts) - from_sidecar)
 
-    channels = next((p.shape[1] for p, _ in pieces if p is not None), 1)
+    channels = next((p.shape[1] for _, p, _ in pieces if p is not None), 1)
     filled = []
     matched = 0
-    for piece, seconds in pieces:
+    # ★ 三元组带着各自的 ``path``：``.lufs`` 伴生文件是**每段一个**目标。这里
+    #   曾直接引用上面循环遗留的 ``path`` 变量 —— 恒为最后一段的路径，于是
+    #   全部段都读同一个目标：末段是对白（-16）时，前面的战场段（-8）会被
+    #   判成「没母带过」而二次压到 -16，恰好抹平这次改动要引入的动态。
+    for path, piece, seconds in pieces:
         if piece is None:
             # A segment with no audio track still occupies time in the cut.
             piece = torch.zeros(1, channels, int(round(seconds * rate)))
+        target = _read_lufs_target(path)
+        # 有伴生 = 保存时已母带化（已过 40 Hz 高通与 tonal shaping）。
+        was_mastered = target is not None
+        if target is None and audio_master.ENABLED:
+            # 无伴生（旧版本产物，或成片后清理扫掉了伴生再重建音轨）：
+            # **先吸附**到最近的规范档位 —— 已母带化的音频离 -8/-13/-16
+            # 很近，吸附命中就按「已母带」对待，守卫放行或仅做电平校正；
+            # 吸不上（离所有档都远）才是原始段，按音频自身分类走完整处理。
+            # ★ 顺序是实测出来的（v17 重建，2026-10-18）：直接对已母带化
+            #   音频跑 profile_target 会分错档 —— 一条裁剪后 -14.3 LUFS 的
+            #   中性段被判战场档、回来烫 +5.9 dB，三条对白段被拉高 +3.4 dB。
+            #   高通与 shaping 已经改过频谱，分类器看到的不是原始信号。
+            try:
+                np_piece = piece.detach().cpu().numpy()
+                target = audio_master.snap_target(np_piece, rate)
+                if target is None:
+                    target = audio_master.profile_target(np_piece, rate)
+                else:
+                    was_mastered = True
+            except Exception:
+                target = None
         if audio_master.ENABLED:
             try:
                 # Segments are mastered when they are saved, so most of them are
@@ -663,10 +770,24 @@ def _join_audio(parts, fps):
                 # them would only spend their headroom a second time. The guard
                 # is what lets both passes coexist: a segment an older build
                 # wrote is still raw and gets fixed, a current one is left alone.
-                if _is_mastered_tensor(piece, rate):
+                # ``target`` is the same number ``save_clip`` wrote, so the two
+                # passes can never disagree on what "already mastered" means.
+                if _is_mastered_tensor(piece, rate, target):
                     matched += 1
                 else:
-                    piece = _master_tensor(piece, rate, audio_master.master_segment)
+                    # ★ 已母带段只是裁剪后漂出容差时，只做**电平**校正
+                    #   （2026-10-18 v17 成片实测发生 1 段）：带 .lufs 伴生的
+                    #   段保存时已经过高通与 tonal shaping，再跑一遍 hp/shape
+                    #   正是成片趟明文避免的双重处理 —— 两级 2 阶 40 Hz 串联
+                    #   把真峰顶高约 1.1 dB，2.5 dB 低频搁架变 5 dB、3.5 dB
+                    #   凹陷变 7 dB，那一段的音色平衡会与其他段可闻地不同。
+                    #   没有伴生的原始段（旧版本产物）才走完整处理。
+                    piece = _master_tensor(piece, rate,
+                                           audio_master.master_segment,
+                                           target_lufs=target,
+                                           hp_hz=None if was_mastered
+                                           else audio_master.HIGHPASS_HZ,
+                                           shape_tone=not was_mastered)
             except Exception as exc:
                 warn("segment mastering skipped (%s: %s)",
                                 type(exc).__name__, exc)
@@ -691,9 +812,15 @@ def _join_audio(parts, fps):
     # for nothing.
     if audio_master.ENABLED:
         try:
+            # normalize=False: each segment was already brought to *its own*
+            # per-segment target when it was saved (see profile_target /
+            # master_segment). Re-normalising the whole film to one LUFS would
+            # flatten the very dynamics this change introduces, so the join only
+            # applies the final true-peak safety clamp and leaves the levels as
+            # the segments left them.
             waveform = _master_tensor(waveform, rate, audio_master.master,
                                       hp_hz=None, pre_limit=False,
-                                      shape_tone=False)
+                                      shape_tone=False, normalize=False)
         except Exception as exc:
             # Losing a finished render to an audio polish step would be a bad
             # trade, so anything unexpected leaves the mix exactly as it was.

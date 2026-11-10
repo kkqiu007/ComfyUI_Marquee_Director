@@ -157,11 +157,127 @@ def generation_length(frames):
 
     H3 only generates 5, 22, 39, ... 124, 141, ... frames. The trained range is
     124-362 (about 5-15 s at 24 fps); shorter and longer both work but degrade.
+
+    ⚠ **只用于「非段长」的帧数**：回放/锚点窗口、人脸裁剪窗。
+      一条链的**段长**必须走 ``chain_length``（双时钟），见那里。
+      两者的区别不是洁癖：17k+5 只是视频网格，段长不落在 3 的倍数上时
+      模型的音频潜在只能四舍五入，接缝处每段差 8.3 ms 且逐段累积。
     """
     frames = max(5, int(round(frames)))
     while frames % 17 != 5:
         frames += 1
     return frames
+
+
+# ── H3 的硬限制：ComfyUI 核心不拦的那几条 ────────────────────────────────
+#
+# 核心 `comfy_extras/nodes_minimax_h3.py` 只做两件事：把帧数吸附到 17k+5
+# （`align_frame_count`）、把画布按 32 对齐（`adapt_canvas`）。它的 `length`
+# 上限是 **3600**（150 秒），`adapt_canvas` 也接受任意宽高比 —— 也就是说，
+# 下面三种情况核心一律放行，渲得出来、也不报错，只是**结果不对**。
+#
+# 数值来源（两处独立互证）：
+#   * diffusers 参考实现 `modular_pipelines/minimax_h3/modular_pipeline.py`
+#     定义 MINIMAX_H3_MIN/MAX_ASPECT_RATIO = 1/4 .. 4，并在 `align_num_frames`
+#     里要求 17n+5。
+#   * fblissjr/ComfyUI-h3-explorations 把这批规则整理成常量与谓词
+#     （`h3_rules.py`，该仓库自述 "Each one is a render that succeeds and is
+#     wrong"）；其 `docs/wiki/decisions.md` 另记：相接的两个窗口必须**同时**
+#     落在 17k+5 与 3 的倍数上（视频网格 + 音频时钟），否则接缝处音画对不齐。
+#
+# 这里做判定**并**在段长上强制吸附 —— 画布怎么选仍归用户。
+#
+# ★ 2026-10-18：以前这里只判定、不改行为，代价是每条链都在带病渲染。实测一条
+#   10 段链里 5 段踩中（124 / 311 / 209 / 277 帧），每道接缝差 8.3 ms，逐段
+#   累积到第 10 段已经是 ±40 ms —— 超过 lip-sync 的可察觉下限。日志里那条
+#   「最近的合法长度是 141 帧」当时只是提示，长度照旧是 124。现在段长一律走
+#   ``chain_length``，判定与纠正合流。
+
+MIN_ASPECT_RATIO = 1.0 / 4.0     # H3 训练覆盖的最窄画幅（1:4）
+MAX_ASPECT_RATIO = 4.0           # 最宽（4:1）
+MAX_LENGTH = 362                 # 训练上限帧数；超过照样能渲，只是没被训练过
+MIN_DURATION = 5.0               # 训练覆盖的最短时长（秒）
+MAX_DURATION = MAX_LENGTH / float(FPS)      # 15.083s
+#: 音频潜在 40 Hz、画面 24 fps，`frames*40 % 24 == 0` 等价于 `frames % 3 == 0`。
+AUDIO_STEP_FRAMES = 3
+
+
+def describe_aspect_range():
+    """``"1:4 – 4:1"``，给提示文案用。"""
+    return "1:4 – 4:1"
+
+
+def on_both_clocks(frames):
+    """帧数是否同时落在视频网格（17k+5）与音频时钟（40 Hz 整除）上。
+
+    相接的两段各自生成自己的音频，只有长度同时满足两个时钟，接缝处的
+    音画才对得齐。核心只保证前者。
+    """
+    frames = int(frames)
+    return frames % 17 == 5 and (frames * AUDIO_LATENT_FPS) % FPS == 0
+
+
+def chain_lengths(ceiling=MAX_LENGTH):
+    """能拿来做「相接窗口」的合法帧数：17k+5 且为 3 的倍数，到训练上限为止。
+
+    362 本身不是 3 的倍数，所以真正可用的最大相接长度是 **345**（14.375s）。
+    """
+    return tuple(n for n in range(5, int(ceiling) + 1) if on_both_clocks(n))
+
+
+def nearest_chain_length(frames, ceiling=MAX_LENGTH):
+    """离 ``frames`` 最近的合法相接长度；没有候选时返回 ``None``。"""
+    options = chain_lengths(ceiling)
+    if not options:
+        return None
+    frames = int(frames)
+    return min(options, key=lambda n: (abs(n - frames), n))
+
+
+#: 相接长度的网格。``17k+5`` ∩ ``3 的倍数`` 联立即 ``n ≡ 39 (mod 51)``：
+#: 39 / 90 / 141 / 192 / 243 / 294 / 345 / 396 …（相邻差 51 帧 = 2.125s）。
+#: 直接用同余式算，不走 ``chain_lengths`` 的枚举 —— 枚举被 ``MAX_LENGTH``
+#: 截在 345，超过 15 s 的段就找不到候选了，而 ``generation_length`` 本来
+#: 也不设上限（15 s → 396 帧照样渲），这里必须保持同一条边界。
+CHAIN_STEP = 51
+MIN_CHAIN_LENGTH = 39
+
+
+def chain_length(frames):
+    """Snap a **segment** frame count UP onto the both-clocks grid (39 + 51n).
+
+    这是「一条链里每一段的生成长度」唯一该走的函数。段长要同时落在两个
+    时钟上：
+
+    * **视频网格** —— ``17k+5``，H3 只认这个（``generation_length``）。
+    * **音频时钟** —— 音频潜在 40 Hz 对 24 fps 画面，即 ``n % 3 == 0``。
+      不满足时模型只能把音频潜在四舍五入到最近的整步，**段内**音画就差
+      最多 12.5 ms；每一段各自生成自己的音频，误差同号，**逐段累积**，
+      十段就是几十毫秒 —— 台词与口型对不上。
+
+    为什么必须是「向上」：与 ``generation_length`` 同策略。向下取会把剧本
+    要求的内容裁掉；向上取多出来的帧由 ``prompt_pack`` 同样口径地写进
+    提示词时间轴（``chain_seconds``），所以那是**被完整指定**的时间，不是
+    模型即兴的空白 —— 两层不同源才会生出「乱说话」。
+
+    代价要说清楚：步长 51 帧，单段最多多出 **50 帧 ≈ 2.08s**（原先 17k+5
+    最多 16 帧 ≈ 0.67s）。这是把段长锁进双时钟的固有成本，不是实现缺陷。
+    """
+    frames = max(5, int(round(frames)))
+    if frames <= MIN_CHAIN_LENGTH:
+        return MIN_CHAIN_LENGTH
+    return MIN_CHAIN_LENGTH + (
+        (frames - MIN_CHAIN_LENGTH + CHAIN_STEP - 1) // CHAIN_STEP) * CHAIN_STEP
+
+
+def audio_clock_error_ms(frames):
+    """这一段音频比画面短（负）或长（正）多少毫秒。
+
+    ``audio_latent_frames`` 把帧数四舍五入成音频步，精确值是
+    ``frames*40/24``。差值就是接缝处音画错位的量 —— 每段同号就逐段累积。
+    """
+    exact = float(frames) * AUDIO_LATENT_FPS / float(FPS)
+    return (round(exact) - exact) / float(AUDIO_LATENT_FPS) * 1000.0
 
 
 def guide_length(frames):

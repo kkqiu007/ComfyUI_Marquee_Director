@@ -1820,6 +1820,8 @@
         "分镜JSON",
         "",
         "h264",
+        0,
+        0,
         ""
       ],
       "widgets_values_named": {
@@ -1845,7 +1847,9 @@
         "source": "分镜JSON",
         "video_path": "",
         "h3_director_panels": "",
-        "seg_cache_codec": "h264"
+        "seg_cache_codec": "h264",
+        "width": 0,
+        "height": 0
       },
       "color": "#b58b2a",
       "bgcolor": "#3d3116"

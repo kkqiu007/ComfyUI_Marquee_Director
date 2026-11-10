@@ -87,6 +87,16 @@ _SEED_TOOLTIP = (
     "种子进缓存键，改了会重渲这一段。"
 )
 
+_CLEAR_VRAM_TOOLTIP = (
+    "一采结束后、二采开始前卸载模型并清空显存缓存。默认关。\n\n"
+    "同一段里一采的 UNET 还驻留着，二采紧接着就开始 —— 一旦接了「二采模型」"
+    "（另一套 UNET），两套模型会同时占着显存，8GB 卡上峰值就在这里。勾上能把"
+    "一采那套先卸掉，峰值降下来。\n\n"
+    "代价是每段多一次模型加载。本包实测加载就是 8GB 机器上的大头，所以默认关；"
+    "显存够、或者一采/二采确实是两套不同 UNET 时才值得勾。\n\n"
+    "不进缓存键：这是显存策略，不改变画面 —— 勾与不勾产出的段应当逐像素相同。"
+)
+
 
 class H3RefineNode(io.ComfyNode):
     """Pack a second-sample pass. Wire ``refine`` into ``H3Director``'s ``refine``."""
@@ -130,6 +140,11 @@ class H3RefineNode(io.ComfyNode):
                     "refine_seed", display_name="二采种子", default=0, min=0,
                     max=0xffffffffffffffff, advanced=True,
                     tooltip="仅「种子来源 = 独立种子」时生效。"),
+                # ★ 追加在**末尾**：widget 顺序即 widgets_values 的对齐顺序，
+                #   插在中间会让已存工作流的控件整体错位。默认 False = 旧行为。
+                io.Boolean.Input(
+                    "clear_vram", display_name="二采前清显存", default=False,
+                    advanced=True, tooltip=_CLEAR_VRAM_TOOLTIP),
             ],
             outputs=[H3Refine.Output(display_name="refine")],
         )
@@ -137,7 +152,7 @@ class H3RefineNode(io.ComfyNode):
     @classmethod
     def execute(cls, passes=1, sampler=REFINE_FOLLOW_SAMPLER,
                 seed_mode=REFINE_SEED_FOLLOW, refine_seed=0, sigmas=None,
-                refine_model=None) -> io.NodeOutput:
+                refine_model=None, clear_vram=False) -> io.NodeOutput:
         return io.NodeOutput({
             "sigmas": sigmas,
             "model": refine_model,
@@ -147,6 +162,9 @@ class H3RefineNode(io.ComfyNode):
             "sampler": None if sampler == REFINE_FOLLOW_SAMPLER else sampler,
             "seed_mode": seed_mode,
             "seed": int(refine_seed or 0),
+            # 显存策略，不是渲染参数 —— session.segment_key 逐项枚举 refine 字段，
+            # 没有这一项，所以勾/不勾不会让已渲段失效。
+            "clear_vram": bool(clear_vram),
         })
 
 

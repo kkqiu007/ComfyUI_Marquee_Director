@@ -72,6 +72,12 @@ def _is_keep(name: str, session: str) -> bool:
     """只留分镜分段视频和完整拼接视频，外加面板要用的元数据。"""
     if _SEG_RE.match(name):
         return True
+    # ``.lufs`` 是 seg_NN.mp4 的响度伴生（每段 7 字节）：成片后的音轨重建
+    # （tools/rebuild_film_audio.py）靠它读回每段自己的交付目标。扫掉它就
+    # 逼重建走无伴生回退，而那一代音频已经过 AAC，目标再错一次就回不去了。
+    # 与 PANEL_KEEP 同一条理由 —— 描述**被保留产物**的小体积元数据必须留下。
+    if name.lower().endswith(".lufs"):
+        return True
     if name.lower() == (session + ".mp4").lower():
         return True
     if name.lower() in {p.lower() for p in PANEL_KEEP}:

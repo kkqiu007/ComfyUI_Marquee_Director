@@ -78,20 +78,27 @@ def _cache_put(store, key, value, maxsize=_PREVIEW_CACHE_MAX):
             store.pop(next(iter(store)))     # 丢最久未用的
 
 
-def _cached_preview(text: str, session_name: str = "") -> dict:
-    """/h3/pack_preview 的带缓存版本。键 = PACK 全文 + 会话名。
+def _cached_preview(text: str, session_name: str = "", **opts) -> dict:
+    """/h3/pack_preview 的带缓存版本。键 = PACK 全文 + 会话名 + 解析参数。
 
     缓存里存的是 **JSON 字符串**，返回时再 ``json.loads`` 还原成一份新对象。
     为什么不直接存 dict：返回值会被 web.json_response 序列化，也可能被调用方
     就地修改；共享同一个 dict 的话，一次误改会污染后续所有命中（表现为"改了
     PACK 面板却还是旧内容"，且再也刷不掉）。一次序列化往返比重新解析便宜两个
     数量级（实测命中路径 <1ms，而单侧解析就要 18ms）。
+
+    ★ 解析参数（``default_duration`` / ``auto_fix`` / ``language`` /
+      ``pack_override``）**必须进键**：它们会改变段数与每段时长，漏进键就会
+      出现"改了画布上的缺省段长、面板还是旧时间线"，而且因为命中缓存，
+      连重新解析都不会发生。
     """
-    key = _content_key(text, session_name)
+    key = _content_key(text, session_name, opts.get("default_duration"),
+                       opts.get("auto_fix"), opts.get("language"),
+                       opts.get("pack_override"))
     hit = _cache_get(_preview_cache, key)
     if hit is not None:
         return json.loads(hit)              # 防调用方就地改坏缓存
-    result = _pack_preview(text, session_name)
+    result = _pack_preview(text, session_name, **opts)
     _cache_put(_preview_cache, key, json.dumps(result))
     return result
 
@@ -99,13 +106,54 @@ def _cached_preview(text: str, session_name: str = "") -> dict:
 # ---------------------------------------------------------------------------
 # /h3/pack_preview —— 给 PACK 模块用：不渲染，只解析
 # ---------------------------------------------------------------------------
-def _pack_preview(text: str, session_name: str = "") -> dict:
-    # 双语 PACK 同时解两版：英文版给 Director 真正渲染用（默认 auto 取的那侧），
-    # 中文版给前端「六段实时编辑」面板做对照源 / 编辑目标。两段按 index 对齐。
-    en_segments, en_meta, issues = pp.parse_pack(text or "", language="en")
-    zh_segments, _, _ = pp.parse_pack(text or "", language="zh")
-    # 传 en_segments：无 PACK 头部的输入（[Shot N] 布局）靠它反推段数/总时长
-    header = pp.pack_header(en_meta, en_segments)
+def _preview_primary_lang(language) -> str:
+    """画布上 H3PromptPackParser 的 ``language`` 控件 → 预览的**主侧**（en/zh）。
+
+    与 :func:`prompt_pack._pick_section` 同口径：``auto`` 英文版优先、
+    ``中文版``/``zh`` 取中文侧。以前预览这里写死 ``"en"``，而节点 ``execute``
+    是把控件原样传给 ``parse_pack`` 的 —— 控件选「中文版」时面板按英文侧画
+    时间线、节点渲中文侧，段数与段长都可能不同。
+    """
+    s = str(language or "")
+    if s.strip().lower() in ("zh", "cn") or "中文" in s:
+        return "zh"
+    return "en"
+
+
+def _pack_preview(text: str, session_name: str = "", *,
+                  default_duration=None, auto_fix=None,
+                  language=None, pack_override=None) -> dict:
+    # ★ pack_override 与节点 execute **同口径**：非空且"看起来像 PACK"时代替
+    #   pack_text 参与解析（前端分镜提示词编辑器的 override 写回模式）。
+    #   以前预览完全无视它 —— 编辑器写回后面板显示的还是源文，而节点渲染的
+    #   是覆盖版，两边静默分叉。守卫与节点 execute 共用同一条实现
+    #   （prompt_pack.looks_like_pack）：widgets_values 位置错位会把 on_issue 的
+    #   "warn" 塞进这个控件，照单全收就会拿 "warn" 去解析，整块面板报
+    #   「没有解析到任何分镜」。
+    source = "pack_text"
+    ov = str(pack_override or "").strip()
+    if ov and pp.looks_like_pack(ov):
+        text, source = ov, "pack_override"
+
+    # 缺省段长 / 自动修正：节点 execute 用的就是控件值，预览必须一致，
+    # 否则「段标题没写时长」的稿子上面板时间线与真实渲染对不上。
+    dd = 11.0 if default_duration is None else float(default_duration or 11.0)
+    af = True if auto_fix is None else bool(auto_fix)
+    primary = _preview_primary_lang(language)
+    other = "zh" if primary == "en" else "en"
+
+    # 双语 PACK 同时解两版：主侧给 Director 真正渲染用（= 控件选的那一侧），
+    # 另一侧给前端「六段实时编辑」面板做对照源 / 编辑目标。两段按 index 对齐。
+    pri_segments, pri_meta, issues = pp.parse_pack(
+        text or "", language=primary, default_duration=dd, auto_fix=af)
+    alt_segments, _, _ = pp.parse_pack(
+        text or "", language=other, default_duration=dd, auto_fix=af)
+    # 编辑器两栏按**语言**归位（不是按主/次）：EN 栏永远是英文侧、ZH 栏永远
+    #   是中文侧；而 segments / header / 时间线跟主侧走（节点渲染的那侧）。
+    en_segments, zh_segments = ((pri_segments, alt_segments) if primary == "en"
+                                else (alt_segments, pri_segments))
+    # 传主侧 segments：无 PACK 头部的输入（[Shot N] 布局）靠它反推段数/总时长
+    header = pp.pack_header(pri_meta, pri_segments)
     # ★ 整段式 [Shot N] 脚本**没有** ########## 段标题 —— 前端「分镜时间线」
     #   靠段标题定位原文块（h3LocateSegRange），在这类稿子上一个段都切不出来：
     #   编辑器只能显示后端兜底拼的内容，且 doWrite 会因 fromFallback 拒绝写回
@@ -113,15 +161,18 @@ def _pack_preview(text: str, session_name: str = "") -> dict:
     #   所以把每段在**原文里的行区间**一起下发，前端拿它当兜底定位。
     #   分段 PACK（########## 形式）用不到，给 None。
     pack_ranges = []
-    if str((en_meta or {}).get("layout") or "") == pp.SHOT_SCRIPT_LAYOUT:
+    if str((pri_meta or {}).get("layout") or "") == pp.SHOT_SCRIPT_LAYOUT:
         try:
             pack_ranges = pp.shot_script_segment_ranges(text or "")
         except Exception:                                     # pragma: no cover
             pack_ranges = []
     segs = []
-    for idx, seg in enumerate(en_segments):
+    for idx, seg in enumerate(pri_segments):
         fields = seg.get("fields") or {}
         body = str(fields.get("detailed_description") or "")
+        # 编辑器两栏各取自己那一侧（与主侧无关）：控件选「中文版」时主侧是中文，
+        # 但 EN 栏仍须显示英文侧，否则两栏内容一样、对照功能失效。
+        en_fields = (en_segments[idx].get("fields") or {}) if idx < len(en_segments) else {}
         zh_fields = (zh_segments[idx].get("fields") or {}) if idx < len(zh_segments) else {}
         rng = pack_ranges[idx] if idx < len(pack_ranges) else None
         # 末段不要求无台词尾巴，其余每段最后 1.6s 必须没有新台词
@@ -131,6 +182,14 @@ def _pack_preview(text: str, session_name: str = "") -> dict:
             "id": seg["id"],
             "new_seconds": round(float(seg["new_seconds"]), 3),
             "handoff_seconds": round(float(seg["handoff_seconds"]), 3),
+            # ★ replay_in 必须一起下发：段头漏写 ``+1.6`` 时，解析层会按网格给
+            #   接续段补一个 1.625s 的**段首回放窗**，它算进 gen_seconds 却
+            #   **不算进 handoff_seconds**（后者是"本段尾部交给下一段"的窗口，
+            #   两件事）。实测这种稿子上 new+handoff=12.750 而 gen=14.375，
+            #   差整整一个回放窗 —— 前端标尺若按 new+handoff 画格子，就比它
+            #   下方那段缩略图短 1.625s（用户报的"标尺时间对不上缩略图"）。
+            #   下发它，前端与排查都能看出这段时间去哪了。
+            "replay_in": round(float(seg.get("replay_in") or 0.0), 3),
             "gen_seconds": round(float(seg["gen_seconds"]), 3),
             "frames": seg.get("spec_frames"),
             "task": seg.get("task"),
@@ -140,9 +199,9 @@ def _pack_preview(text: str, session_name: str = "") -> dict:
             "dialogues": seg.get("dialogues") or 0,
             "words": len(body.split()),
             "dialogue_free_tail": tail_clean,
-            # 完整六字段（英文版，Director 实际渲染用）：给前端「分镜提示词编辑器」
-            # 做逐段实时显示/编辑用，顺序固定为 FIELD_ORDER。
-            "full_fields": {k: str(fields.get(k) or "") for k in pp.FIELD_ORDER},
+            # 完整六字段（英文侧）：给前端「分镜提示词编辑器」做逐段实时显示/
+            # 编辑用，顺序固定为 FIELD_ORDER。
+            "full_fields": {k: str(en_fields.get(k) or "") for k in pp.FIELD_ORDER},
             # 完整六字段（中文版）：对照源 + 可编辑；写回时传 lang="zh"。
             "full_fields_zh": {k: str(zh_fields.get(k) or "") for k in pp.FIELD_ORDER},
             # 每段真正进模型的正文：subject_definitions 也会拼进首段提示词，
@@ -170,7 +229,7 @@ def _pack_preview(text: str, session_name: str = "") -> dict:
     total_gen = sum(s["gen_seconds"] for s in segs)
     # 节点自动修过的项（不是问题，是成功日志）—— 前端要单独显示，别混进 issues。
     fixes = []
-    for seg in en_segments:
+    for seg in pri_segments:
         for fix in (seg.get("fixes") or ()):
             fixes.append("%s：%s" % (seg["id"], fix))
     declared = None
@@ -230,10 +289,16 @@ def _pack_preview(text: str, session_name: str = "") -> dict:
         # 段数、总时长、以及 `S02 / 11s+1.6=12.6s` 这种一眼看出规划对不对的
         # 写法。以前这两样根本没产出，只能从正文里数时间码反推。
         "pack_text": pp.pack_text(
-            en_segments if en_segments else segs, en_meta,
+            pri_segments if pri_segments else segs, pri_meta,
             project=header.get("project") or session_name or None,
             mode=header.get("mode") or None,
             aspect=header.get("aspect") or None),
+        # 面板据此说明"时间线读的是哪一份文本 / 哪一侧语言"。override 生效时
+        # 源文本框里看到的**不是**将要渲染的那份，不说清楚就成了静默分叉。
+        "pack_source": source,
+        "primary_lang": primary,
+        "parse_args": {"default_duration": dd, "auto_fix": af,
+                       "language": primary},
     }
 
 
@@ -388,6 +453,29 @@ def _session_dirs():
     return [root for root in roots if os.path.isdir(root)]
 
 
+def _is_session_dir(path):
+    """这个目录**本身**是不是一个会话目录（而不是包着若干版本的剧本夹）。
+
+    判据从宽：有 seg_NN.mp4 或 manifest.json 就一定是会话目录；两者都没有时，
+    看它有没有子目录 —— 有子目录说明它是剧本夹（版本在下一层），没有就当
+    会话目录（刚开始渲、一段都还没落盘的新会话正是这个形态，不能因为"空"
+    就把它判成剧本夹，否则面板对一个正在渲的新会话永远显示不出目录）。
+    """
+    try:
+        names = os.listdir(path)
+    except OSError:
+        return False
+    if "manifest.json" in names:
+        return True
+    has_sub = False
+    for n in names:
+        if re.match(r"^seg_\d+\.mp4$", n):
+            return True
+        if not has_sub and os.path.isdir(os.path.join(path, n)):
+            has_sub = True
+    return not has_sub
+
+
 def _find_session(name: str):
     """按会话名找目录。
 
@@ -431,24 +519,43 @@ def _find_session(name: str):
             # 1) 老的单层布局：<总根>/<会话名>
             path = os.path.join(root, cand)
             if os.path.isdir(path):
+                # ★ 但两层布局下这个名字也可能是**剧本夹**
+                #   （<总根>/<剧本名>/<版本名>）。直接返回剧本夹的话，
+                #   _session_state 会在它里面找 seg_NN.mp4 —— 一个都没有，
+                #   面板于是 done=0、缩略图全空，而真实的段就在下一层。
+                #   实测：name='汴京军议_EP002_牵羊' 返回剧本夹本身、
+                #   disk_count=0，而它底下的 EP02v3 里有 3 段。
+                if _is_session_dir(path):
+                    return path
+                hit = _nested_session(root, cand, match_parent=True)
+                if hit:
+                    return hit
                 return path
             # 2) 现行两层：<总根>/<剧本名>/<版本名>。先按版本名找，再放宽到
             #    "用户填的是剧本名" —— 那种情况下取最新的一版，面板才有东西可显示。
             hit = _nested_session(root, cand)
             if hit:
                 return hit
-        # 最后再放宽：不区分大小写 + 去下划线比一遍（两种布局都试）
+        # 最后再放宽：不区分大小写 + 去下划线比一遍（两种布局都试）。
+        # ★ 必须先确认**这个夹子的名字就是要找的名字**，再决定把它当会话目录
+        #   还是剧本夹。原来这里对根下**每一个**剧本夹都调一次
+        #   ``_nested_session(match_parent=True)``，而那个调用压根不看 cand ——
+        #   夹子底下只要有版本目录就返回最新的一版。于是任何找不到的名字都会
+        #   落到"磁盘上最新的那个会话"：实测 name=''、'zzz_nonexistent_xyz'、
+        #   '../../Windows' 全部解析成 EP02v3，时间线于是显示**别的剧本**的
+        #   缩略图与进度，甚至对一份从没渲过的 PACK 报「✓ 完成」。
         if flat:
             try:
                 for entry in os.listdir(root):
                     path = os.path.join(root, entry)
                     if not os.path.isdir(path):
                         continue
-                    if entry.lower().replace("_", "") == flat:
-                        return path
-                    hit = _nested_session(root, entry, match_parent=True)
-                    if hit:
-                        return hit
+                    if entry.lower().replace("_", "") != flat:
+                        continue
+                    # 名字对上了：老的单层布局里它就是会话目录本身；两层布局里
+                    # 它是剧本夹，取该剧本下最新的一版（面板收到剧本名时也该
+                    # 有东西可显示，而不是"会话目录不存在"）。
+                    return _nested_session(root, entry, match_parent=True) or path
             except OSError:
                 pass
     return None
@@ -621,13 +728,28 @@ def _view_subfolder(path):
       于是每一段的预览图 404，面板只剩一排空白缩略图。相对基准只有一个正解：
       ``session.output_root()``。
     """
+    _sess = None
     try:
-        from . import session as _sess
-
+        from . import session as _sess_mod
+        _sess = _sess_mod
         root = _sess.output_root()
     except Exception:
         root = os.path.dirname(os.path.dirname(os.path.normpath(path)))
-    return os.path.relpath(path, root).replace("\\", "/")
+    try:
+        return os.path.relpath(path, root).replace("\\", "/")
+    except ValueError:
+        # ★ Windows 上**跨盘符**时 relpath 不给相对路径，直接抛 ValueError
+        #   （实测：会话目录在 C: 的临时夹、输出根在 E:）。这个函数在
+        #   _session_state 的每段循环里被调用，一抛整个 /h3/session 就 500 ——
+        #   面板一段已渲都拿不到，表现为"时间线全空"。而 _session_dirs() 本来
+        #   就可能返回**另一个根**（历史遗留根 = base_path/output），所以这条
+        #   路径在生产里也走得到，不只是测试环境问题。
+        #   退回按路径本身推：从 h3_continuous 那一层往下就是 subfolder。
+        parts = os.path.normpath(path).split(os.sep)
+        marker = getattr(_sess, "ROOT", None) or "h3_continuous"
+        if marker in parts:
+            return "/".join(parts[parts.index(marker):])
+        return os.path.basename(path)
 
 
 def _script_of(session_dir):
@@ -694,6 +816,12 @@ def _session_state(name: str, planned_segs=None) -> dict:
     #   多出幽灵段让进度条虚高（截图实况：已渲 20/20，磁盘却有 seg_21）。
     #   manifest 可能已被清理扫掉（用户实况就没有 manifest），没有键可逐一
     #   比对，所以由调用方把面板当前段数带进来，两边一对即可判定。
+    # ★ 2026-10-18 用户实况（首渲假阳性）：会话刚开始渲、一次刷新落在第一段
+    #   落盘前 → 磁盘 0 段 vs 面板 20 段，横幅喊「PACK 改过？缩略图错位」——
+    #   可磁盘上什么都没有，无从错位。漂移判据成立的前提是**两边都有段**：
+    #   磁盘 0（未渲 / 已被清理）或面板 0（PACK 未解析）时无可比对，判 False。
+    #   渲染途中 1..N vs planned 的前端抑制见 h3_director.js absorbSession
+    #   的 _running 门（进行中的计数差距是正常进度，不是漂移）。
     planned = None
     if planned_segs is not None:
         try:
@@ -713,9 +841,22 @@ def _session_state(name: str, planned_segs=None) -> dict:
         "manifest_segments": len(records),
         # 磁盘段总数 / 面板计划段数 / 是否漂移。drift=True 时前端必须**显式
         # 警示**而不是假装对齐（处置见前端的 absorbSession）。
+        # 判据要求两边都非空：磁盘 0 段（首渲未出片 / 已清理）或面板 0 段
+        # （PACK 未解析）时没有可比对对象，判 False —— 见上方 2026-10-18 注释。
         "disk_count": len(segs),
         "planned_segs": planned,
-        "drift": bool(planned is not None and planned != len(segs)),
+        # ★ 2026-10-23：**连续前缀不算漂移**。磁盘是 1..N 且 N < planned，
+        #   那是「渲到一半停了」（用户取消 / 报错 / 关机），不是「PACK 改过」。
+        #   实测一次 9 段的渲染在第 5 段被取消，面板于是对着一份**没改过**的
+        #   PACK 喊「磁盘 4 段 ≠ 当前分镜 9 段（PACK 改过？）已渲缩略图与段号
+        #   可能错位」—— 把"没渲完"说成"数据错了"，用户会去重跑一个本来只要
+        #   断点续渲的会话。前端 absorbSession 只在 _running 时抑制这条横幅，
+        #   而中断之后恰恰**不在** running，所以抑制不住。
+        #   真正的漂移只有两种：磁盘段数**超过**计划（旧版多切了几段，seg_NN
+        #   与面板第 NN 段从此错开），或磁盘段号不是从 1 开始的连续前缀
+        #   （中间缺号 → done < disk_count，段号已经对不上）。
+        "drift": bool(planned and len(segs) > 0
+                      and (len(segs) > planned or done != len(segs))),
         # 落盘名与查找名是否共用**同一个** sanitize 函数对象。
         # 这两侧一旦分叉，渲染写 A 目录、面板查 B 目录，表现为「断点渲染又从第 1
         # 段开始」以及修复节点抛 "segment 1 has no handoff clip"。以前靠 import
@@ -812,11 +953,30 @@ def register() -> bool:
         except Exception:
             payload = {}
         text = (payload or {}).get("text") or ""
-        # 画布上 H3PromptPackParser 的 session_name 控件值 —— 前端顺带传上来，
-        # 好让会话名的候选顺序和那个节点完全一致。
-        sess = str((payload or {}).get("session_name") or "")
+        # 画布上 H3PromptPackParser 的控件值 —— 前端顺带传上来，好让预览与
+        # 那个节点 execute 的口径完全一致（会话名候选顺序、缺省段长、自动修正、
+        # 取哪一侧语言、以及编辑器写回的 pack_override）。
+        # ★ 这些参数以前**一个都没读**：面板永远按 default_duration=11 /
+        #   auto_fix=True / 英文侧 / 无视 override 解析，而节点按控件值渲染，
+        #   两边静默分叉（表现为"时间线的秒数和 PACK 对不上"）。
+        p = payload or {}
+
+        def _num(key, default):
+            try:
+                return float(p.get(key))
+            except (TypeError, ValueError):
+                return default
+
+        opts = {
+            "session_name": str(p.get("session_name") or ""),
+            "default_duration": _num("default_duration", 11.0),
+            "language": p.get("language"),
+            "pack_override": p.get("pack_override"),
+        }
+        if p.get("auto_fix") is not None:
+            opts["auto_fix"] = bool(p.get("auto_fix"))
         try:
-            return web.json_response(_cached_preview(text, sess))
+            return web.json_response(_cached_preview(text, **opts))
         except Exception as exc:                              # pragma: no cover
             return web.json_response({"ok": False, "error": str(exc)}, status=400)
 

@@ -79,10 +79,19 @@ from . import frames_cache
 from . import wardrobe as wardrobe_mod
 from .common import (
     FPS,
+    MAX_ASPECT_RATIO,
+    MAX_LENGTH,
+    MIN_ASPECT_RATIO,
+    audio_clock_error_ms,
+    audio_latent_frames,
+    chain_length,
+    describe_aspect_range,
     evict_dead_loaded_models,
     generation_length,
     guide_length_up,
     log,
+    nearest_chain_length,
+    on_both_clocks,
     seconds_to_frames,
 )
 from .engine import free_between_segments, unload_due, unload_every_int
@@ -101,7 +110,6 @@ from .nodes import (
     _safe_script_handoff,
     _script_asset,
     _script_segment,
-    _settings_for_script,
 )
 
 CATEGORY = "ComfyUI_Marquee_Director"
@@ -178,6 +186,139 @@ def _canvas_note(info, settings):
     return ("PACK 画幅 %s（%.3f）与画布 %d×%d（%.3f）不一致 —— "
             "成片会是后者，要改请改「H3 链路设置」的 width/height。"
             % (aspect, want, width, height, got))
+
+
+def _aspect_label(ratio):
+    """``0.5625`` → ``"9:16"`` 那种读得懂的写法。"""
+    if ratio >= 1.0:
+        return "%.2f:1" % ratio
+    return "1:%.2f" % (1.0 / ratio)
+
+
+def _canvas_range_note(settings):
+    """画布宽高比是否落在 H3 训练覆盖的区间里。
+
+    ``adapt_canvas`` 接受任意比例，核心也不报错 —— 但 H3 只在 1:4 到 4:1 之间
+    训练过。出了区间照样渲得出来，坏的是构图和人体结构，而这两样要到看成片才
+    发现。这里只提示，不替用户改画布。
+    """
+    width = int(settings.get("width") or 0)
+    height = int(settings.get("height") or 0)
+    if width <= 0 or height <= 0:
+        return ""
+    ratio = width / float(height)
+    if MIN_ASPECT_RATIO <= ratio <= MAX_ASPECT_RATIO:
+        return ""
+    return ("画布 %d×%d 是 %s，超出 H3 训练覆盖的 %s —— 能渲，但构图与人体"
+            "结构会走样。横屏用 16:9（960×544），竖屏用 9:16（544×960）。"
+            % (width, height, _aspect_label(ratio), describe_aspect_range()))
+
+
+#: H3 训练覆盖的画布面积上限。核心的 ``adapt_canvas``（nodes_minimax_h3.py）
+#: 里有同名的 ``MAX_PIXELS = 768 * 1344``，但它**只作用于参考视频**，主画布
+#: 不过那一道 —— 核心的 ``_empty_av_latent`` 按 ``height//16 × width//16`` 直接
+#: 开张。所以这里给主画布补上一道面积提醒。
+TRAINED_AREA_PIXELS = 768 * 1344
+
+
+def _align_canvas(value, stride=None):
+    """一维画布边长 → ``stride`` 的倍数（就近取整，不小于 ``stride``）。
+
+    32 对齐是 H3 的**充要**条件，不必再多做什么：VAE 空间下采样 16 倍、再
+    2×2 patchify，latent 边长 = ``w // 16``，patchify 要求它是偶数；
+    ``w`` 是 32 的倍数时 ``w // 16`` 必为偶数（如 480 → 30、864 → 54），
+    而 496 → 31 是奇数、会在采样中途崩在 ``patchify_video``。
+
+    ★ ``stride`` 默认值**不能**写成 ``=CANVAS_STRIDE``（2026-10-18 实测）：
+      默认参数在 ``def`` 执行时就求值，而 ``CANVAS_STRIDE`` 定义在本函数
+      之后（见下方 ref_images 收敛处）—— 于是模块导入直接
+      ``NameError: name 'CANVAS_STRIDE' is not defined``，整个
+      ComfyUI_Marquee_Director **IMPORT FAILED**、H3Director 从节点列表里
+      消失。运行中的进程看不出问题（旧代码还在内存里），一重启才炸。
+      改成调用时解析：既保持 32 的口径，又不会与常量定义顺序耦合。
+    """
+    stride = CANVAS_STRIDE if stride is None else stride
+    value = max(0, int(value or 0))
+    if value <= 0:
+        return 0
+    return max(stride, int(round(value / float(stride))) * stride)
+
+
+def _resolve_canvas(settings, want_width, want_height, asset=None):
+    """Director 上的输出规格 → 真正送进 H3 的画布。返回 ``(settings, notes)``。
+
+    ★ 优先级（2026-10-18 定）：**Director 控件 > 源视频画布 > H3 链路设置**。
+      以前只有后两级，而且中间那级是**静默**的：``_settings_for_script`` 无条件
+      用源视频的宽高覆盖 settings，用户在上游 ResolutionSelector 选什么都不生效，
+      报告里只有一句「跟随源视频」。现在 Director 控件设了就一定听用户的，
+      没设才轮��下游，而且**谁赢了一定写进报告**。
+
+    ★ 32 对齐在这里统一收口。以前全包只有 ``_fit_ref_image`` 拿
+      ``CANVAS_STRIDE`` 缩参考图，**主画布从头到尾没人校验**：H3ChainSettings 的
+      ``step=32`` 只是 UI 步进提示，而 width/height 一旦是连线来的（ResolutionSelector
+      那种标准接法）widget 就被绕过、step 随之失效，非 32 倍数的值会一路穿到采样器
+      才崩，报错点离根因十万八千里。
+
+    ``notes`` 是给人看的：改写、对齐、半配置、超面积。空列表 = 一切照旧
+    （这正是既有工作流升级后必须走的那条路径）。
+    """
+    notes = []
+    effective = dict(settings or {})
+    asset = asset or {}
+
+    # ★ 原始值必须先留一份（2026-10-18 白盒自查）：下面第 269 行会就地把
+    #   want_width/want_height 对齐成 32 的倍数，若在 299 行再回头取"raw"，
+    #   拿到的其实是对齐后的值 —— `raw != aligned` 恒为假，「已对齐到 …」这条
+    #   提示**永远不会出现**。用户填 1000×562 却什么都没被告知，只能看日志猜。
+    raw_want_w, raw_want_h = want_width, want_height
+
+    want_width = _align_canvas(want_width)
+    want_height = _align_canvas(want_height)
+    if bool(want_width) != bool(want_height):
+        # 半配置是最容易烧掉一整条链的输入：只给宽不给高时，"跟随上游" 和
+        # "用这个宽配上游的高" 都会得到一条竖屏或横向拉扁的片子，且不报错。
+        # 不猜 —— 两边一起当没设。
+        notes.append("输出宽高只填了一个（宽=%s 高=%s）—— 两个都填才生效，"
+                     "这次按「跟随上游」处理。" % (want_width or "空", want_height or "空"))
+        want_width = want_height = 0
+
+    upstream_w = _align_canvas(effective.get("width"))
+    upstream_h = _align_canvas(effective.get("height"))
+    asset_w = _align_canvas(asset.get("width"))
+    asset_h = _align_canvas(asset.get("height"))
+
+    if want_width and want_height:
+        width, height, origin = want_width, want_height, "导演节点"
+    elif asset_w and asset_h:
+        # 源视频自动切分：没在 Director 上指定就跟随源片。
+        width, height, origin = asset_w, asset_h, "源视频"
+    else:
+        width, height, origin = upstream_w, upstream_h, "H3 链路设置"
+
+    if not (width and height):
+        raise ValueError(
+            "画布尺寸无效：H3 链路设置 没给到宽高（width=%r height=%r），"
+            "导演节点上的输出宽高也是 0。把 H3 链路设置 的 width/height 接上，"
+            "或者直接在导演节点上填两个 32 的倍数。"
+            % (effective.get("width"), effective.get("height")))
+
+    # raw 取**对齐前**的值：导演节点填了什么就报什么，才能看出 1000 → 992。
+    raw_w = int(raw_want_w or effective.get("width") or asset.get("width") or 0)
+    raw_h = int(raw_want_h or effective.get("height") or asset.get("height") or 0)
+    if (raw_w, raw_h) != (width, height) and raw_w > 0 and raw_h > 0:
+        notes.append("画布 %d×%d 已对齐到 %d×%d（H3 要求两条边都是 %d 的倍数，"
+                     "否则采样时会崩在 patchify）。"
+                     % (raw_w, raw_h, width, height, CANVAS_STRIDE))
+
+    area = width * height
+    if area > TRAINED_AREA_PIXELS:
+        notes.append("画布 %d×%d = %.2f MP，超出 H3 训练覆盖的 %.2f MP —— 能渲，"
+                     "但构图与人体质量会走样。0.4–0.8 MP 是 24fps H3 的甜点区。"
+                     % (width, height, area / 1e6, TRAINED_AREA_PIXELS / 1e6))
+
+    effective["width"], effective["height"] = width, height
+    effective["canvas_origin"] = origin
+    return effective, notes
 
 
 def _pool_labels(slots, ref_classify):
@@ -521,7 +662,7 @@ def _shot_plan(seconds, replay_in=0.0, tail_out=0.0,
     剧本里没有，模型只能自由发挥 → 成片"乱说话"），末段又因为 ``is_last``
     把回放归零、少生成 1.6 秒（提示词时间码写到 8.6s 却只给 7s，动作被挤压）。
     """
-    length = generation_length(seconds_to_frames(seconds))
+    length = chain_length(seconds_to_frames(seconds))
     # 回放要的是「至少 1.6 秒」，所以向上对齐到 17k+5：1.6s = 38 帧向下取是
     # 22 帧（0.92s），等于把规范要求的回放窗口砍掉一半。向上取到 39 帧
     # （1.625s）才能完整保留，而且这个值传给 H3RenderSegment 后再被
@@ -543,7 +684,12 @@ def _shot_plan(seconds, replay_in=0.0, tail_out=0.0,
     if duration_is_new_content and replay:
         gen_seconds = min(gen_seconds + float(replay), 15.0)
     requested = seconds_to_frames(gen_seconds)
-    frames = generation_length(requested)
+    # ★ 段长走双时钟网格（39+51n），不是 17k+5：段长不落在 3 的倍数上时，
+    #   模型的音频潜在只能四舍五入，段内音画差最多 12.5 ms，且每段同号
+    #   逐段累积。``replay_frames`` / ``tail_frames`` 走的仍是
+    #   ``guide_length_up``（17k+5）—— 那是**锚点窗口**，1.6s → 39 帧已经
+    #   同时在两张网格上，不需要也不应该被抬到 90 帧。
+    frames = chain_length(requested)
     new_frames = max(0, frames - replay_frames)
     return {
         "replay_in": replay,
@@ -1587,6 +1733,31 @@ class H3DirectorNode(io.ComfyNode):
                             "边车（所以换这个开关不会让既有会话重渲）。要整条换成无损，"
                             "用「选择渲染段」把要补的段重渲一遍。\n\n"
                             "默认关是刻意的：它改变成片本身，不该由一次升级替你决定。"),
+                # ★ 输出规格（2026-10-18）：Director 自己持有画布。**必须挂末尾**
+                #   —— widget 顺序就是已存工作流 widgets_values 的对齐顺序。
+                #   默认 0 = 跟随上游，既有工作流与既有会话缓存键逐比特不变。
+                #   面板「输出规格」那一行现在直接写这两个控件（以前是代理写上游
+                #   ResolutionSelector，Director 自己一个画布控件都没有）。
+                io.Int.Input(
+                    "width", display_name="输出宽度（0=跟随上游）", default=0,
+                    min=0, max=16384, step=CANVAS_STRIDE, optional=True,
+                    advanced=True,
+                    tooltip="成片画布宽度。0 = 跟随「H3 链路设置」（或源视频）。\n\n"
+                            "会自动对齐到 32 的倍数 —— H3 的 VAE 先 ÷16 再 2×2 "
+                            "patchify，非 32 倍数会在采样中途崩在 patchify_video，"
+                            "报错点离根因很远，所以在这里就地拦下。\n\n"
+                            "宽和高要么都填、要么都留 0：只填一个是最容易烧掉一整条"
+                            "链的输入，两边口径不一致又不会报错。\n\n"
+                            "⚠ 画布宽高在 segment_key 里，改了必然全片重渲。"),
+                io.Int.Input(
+                    "height", display_name="输出高度（0=跟随上游）", default=0,
+                    min=0, max=16384, step=CANVAS_STRIDE, optional=True,
+                    advanced=True,
+                    tooltip="成片画布高度。0 = 跟随「H3 链路设置」（或源视频）。\n\n"
+                            "H3 只在 1:4 – 4:1、约 1.03 MP 以内训练过：横屏常用 "
+                            "960×544，竖屏 544×960，0.4–0.8 MP 是 24fps 的甜点区。"
+                            "超出会提示，但不会拦 —— 能渲，坏的是构图与人体结构。\n\n"
+                            "⚠ 与「输出宽度」同：两个要么都填要么都留 0。"),
             ],
             outputs=[
                 io.String.Output(
@@ -1614,7 +1785,8 @@ class H3DirectorNode(io.ComfyNode):
                 build_timeline=True, export_segments=False, ref_images=None,
                 ref_image_size=REF_SIZE_MATCH, pack_info="",
                 ref_classify="", repair_segment=0, run_segments="",
-                refine=None, face_refine=None, seg_cache_codec="h264"):
+                refine=None, face_refine=None, seg_cache_codec="h264",
+                width=0, height=0):
         mode = _source_mode(source)
         node_id = _node_id(cls)
 
@@ -1676,7 +1848,13 @@ class H3DirectorNode(io.ComfyNode):
         # 剧本名（落盘第一层）。控件没处填，取分镜 JSON 的 script_name / project：
         # PACK 解析器把头部 Project 原样写在那里，所以中文片名直接成了文件夹名。
         script_name = _script_name_from(asset)
-        settings = _settings_for_script(settings or {}, asset)
+        # ★ 输出规格收口（2026-10-18）：以前这里是 `_settings_for_script`，它会
+        #   **无条件**用源视频的宽高覆盖 settings —— 用户在上游 ResolutionSelector
+        #   选什么都不生效，报告里只有一句「跟随源视频」。现在由 `_resolve_canvas`
+        #   按「导演节点 > 源视频 > H3 链路设置」裁决，并把裁决结果与 32 对齐写进
+        #   canvas_notes。Director 控件留 0 时行为与以前逐比特一致。
+        settings, canvas_notes = _resolve_canvas(settings or {}, width, height,
+                                                 asset)
         # The session name is a director decision, not a graph-topology one:
         # H3RenderSegmentNode reads settings["session_name"] when chain_state is
         # None, so the widget only takes effect if it lands here.
@@ -1757,6 +1935,10 @@ class H3DirectorNode(io.ComfyNode):
             # collect_slots 已经按槽号裁到 9 了，这里只是兜底提示。
             warnings.append("参考图接了 %d 张，超过 H3 上限 %d 张，多余的会被忽略"
                             % (len(raw_slots), MAX_REFERENCE_IMAGES))
+        # 画布宽高比：核心的 adapt_canvas 什么都收，H3 却只在 1:4–4:1 训练过。
+        canvas_range_note = _canvas_range_note(settings)
+        if canvas_range_note:
+            warnings.append(canvas_range_note)
         pool_labels = _pool_labels(raw_slots, ref_classify)
         ref_pool, ref_rows = _prepare_ref_images(
             raw_slots, ref_image_size, settings, labels=pool_labels)
@@ -1942,16 +2124,29 @@ class H3DirectorNode(io.ComfyNode):
             "目录   %s" % sess.dir,
             "来源   %s" % ("源视频自动切分" if mode == "video" else "分镜JSON"),
         ]
+        # ★ 画布来源必须写出来（2026-10-18）：`_resolve_canvas` 早就算好了
+        #   canvas_origin / canvas_notes，但以前只赋值、没人消费 —— 用户没法从
+        #   报告里确认「导演节点到底有没有赢」，只能靠成片像素反推。
+        #   同时修掉一句假话：源视频模式原本硬写「（跟随源视频）」，导演节点
+        #   覆盖时这句话是错的，会把人往错的方向引。
+        _canvas_w = int(settings.get("width") or 0)
+        _canvas_h = int(settings.get("height") or 0)
+        _canvas_src = {
+            "导演节点": "导演节点指定，压过上游",
+            "源视频": "跟随源视频",
+            "H3 链路设置": "跟随 H3 链路设置",
+        }.get(str(settings.get("canvas_origin") or ""), "来源未标注")
         if split_meta is not None:
             header.append("源片   %s" % split_meta["path"])
             header.append("切分   %s · %.2ffps · %d 帧 → %d 个镜头"
                           % (split_meta["method"], split_meta["fps"],
                              split_meta["total_frames"], len(shots)))
-            header.append("分辨率 %s x %s（跟随源视频）"
-                          % (settings.get("width"), settings.get("height")))
+            header.append("分辨率 %d x %d（%s）" % (_canvas_w, _canvas_h, _canvas_src))
         else:
-            header.append("分辨率 %s x %s @ %dfps"
-                          % (settings.get("width"), settings.get("height"), FPS))
+            header.append("分辨率 %d x %d @ %dfps（%s）"
+                          % (_canvas_w, _canvas_h, FPS, _canvas_src))
+        for _canvas_note in canvas_notes:
+            header.append("画布   %s" % _canvas_note)
         header.append("模式   %s" % ("续接会话：已有 %d 段，本次从第 %d 段开始"
                                      % (start_index, start_index + 1) if chain
                                      else "新建会话"))
@@ -2061,6 +2256,26 @@ class H3DirectorNode(io.ComfyNode):
             if plan["frames"] <= MIN_SHOT_FRAMES and seconds > 0:
                 warnings.append("分镜 %d 只有 %d 帧，接近 H3 下限，建议加长"
                                 % (index + 1, plan["frames"]))
+            # ★ 训练上限：核心的 length 只到 3600，362 以上它照收不误。
+            if plan["frames"] > MAX_LENGTH:
+                warnings.append(
+                    "分镜 %d：%d 帧（%.2fs）超过 H3 训练上限 %d 帧（%.2fs）—— 能渲，"
+                    "但这段的动作与口型没有训练保障。要更长请拆成两段用回放接起来。"
+                    % (index + 1, plan["frames"], plan["frames"] / float(FPS),
+                       MAX_LENGTH, MAX_LENGTH / float(FPS)))
+            # ★ 音频时钟：17k+5 只管视频网格，音频潜在是 40 Hz。
+            #   不是 3 的倍数时这一段音频与画面就差几毫秒，且每道接缝都差，
+            #   逐段累积到能听出来（lip-sync 的容忍度约 100ms）。
+            if not is_last and not on_both_clocks(plan["frames"]):
+                nearest = nearest_chain_length(plan["frames"])
+                warnings.append(
+                    "分镜 %d：%d 帧满足 17k+5，但不是 3 的倍数 —— 音频 40 Hz 只能落 "
+                    "%d 步，与画面差 %.1f ms，每道接缝都差这么多并逐段累积。"
+                    "最近的合法长度是 %d 帧（%.2fs）。"
+                    % (index + 1, plan["frames"],
+                       audio_latent_frames(plan["frames"]),
+                       abs(audio_clock_error_ms(plan["frames"])),
+                       nearest, nearest / float(FPS)))
             if len(images) > MAX_REFERENCE_IMAGES:
                 warnings.append("分镜 %d 用了 %d 张参考图，H3 只认前 %d 张"
                                 % (index + 1, len(images), MAX_REFERENCE_IMAGES))

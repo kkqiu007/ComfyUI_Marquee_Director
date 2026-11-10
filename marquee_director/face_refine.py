@@ -92,7 +92,8 @@ _DETECTOR_CACHE: dict = {}
 
 
 def list_detectors():
-    """``models/ultralytics/bbox/`` 里可用的 YOLO 权重。拿不到就给个空列表。"""
+    """``models/ultralytics/bbox/`` 里可用的 YOLO 权重。拿不到就回退默认名 ——
+    下拉必须非空且默认值在选项内，否则前端控件串值。"""
     import folder_paths
 
     names = set()
@@ -104,12 +105,12 @@ def list_detectors():
     if not names:
         base = getattr(folder_paths, "models_dir", None)
         if not base:
-            return []
+            return ["face_yolov8m.pt"]
         sub = os.path.join(base, "ultralytics", "bbox")
         try:
             names.update(n for n in os.listdir(sub) if n.endswith(".pt"))
         except OSError:
-            return []
+            return ["face_yolov8m.pt"]
     out = sorted(n for n in names if n.endswith(".pt"))
     return out or ["face_yolov8m.pt"]
 

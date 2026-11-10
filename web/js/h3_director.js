@@ -1052,7 +1052,6 @@ const CSS = `
 .h3d-ruler { position: relative; display: flex; gap: 3px;
              flex: none; height: 22px; margin: 0 0 3px; min-width: 0;
              border-radius: var(--h3d-r-md);
-             border: 1px solid #2e2e2e;
              overflow: hidden;
              /* 玻璃材质 = 与 .h3d-glass 工具类同一套令牌 */
              background: var(--h3d-glass-bg);
@@ -1065,10 +1064,14 @@ const CSS = `
 /* specular rim：与 .h3d-ref::after 同款手法 —— 用 inset box-shadow 而不是
    border，才能只画在内侧、且不被上面的 overflow:hidden 影响。
    上边亮、下边暗 = 光从上方来 = 玻璃的"厚度感"。
-   z-index 3：压在所有刻度之上（刻度是 1/2 层），但不吃指针事件。 */
+   z-index 3：压在所有刻度之上（刻度是 1/2 层），但不吃指针事件。
+   ★ 那条 1px 描边也画在这里，**不能**写成 .h3d-ruler 的 border：border 会把
+     格子整体右推 1px，而 .h3d-segs 没有 border —— 实测标尺每一格都比它下方
+     的缩略图偏右 1px，段分界竖线于是压不到缩略图之间那条缝上。inset shadow
+     不占布局，两行才逐像素同列。 */
 .h3d-ruler::after { content: ""; position: absolute; inset: 0; z-index: 3;
                     border-radius: inherit; pointer-events: none;
-                    box-shadow: var(--h3d-rim); }
+                    box-shadow: inset 0 0 0 1px #2e2e2e, var(--h3d-rim); }
 .h3d-rul-cell { position: relative; flex: 0 0 auto; min-width: 0; height: 100%; }
 /* 该段真实时长（new+handoff）：格子右上角，与段块右下 .dur 的"新增秒数"互补。
    段号取消后顶部那条让它独占，只在格子够宽时出现 */
@@ -2231,6 +2234,14 @@ function fmtRulerLong(sec) {
    ★ 字段缺失（老 PACK / 后端没给）时退回 new_seconds，再没有就退回 1s，
      保证 flexGrow 永远是个正数，不会出现 0 宽段块。 */
 function segTotalSec(seg) {
+  /* ★ 优先用后端下发的 gen_seconds —— 它才是「这一段落盘的视频有多长」的
+     权威值：prompt_pack._build_segment 把 gen 按 17k+5 帧与音频 40Hz 两张
+     网格吸附过（chain_seconds），new_seconds 是吸附后反算的。正常情况下
+     new + handoff 与它逐段相等（实测 9 段稿子两边都是 99.625s），但解析层
+     一旦改网格口径，前端自己再加一遍就会和真实帧数错开 —— 标尺要「对应
+     下方缩略图」，就必须和后端用同一个数。 */
+  const gen = Number(seg && seg.gen_seconds) || 0;
+  if (gen > 0) return gen;
   const nw = Number(seg && seg.new_seconds) || 0;
   const ho = Number(seg && seg.handoff_seconds) || 0;
   return nw + ho > 0 ? nw + ho : nw > 0 ? nw : 1;
@@ -3249,15 +3260,17 @@ function buildPackPanel(node, state) {
     tag.textContent = "解析中…";
     tag.className = "h3d-tag";
     try {
-      // 顺手把画布上 H3PromptPackParser 的 session_name 控件值带过去：
-      // 后端算会话名时「控件 > PACK 头部 Project」这个顺序必须和那个节点
-      // 一致，否则面板查的会话和落盘的会话会是两个名字。
-      const pkNode = findNodeByClass("H3PromptPackParser");
-      const pkSess = readStr(pkNode, "session_name", "");
+      // 把画布上 H3PromptPackParser 的**全部解析参数**带过去（不只是会话名）：
+      //   · session_name —— 后端算会话名时「控件 > PACK 头部 Project」这个顺序
+      //     必须和那个节点一致，否则面板查的会话和落盘的会话会是两个名字；
+      //   · default_duration / language / auto_fix / pack_override —— 节点
+      //     execute 就是按它们解析的，预览不带上就等于两边各算一套（详见
+      //     h3ParseArgs 的注释）。
+      const pkArgs = h3ParseArgs();
       const res = await api.fetchApi("/h3/pack_preview", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text, session_name: pkSess }),
+        body: JSON.stringify(Object.assign({ text: text }, pkArgs)),
       });
       const data = await res.json();
       if (!data.ok) throw new Error(data.error || "解析失败");
@@ -3559,6 +3572,58 @@ function buildOutputPanel(node, state) {
     return all[0];
   };
 
+  /* ★★ 导演节点自己的画布控件（2026-10-18 后端新增 width / height）。
+   *
+   *   为什么这一层必须存在：上游那条 ResolutionSelector → H3 链路设置 的路
+   *   看着是通的，但它有两个**静默失效**的口子：
+   *     · 链路设置的 width/height 一旦接了线，控件值在运行时就被连线覆盖，
+   *       面板直写控件等于写进一个没人读的地方（面板显示变了、成片没变）；
+   *     · 连线识别一旦在某个前端版本上失手，面板会掉进 "direct" 分支，
+   *       同样写的是被连线占用的控件。
+   *   导演节点自己的 width/height 不接线、后端 `_resolve_canvas` 又把它排在
+   *   第一优先级，所以写这里一定进成片 —— 这才是「真控制」。
+   *
+   *   返回 null = 运行中的后端还没有这两个控件（旧进程），调用方回落到旧逻辑，
+   *   所以这份 JS 在新旧后端下都不会炸。 */
+  function dirWH() {
+    const w = findWidget(node, "width");
+    const hh = findWidget(node, "height");
+    if (!w || !hh) return null;
+    const nw = Number(w.value) || 0;
+    const nh = Number(hh.value) || 0;
+    return { w: nw, h: nh, owned: nw > 0 && nh > 0 };
+  }
+
+  /** 宽高 → 下拉里最接近的画幅键；对不上返回 ""（自定义）。
+   *
+   *  ★ 容差必须是**相对**的（2026-10-18 白盒自查）：32 对齐会把比例挤偏，
+   *    16:9 在 0.4MP 下对齐成 864×480，比值 1.8 而 16:9 是 1.7778，
+   *    绝对差 0.022 —— 旧的 0.02 绝对容差会把刚选过的 16:9 判成「自定义」，
+   *    下拉自己跳走，用户会以为面板没记住。相对差只有 1.25%。
+   *    4% 不会串档：相邻预设（4:3 与 3:2）相对差 12.5%，远大于它。 */
+  function aspectOf(w, hh) {
+    if (!w || !hh) return "";
+    const ratio = w / hh;
+    let best = "", diff = 0.04;
+    Object.keys(ASPECT_RATIOS).forEach((k) => {
+      const r = ASPECT_RATIOS[k];
+      const want = r[0] / r[1];
+      const d = Math.abs(want - ratio) / want;
+      if (d < diff) { diff = d; best = k; }
+    });
+    return best;
+  }
+
+  /** 下拉里没有这个键时补一个临时项（自定义画幅 / 非标准比例）。 */
+  function ensureOption(sel, key) {
+    if (!sel || !key) return;
+    if (Array.prototype.some.call(sel.options, (o) => o.value === key)) return;
+    const o = document.createElement("option");
+    o.value = key;
+    o.textContent = key;
+    sel.appendChild(o);
+  }
+
   let mode = "";
   let selAspect = null, inMp = null, outRes = null;   // 模式 A：ResolutionSelector
   let inW = null, inH = null;                         // 模式 B：直接写画布宽高
@@ -3572,6 +3637,10 @@ function buildOutputPanel(node, state) {
   }
 
   function detectMode() {
+    // 导演节点持有画布控件时永远走 "director"：后端 _resolve_canvas 的优先级
+    // 也是「导演节点 > 源视频 > 链路设置」，面板必须与之一致，否则面板显示的
+    // 是一个数、成片是另一个数。
+    if (dirWH()) return "director";
     const r = rsNode(), c = csNode();
     if (!c) return r ? "selector" : "none";
     return selectorFeedsChain(r, c) ? "selector" : "direct";
@@ -3585,7 +3654,9 @@ function buildOutputPanel(node, state) {
     resRow.appendChild(h("span", "lb", "分辨率"));
     selAspect = inMp = outRes = inW = inH = null;
 
-    if (next === "selector") {
+    if (next === "selector" || next === "director") {
+      // director 与 selector 共用同一套形态（画幅下拉 + 像素量 → 结果），
+      // 只是写回目标不同：director 写节点自己的 width/height。
       selAspect = document.createElement("select");
       selAspect.className = "h3d-in is-sel";
       Object.keys(ASPECT_RATIOS).forEach((k) => {
@@ -3600,7 +3671,9 @@ function buildOutputPanel(node, state) {
       inMp.type = "number";
       inMp.className = "h3d-in is-num";
       inMp.min = "0.1"; inMp.max = "16"; inMp.step = "0.1";
-      inMp.title = "目标总像素量（ResolutionSelector 的 megapixels）";
+      inMp.title = next === "director"
+        ? "目标总像素量（写进导演节点的输出宽高，32 对齐）"
+        : "目标总像素量（ResolutionSelector 的 megapixels）";
       resRow.appendChild(inMp);
       resRow.appendChild(h("span", "unit", "MP"));
       resRow.appendChild(h("span", "arrow", "→"));
@@ -3667,6 +3740,21 @@ function buildOutputPanel(node, state) {
   /* ---- 把面板上的值写回图上的节点 ---- */
   function pushRes() {
     const r = rsNode(), c = csNode();
+    if (mode === "director") {
+      const aspect = selAspect.value || "";
+      // 选中的是「自定义」临时项（图上是非标准比例）—— 没有可写的算式，
+      // 等用户主动挑一个标准比例。
+      if (!ASPECT_RATIOS[aspect]) { render(); return; }
+      const mp = Math.min(16, Math.max(0.1, Number(inMp.value) || 0.4));
+      // 32 是硬要求：H3 的 VAE ÷16 后再 2×2 patchify，非 32 倍数会在采样
+      // 中途崩在 patchify_video。后端 _resolve_canvas 也会再对齐一次，
+      // 这里先对齐只是为了让面板显示的数就是最终落盘的那个数。
+      const [w, hh] = calcResolution(aspect, mp, 32);
+      setWidget(node, "width", w);
+      setWidget(node, "height", hh);
+      render();
+      return;
+    }
     if (mode === "selector" && r) {
       const aspect = selAspect.value || DEFAULT_ASPECT;
       const mp = Math.min(16, Math.max(0.1, Number(inMp.value) || 0.5));
@@ -3689,7 +3777,103 @@ function buildOutputPanel(node, state) {
     const r = rsNode(), c = csNode(), p = pkNode();
 
     // ---- 分辨率 ----
-    if (mode === "selector" && r) {
+    if (mode === "director") {
+      /* 生效画布 = 导演节点填了就用它，否则回落到上游。
+       * 这与后端 _resolve_canvas 的优先级逐条对应，面板显示的数就是成片的数。 */
+      const d = dirWH();
+      let w = 0, hh = 0, owned = false, src = "";
+      if (d && d.owned) {
+        w = d.w; hh = d.h; owned = true; src = "导演节点";
+      } else if (r) {
+        const [rw, rh] = calcResolution(readStr(r, "aspect_ratio", DEFAULT_ASPECT),
+          readNum(r, "megapixels", 1), readNum(r, "multiple", 32));
+        w = rw; hh = rh; src = "上游 ResolutionSelector";
+      } else if (c) {
+        w = readNum(c, "width", 0); hh = readNum(c, "height", 0);
+        src = "H3 链路设置";
+      }
+
+      /* ★ 面板必须按 32 对齐后再显示（2026-10-18 白盒自查）：后端
+       *   `_resolve_canvas` 会把画布就近取整到 32 的倍数，而**上游
+       *   ResolutionSelector 的 multiple 可能是 8**（默认就是 8）—— 9:16 0.4MP
+       *   在 multiple=8 下算出来是 432×768，432 不是 32 的倍数，后端会渲成
+       *   448×768。不在这里对齐，面板就会显示一个成片永远不会出现的尺寸。
+       *   原生控件里手填的非 32 值同理。 */
+      const rawW = w, rawH = hh;
+      if (w && hh) {
+        w = Math.max(32, Math.round(w / 32) * 32);
+        hh = Math.max(32, Math.round(hh / 32) * 32);
+      }
+      const snapped = !!(w && hh && (w !== rawW || hh !== rawH));
+
+      const key = aspectOf(w, hh);
+      const custom = (w && hh && !key) ? ("自定义 " + w + "×" + hh) : "";
+      if (!isFocused(selAspect)) {
+        const want = key || custom;
+        if (want) { ensureOption(selAspect, want); selAspect.value = want; }
+      }
+      if (!isFocused(inMp) && w && hh) {
+        inMp.value = (w * hh / (1024 * 1024)).toFixed(1);
+      }
+
+      outRes.textContent = (w && hh) ? (w + " × " + hh) : "— × —";
+      outRes.className = (w && hh) ? "h3d-out" : "h3d-out is-mute";
+      outRes.title = "画布来源：" + (src || "未解析");
+
+      /* 与 PACK 声明的画幅对账：对不上就点一下按 PACK 对齐（和 selector 分支
+       * 同一套交互）。没分歧时，owned 状态下点一下 = 清回 0（跟随上游）。 */
+      const packRaw = String((state.packData?.header?.aspect) || "").trim();
+      const hit = guessAspect(packRaw);
+      const mismatch = !!(hit && key && hit !== key);
+
+      let note;
+      if (owned) {
+        note = "画布由导演节点控制（" + w + "×" + hh + "），压过上游";
+      } else {
+        note = "跟随上游 " + (w && hh ? (w + "×" + hh + " · " + src) : "")
+          + " —— 改比例或像素量即由导演节点接管";
+      }
+      let warn = false;
+      if (w && hh) {
+        const ratio = w / hh;
+        if (ratio < 1 / 4 || ratio > 4) {
+          note += " · 比例超出 H3 训练区间（1:4–4:1），构图与人体会走样";
+          warn = true;
+        } else if (w * hh > 768 * 1344) {
+          note += " · " + (w * hh / 1048576).toFixed(2)
+            + " MP 超出训练面积（约 1.03 MP），质量会走样";
+          warn = true;
+        }
+      }
+      if (mismatch) {
+        note += " · PACK 声明 " + packRaw.split("/")[0].trim() + " ✗ 点此对齐";
+        warn = true;
+      } else if (owned) {
+        note += " · 点此恢复跟随上游";
+      }
+      if (snapped) {
+        note += " · 已按 32 对齐（" + rawW + "×" + rawH + " → " + w + "×" + hh + "）";
+      }
+
+      noteRes.textContent = note;
+      noteRes.className = "h3d-note"
+        + ((owned || mismatch) ? " is-link" : "")
+        + (warn ? " is-warn" : "");
+      noteRes.title = mismatch ? "点一下按 PACK 的画幅重算画布"
+        : (owned ? "点一下把输出宽高清零 = 跟随上游" : "");
+      noteRes.onclick = mismatch ? () => {
+        ensureOption(selAspect, hit);
+        selAspect.value = hit;
+        pushRes();
+      } : (owned ? () => {
+        setWidget(node, "width", 0);
+        setWidget(node, "height", 0);
+        render();
+      } : null);
+
+      tag.textContent = (w && hh) ? (w + "×" + hh) : "";
+      tag.className = "h3d-tag " + ((w && hh) ? "is-ok" : "");
+    } else if (mode === "selector" && r) {
       const aspect = readStr(r, "aspect_ratio", DEFAULT_ASPECT);
       const mp = readNum(r, "megapixels", 1);
       const mul = readNum(r, "multiple", 8);
@@ -4691,6 +4875,28 @@ function buildTimelinePanel(node, state) {
   const PX_PER_SEC = 18;   // 1.0  zoom 时每秒占 18px
   const MIN_SEG_W = 56;    // 段块最窄不要低于 56px，保证缩略图/段号可读
   let timelineZoom = 1.0;
+  /* ★ 2026-10-24：pack 换版本时自动把整条时间轴铺进视口（用户定版：自适应铺满）。
+   *   以前 zoom 恒为 1.0：9 段 99.6s = 1793px，而轨道只有 ~1000px，右端那个
+   *   总时长标签（"99.6s · 成片 86.6s"）默认在视口外 —— 拿标尺去对 pack 头部
+   *   的「Total duration」时永远对不上，看上去就是"标尺时长没联动剧本时长"。
+   *   触发条件收紧到**分镜身份变化**（段数或总生成时长变了）且用户没手动缩放
+   *   过；滚轮 / 滑块 / ±按钮一旦碰过就再也不抢用户的视图，「适配」按钮则把
+   *   主动权交回来。实测这份 9 段稿子 fit 出 zoom≈0.55、最窄段 78px，仍高于
+   *   MIN_SEG_W=56，不会触发等宽钳制、比例不失真。 */
+  let _userZoomed = false;
+  let _fittedSig = "";
+  function maybeAutoFit() {
+    const segs = state.segments();
+    if (!segs.length) return;
+    const total = segs.reduce((a, s) => a + Math.max(0.55, segTotalSec(s)), 0);
+    const sig = segs.length + ":" + total.toFixed(3);
+    if (sig === _fittedSig) return;
+    if (!(timelineTrack.clientWidth > 0)) return;   // 还没布局：等下一次重绘再试
+    _fittedSig = sig;
+    if (_userZoomed) return;
+    // 放到本轮重绘之后：fitZoom→setZoom→render(true) 不能嵌在 renderInner 里跑
+    setTimeout(() => { try { fitZoom(); } catch (e) { /* 折叠/卸载中就算了 */ } }, 0);
+  }
   const zoombar = h("span", "h3d-zoombar");
   const btnZoomOut = h("button", "h3d-btn", "−");
   btnZoomOut.title = "缩小时间线";
@@ -4896,16 +5102,34 @@ function buildTimelinePanel(node, state) {
   function fitZoom() {
     const segs = state.segments();
     if (!segs.length) return;
-    const totalGrow = segs.reduce((a, s) => a + Math.max(0.55, segTotalSec(s)), 0);
-    const gaps = (segs.length - 1) * 3;
+    const lens = segs.map((s) => Math.max(0.55, segTotalSec(s)));
+    const totalGrow = lens.reduce((a, b) => a + b, 0);
+    // gap 数取 **N** 而不是 N-1：标尺行在 N 个格子之后还有一个 0 宽的
+    // .h3d-rul-end（总时长标签），它同样吃一个 3px gap。按 N-1 算会让标尺比
+    // fit 目标宽 3px，末端标签正好被挤出视口一截 —— 而它恰恰是用户要对账的数。
+    const gaps = segs.length * 3;
     const avail = (timelineTrack.clientWidth || 300) - gaps;
-    const z = avail / Math.max(1, totalGrow * PX_PER_SEC);
-    setZoom(Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, z)), 0);
+    const zFit = avail / Math.max(1, totalGrow * PX_PER_SEC);
+    /* ★ 下限不是 ZOOM_MIN，而是"最窄那段刚好不被等宽钳制"的 zoom。
+     *   segWidthFor 有 MIN_SEG_W=56 下限：一旦某段的 gen*pxPerSec 低于 56，
+     *   它就被撑到 56px，这一格的 秒→px 比例与邻格不同 —— 标尺从"等比时间轴"
+     *   退化成"分段等比"，拿两格的宽度比时长就对不上了（实测 462px 轨道上
+     *   fit 到 ZOOM_MIN=0.35 时 8s 段 56px=7.0px/s、12.25s 段 77.2px=6.3px/s）。
+     *   宁可留横向滚动，也不能让比例失真：用户要拿标尺对 pack 的时长。
+     *   轨道够宽时（~1000px，9 段 99.6s → z≈0.54）这个下限不起作用，整条轴
+     *   照样一眼铺满。 */
+    const minGen = Math.min.apply(null, lens);
+    const zNoClamp = MIN_SEG_W / (PX_PER_SEC * Math.max(0.001, minGen));
+    _userZoomed = false;      // 主动"适配"= 把自动铺满的主动权交还给面板
+    setZoom(Math.max(ZOOM_MIN, zNoClamp, Math.min(ZOOM_MAX, zFit)), 0);
   }
-  btnZoomOut.addEventListener("click", () => zoomBy(1 / 1.15, 0.5));
-  btnZoomIn.addEventListener("click", () => zoomBy(1.15, 0.5));
+  // ★ 以下四条是**用户手动**改视图的入口：碰过之后自动铺满就让位，
+  //   免得用户刚调好的缩放被下一次重绘抢回去。
+  btnZoomOut.addEventListener("click", () => { _userZoomed = true; zoomBy(1 / 1.15, 0.5); });
+  btnZoomIn.addEventListener("click", () => { _userZoomed = true; zoomBy(1.15, 0.5); });
   btnZoomFit.addEventListener("click", fitZoom);
   zoomSlider.addEventListener("input", () => {
+    _userZoomed = true;
     const v = Number(zoomSlider.value) / 100;
     setZoom(v, 0.5);
   });
@@ -4918,6 +5142,7 @@ function buildTimelinePanel(node, state) {
       e.preventDefault();
       return;
     }
+    _userZoomed = true;
     // 缩放：以光标在轨道内的位置为锚点
     const rect = timelineTrack.getBoundingClientRect();
     const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / (rect.width || 1)));
@@ -4964,6 +5189,8 @@ function buildTimelinePanel(node, state) {
   let panelDriftHint = "";
   // 标尺上的动态游标元素（paintRuler 每次重建时换新，详见其后的注释）
   let rulerCursor = null;
+  // 三行的 px↔秒 映射表（paintRuler 量完真实几何后重建，详见 buildRulerMap）
+  let _rulerMap = null;
 
   /* ---- 小马：只朝一个方向跑，并且**只在当前这一段的轨道区间里跑** ---- */
   /* 以前是 ping-pong（撞到边界就掉头），看起来像"来回踱步"；后来改成一律
@@ -5291,10 +5518,10 @@ function buildTimelinePanel(node, state) {
      宽度随节点宽度变，所以挂到 _railRO（rail 尺寸变化）与每次 render()。 */
   function paintRuler() {
     if (!ruler) return;
-    if (bd.classList.contains("collapsed")) return;   // 折叠时不量、不画
+    if (bd.classList.contains("collapsed")) { _rulerMap = null; return; }   // 折叠时不量、不画
     ruler.replaceChildren();
     const segs = state.segments();
-    if (!segs.length) return;
+    if (!segs.length) { _rulerMap = null; return; }
     // ★ 与段块宽度同一个口径、同一个下限：new_seconds + handoff_seconds
     //   （段真实时长），且和 render() 里的 grow 逐字一致，否则尺子和缩略图
     //   会错开几像素。
@@ -5328,7 +5555,12 @@ function buildTimelinePanel(node, state) {
       // 段界秒数（11.0 / 23.6 / 36.2…）不是整数，写出来既不好读又容易
       // 和下面的整数主刻度（10s / 20s / 30s）贴在一起变成新"乱码"。
       // 它唯一的任务就是"对齐下面的缩略图分界"。
-      rc.appendChild(h("i", "h3d-rul-t0"));
+      // ★ 左移半个 gap（1.5px）才真的压在两格缩略图中间那条缝上：格子是从
+      //   缝的**右沿**起算的。第 1 格例外 —— 它左边没有缝，而 .h3d-ruler 是
+      //   overflow:hidden，负值会被裁掉，所以留在 0（那正好是时间轴原点）。
+      const t0 = h("i", "h3d-rul-t0");
+      if (i > 0) t0.style.left = "-1.5px";
+      rc.appendChild(t0);
       if (drawMinor && cellW >= 14) {
         for (let t = Math.ceil(start / minor) * minor; t < start + len - 1e-6;
              t += minor) {
@@ -5368,29 +5600,82 @@ function buildTimelinePanel(node, state) {
     rulerCursor = h("div", "h3d-rul-cursor");
     rulerCursor.appendChild(h("span", null, ""));
     ruler.appendChild(rulerCursor);
+    // 格子全部落位之后再量真实几何，建 px↔秒 映射表（游标定位与秒数反查用）。
+    buildRulerMap(lens);
+    // ★ 游标元素每次重绘都是**新建**的，left 与标签都是空的 —— 不立刻按小马
+    //   当前位置摆一次，它就停在标尺原点、秒数也不显示，要等小马下一次移动才
+    //   归位。空闲态尤其明显：调用顺序是 setPony(false) 先跑、paintRuler() 后
+    //   跑（见 _railRO 与 render 的短路分支），正好把归位那一下漏在新元素之前。
+    _cursorSec = -1;                 // 标签随元素一起换了，缓存必须作废
+    try { paintRulerCursor(_x); } catch (e) { /* 小马还没挂上就算了 */ }
   }
 
-  /** 把动态游标摆到 ``x``（rail-line 全局 px，三线坐标同源）。
+  /* 三行的 px↔秒 映射表。★ 为什么必须**实测布局**、不能拿公式算：
+   *   · 标尺与段块行有 gap:3px，而轨道行（.h3d-rail-line）**没有** gap ——
+   *     小马的 x 是轨道坐标，直接摆进标尺就每段偏左 3px。实测一份 9 段的
+   *     稿子累积到 −24px，按 18px/s 就是 **−1.33s**，段数越多偏得越远；
+   *     这正是"标尺上的时间没和参考缩略图对应"的成因。
+   *   · segWidthFor() 有 MIN_SEG_W=56px 下限：窄段被撑宽后，这一格里"1 秒
+   *     占多少 px"就不再等于 PX_PER_SEC×zoom，旧的均匀除法 x/pxPerSec 必然
+   *     算错秒数（段多时 fitZoom 会一路压到 ZOOM_MIN=0.35，8s 段只有 50.4px
+   *     → 被撑到 56px，实测会进入这个分支）。
+   *   · 标尺是 position:relative 的容器，绝对定位的游标以它的 padding box 为
+   *     原点；子格的 offsetLeft 也是同一个原点，所以两者天然可比。
+   * 取 offsetLeft / offsetWidth 的真实值，CSS 以后怎么改都跟得上。 */
+  function buildRulerMap(lens) {
+    const rcEls = ruler ? ruler.querySelectorAll(".h3d-rul-cell") : [];
+    const cells = [];
+    let sec0 = 0;
+    for (let i = 0; i < lens.length; i++) {
+      const rc = rcEls[i], rl = railSpans[i];
+      const len = lens[i];
+      if (rc && rl) {
+        cells.push({
+          railX: rl.offsetLeft || 0, railW: rl.offsetWidth || 0,
+          rulerX: rc.offsetLeft || 0, rulerW: rc.offsetWidth || 0,
+          sec0: sec0, len: len,
+        });
+      }
+      sec0 += len;
+    }
+    _rulerMap = cells.length ? cells : null;
+  }
+
+  /** 把**轨道坐标** ``x`` 换算成累计秒数 + 对应的**标尺坐标**。
+   *  落在哪一段就按那一段的实测宽度做线性插值，所以 gap 与 MIN_SEG_W 撑宽
+   *  都不会让秒数跑偏。没有映射表（折叠 / 0 段 / 尚未布局）时返回 null。 */
+  function rulerAtRailX(x) {
+    const m = _rulerMap;
+    if (!m) return null;
+    let c = m[m.length - 1];
+    for (let i = 0; i < m.length; i++) {
+      if (x < m[i].railX + m[i].railW) { c = m[i]; break; }
+    }
+    const f = c.railW > 0 ? Math.min(1, Math.max(0, (x - c.railX) / c.railW)) : 0;
+    return { sec: c.sec0 + f * c.len, rulerX: c.rulerX + f * c.rulerW };
+  }
+
+  /** 把动态游标摆到轨道坐标 ``x`` 处，并读出对应的累计秒数。
    *
-   *  ★ 为什么不在别处换算秒数：ruler 的格子按 ``segWidthFor`` 画、rail 的
-   *    rail-seg 也用同一个 ``segWidthFor``，两行的同一秒占同样 px —— 所以
-   *    小马在 rail 里的 px 位置就是标尺上的秒位置，直接除 (PX_PER_SEC×zoom)
-   *    即当前累计秒数。0 段时隐藏（`span()==0`，没时间轴可跟）。
+   *  ★ 换算必须走 ``rulerAtRailX()``（实测几何表），**不能**像以前那样
+   *    ``x / (PX_PER_SEC × zoom)`` 均匀除：轨道行没有 gap 而标尺行有 3px gap，
+   *    且窄段会被 MIN_SEG_W 撑宽 —— 均匀除法在两处都错（实测 9 段稿子末段
+   *    偏 −24px = −1.33s）。表里没有这一段时（折叠 / 0 段 / 尚未布局）
+   *    直接不动，别把游标甩到 0 上去骗人。
    *  ★ ``x`` 传的是小马**左边界**（rail 坐标），游标线压小马中心：+PONY_W/2，
    *    否则看着像"游标在小马后面半个身位"，跟用户直觉对不上。 */
   let _cursorSec = -1;      // 上次写进 label 的秒数，避免每帧白写 textContent
   function paintRulerCursor(x) {
     if (!ruler || !rulerCursor) return;
-    const cx = x + PONY_W / 2;          // 对准小马中心
-    const pxPerSec = PX_PER_SEC * timelineZoom;
-    const sec = pxPerSec > 0 ? Math.max(0, Math.round(cx / pxPerSec)) : 0;
-    const sec2 = pxPerSec > 0 ? Math.round(cx / pxPerSec * 10) / 10 : 0;
+    const hit = rulerAtRailX(x + PONY_W / 2);   // 对准小马中心
+    if (!hit) return;
+    const sec2 = Math.round(hit.sec * 10) / 10;
     if (sec2 !== _cursorSec) {
       _cursorSec = sec2;
       const label = rulerCursor.firstChild;
-      if (label) label.textContent = sec + "s";
+      if (label) label.textContent = Math.round(hit.sec) + "s";
     }
-    rulerCursor.style.left = Math.round(cx) + "px";
+    rulerCursor.style.left = Math.round(hit.rulerX) + "px";
   }
 
   /** 时间线重绘。外层只负责把 renderInner 的异常接住并**显式报出来**。
@@ -5796,6 +6081,7 @@ function buildTimelinePanel(node, state) {
     //   已经长出来的实线清零（实测表现为"实线反复闪断"）。
     if (_running) paintRail(_progress); else setPony(false);
     paintRuler();   // A2：标尺刻度随段数 / 宽度重排
+    maybeAutoFit(); // pack 换版本（段数/总时长变了）时把整条轴铺进视口
     refit(node);   // 段数/进度变了，时间线块会换行，节点高度跟着贴合
   }
 
@@ -5852,14 +6138,22 @@ function buildTimelinePanel(node, state) {
         "缩略图与标尺/段号可能错位 —— 需要对齐就重跑该会话"
         + "（段缓存按内容判定，会自动从变化段起重渲）。");
     }
-    panelDriftHint = drift
-      ? ("⚠ 磁盘 " + (data.disk_count != null ? data.disk_count : rows.length)
+    // ★ 2026-10-18：渲染途中磁盘段数按 1..N 递增是**正常进度**——首渲从
+    //   0 涨到 planned 全程 disk != planned，后端 drift 判据（两边都非空
+    //   才比对）放行的 1..N vs planned 不该误报成「PACK 改过」。常驻横幅
+    //   只在空闲时亮：进行中的计数差距由进度条自己说。console.warn 仍照实。
+    //   disk_count==0 一并挡掉：磁盘上没有已渲段，「缩略图错位」无从谈起
+    //   （ComfyUI 重启前旧后端判据仍会对 0 段置 drift，这条前端门刷新即生效）。
+    const diskN = (data.disk_count != null ? data.disk_count : rows.length);
+    const showDrift = drift && !_running && diskN > 0;
+    panelDriftHint = showDrift
+      ? ("⚠ 磁盘 " + diskN
          + " 段 ≠ 当前分镜 " + (Number.isFinite(limit) ? limit : "?")
          + " 段（PACK 改过？）：已渲缩略图与段号可能错位，重跑该会话可对齐")
       : "";
     // 时间线区域内的常驻横幅：状态栏提示会被后续文案覆盖，这里躲不掉
     if (driftBar) {
-      if (drift) {
+      if (showDrift) {
         driftBar.textContent = panelDriftHint;
         driftBar.style.display = "";
       } else {
@@ -6362,6 +6656,43 @@ function h3PackText() {
   if (!hit) return "";
   if (hit.textarea) return hit.textarea.value;
   return String(hit.widget.value || "");
+}
+
+/** 画布上 H3PromptPackParser 的**全部解析参数** —— 必须与后端 execute 同口径。
+ *
+ *  ★ 为什么一个都不能漏（2026-10-23 实测）：面板以前只把 session_name 传上去，
+ *    /h3/pack_preview 于是永远按「缺省段长 11 / 自动修正开 / 英文侧 / 无视
+ *    override」解析，而节点 execute 是按控件值渲染的。两边静默分叉的表现就是
+ *    「时间线的秒数和 PACK 对不上」：段标题没写时长的稿子，改缺省段长后节点
+ *    渲的是新时长、面板画的还是旧的。现在四项一起传，预览与渲染同源。
+ *  ★ pack_override 是前端「分镜提示词编辑器」的 override 写回模式落的值：
+ *    非空时它**代替** pack_text 参与解析（后端同口径，且带 _looks_like_pack
+ *    守卫，防 widgets_values 错位塞进来的 "warn" 被当成 PACK）。
+ */
+function h3ParseArgs() {
+  const pk = h3FindParser();
+  const w = (name) => (pk ? findWidget(pk, name) : null);
+  const val = (name) => { const x = w(name); return x ? x.value : null; };
+  const dd = Number(val("default_duration"));
+  const afRaw = val("auto_fix");
+  const af = afRaw == null ? true
+    : (typeof afRaw === "boolean" ? afRaw : String(afRaw).toLowerCase() !== "false");
+  return {
+    session_name: String(val("session_name") || ""),
+    default_duration: Number.isFinite(dd) && dd > 0 ? dd : 11.0,
+    language: String(val("language") || "auto"),
+    auto_fix: af,
+    pack_override: String(val("pack_override") || ""),
+  };
+}
+
+/** 解析参数的指纹 —— 与 h3PackText() 的文本指纹拼在一起，任一项变了就重解析。
+ *  pack_override 可能是一整份 PACK，只取长度 + 头 48 字符，够区分"换了一版"。 */
+function h3ParseArgsSig(a) {
+  const ov = String((a && a.pack_override) || "");
+  return [a ? a.session_name : "", a ? a.default_duration : "",
+          a ? a.language : "", (a && a.auto_fix) ? 1 : 0,
+          ov.length + ":" + ov.slice(0, 48)].join("~");
 }
 
 /** 把一段的六字段拼成标准六段式正文（与后端 _format_segment_fields 同格式：
@@ -7913,12 +8244,24 @@ function mountPanels(node) {
          *                          替换 / 监听挂到旧 DOM）。只比对指纹，不变不发请求。
          */
         const scheduleParse = debounce(
-          () => { try { pack.parse && pack.parse(); } catch (e) { /* 解析失败不打断面板 */ } },
+          () => {
+            // ★ 真发请求之前先把指纹记下来。lastFp 原来只在轮询里更新，于是
+            //   控件回调触发的那一发解析过后，3s 轮询仍会看到"指纹变了"再补
+            //   一发 —— 同一次改动解析两遍。后端有内容缓存，第二发是命中，
+            //   但白跑一趟往返，日志里也看不出到底是哪条路径触发的。
+            try { lastFp = packFingerprint(); } catch (e) { /* ignore */ }
+            try { pack.parse && pack.parse(); } catch (e) { /* 解析失败不打断面板 */ }
+          },
           1200);
         const packFingerprint = () => {
           const t = String((state.packText && state.packText()) || "");
           // 全长 + 首尾各 64 字符：够区分"换了一份 PACK"，又不必每次算整串哈希
-          return t.length + "|" + t.slice(0, 64) + "|" + t.slice(-64);
+          // ★ 还必须带上 H3PromptPackParser 的解析参数（缺省段长 / 取哪一版 /
+          //   自动修正 / 会话名 / pack_override）：它们同样决定解析结果，只盯
+          //   文本的话，改控件后面板一动不动，用户只能去点「解析 PACK」。
+          //   实测（2026-10-23）：改这三项后 29 秒内 /h3/pack_preview 请求数 = 0。
+          return t.length + "|" + t.slice(0, 64) + "|" + t.slice(-64)
+               + "|" + h3ParseArgsSig(h3ParseArgs());
         };
         let lastFp = packFingerprint();
 
@@ -7927,32 +8270,39 @@ function mountPanels(node) {
           //   否则监听会挂到中间节点上：改 ①-A 不触发解析、改别的才触发。
           const hit = h3PackTextSource();
           const src = hit ? hit.node : null;
-          if (!src) {
+          // 解析器节点自己也要挂：pack_override / default_duration / language /
+          // session_name 都在它身上，而这些控件的变动同样必须触发重解析。
+          const parser = h3FindParser();
+          if (!src && !parser) {
             if (tries > 0) setTimeout(() => bindPackSource(tries - 1), 500);
             return;
           }
           let bound = false;
-          (src.widgets || []).forEach((w) => {
-            if (!w) return;
-            // ① 值变更回调：包装而非覆盖，ComfyUI 自己的行为照旧
-            if (!w.__h3dPackHook) {
-              w.__h3dPackHook = true;
-              const origCb = w.callback;
-              w.callback = function (...args) {
-                try { if (typeof origCb === "function") origCb.apply(this, args); } catch (e) { /* ignore */ }
-                scheduleParse();
-              };
-            }
-            // ② DOM textarea：此刻可能还不存在，交给下面的重试
-            if (w.element && w.element.querySelector) {
-              const ta = w.element.querySelector("textarea");
-              if (ta && !ta.__h3dPackHook) {
-                ta.__h3dPackHook = true;
-                ta.addEventListener("input", scheduleParse);
-                bound = true;
+          const hookWidgets = (node) => {
+            (node && node.widgets || []).forEach((w) => {
+              if (!w || String(w.name || "").indexOf("h3_director") === 0) return;
+              // ① 值变更回调：包装而非覆盖，ComfyUI 自己的行为照旧
+              if (!w.__h3dPackHook) {
+                w.__h3dPackHook = true;
+                const origCb = w.callback;
+                w.callback = function (...args) {
+                  try { if (typeof origCb === "function") origCb.apply(this, args); } catch (e) { /* ignore */ }
+                  scheduleParse();
+                };
               }
-            }
-          });
+              // ② DOM textarea：此刻可能还不存在，交给下一次重试
+              if (w.element && w.element.querySelector) {
+                const ta = w.element.querySelector("textarea");
+                if (ta && !ta.__h3dPackHook) {
+                  ta.__h3dPackHook = true;
+                  ta.addEventListener("input", scheduleParse);
+                  bound = true;
+                }
+              }
+            });
+          };
+          hookWidgets(src);
+          hookWidgets(parser);
           if (!bound && tries > 0) setTimeout(() => bindPackSource(tries - 1), 500);
         };
         bindPackSource(10);                    // 最多等 5s，等 textarea 建出来
@@ -7968,6 +8318,15 @@ function mountPanels(node) {
         let healTries = 0;
         const packPoll = setInterval(() => {
           try {
+            /* ★ 每轮都补挂一次监听（幂等：靠 __h3dPackHook 标记）。
+             *   bindPackSource 原来只在挂载后重试 10 次 × 500ms = 5s，之后
+             *   **永久放弃**。于是两种常见情况只剩 3s 轮询兜底、拿不到即时触发：
+             *     · H3PromptPackParser / PACK 文本框是面板挂载**之后**才接上的
+             *       （用户说的"注入"就是这条路径）；
+             *     · ComfyUI 把 DOM widget 重建了（折叠展开 / 重载图），
+             *       监听随旧 textarea 一起进了垃圾。
+             *   补挂的成本是一次 widgets 遍历，3 秒一次可以忽略。 */
+            bindPackSource();
             const fp = packFingerprint();
             if (fp !== lastFp) { lastFp = fp; healTries = 0; scheduleParse(); return; }
             const len = parseInt(fp.split("|")[0], 10) || 0;

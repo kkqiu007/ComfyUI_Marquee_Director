@@ -43,6 +43,16 @@ UNNAMED = "h3_pack"
 # 自动版本号的词头：<剧本>/r1、<剧本>/r2 …
 VERSION_PREFIX = "r"
 
+# Windows 设备名。这些名字**即使带扩展名**也不能当目录名用：``os.makedirs``
+# 不抛异常，但目录根本没被创建，之后每一次写段都变成 FileNotFoundError。
+# 实测（2026-10-17 自检）：CON/COM1/aux/CON.txt 在本机反而能建出来，NUL 建不出来
+# —— 正是这种"看运气"的差异最该在入口一刀切掉，而不是等某次渲染写到一半失败。
+WIN_RESERVED = (
+    {"CON", "PRN", "AUX", "NUL"}
+    | {"COM%d" % i for i in range(1, 10)}
+    | {"LPT%d" % i for i in range(1, 10)}
+)
+
 
 def sanitize(name):
     """Normalise a session name into a safe directory name.
@@ -63,7 +73,12 @@ def sanitize(name):
     name = re.sub(r"[^\w.-]+", "_", (name or "").strip(), flags=re.UNICODE)
     name = re.sub(r"\.{2,}", "_", name)  # never let a session name walk up a directory
     name = name.strip("._") or UNNAMED
-    return name[:60]
+    name = name[:60]
+    # Windows 设备名兜底：只看第一个点之前的部分（CON.txt 同样是设备名）。
+    # 加下划线前缀而不是替换 —— 前缀后仍可读，且不会与别的会话撞名。
+    if name.split(".", 1)[0].upper() in WIN_RESERVED:
+        name = "_" + name
+    return name
 
 
 def output_root():

@@ -6,11 +6,28 @@
 不再同义，而 /h3/session 此前按磁盘号下发视频 URL、前端照单全收 ——
 段块视频张冠李戴，doneSet 还多出幽灵段（第 21 段）让进度条虚高。
 
-守四条：
+2026-10-18 追加（用户实况：首渲假阳性）：会话刚开始渲、一次刷新落在第一段
+落盘前 → 磁盘 0 段 vs 面板 20 段，横幅喊「PACK 改过？缩略图错位」——可磁盘
+上什么都没有，无从错位。修法：drift 判据要求**两边都非空**；渲染途中
+1..N vs planned 的前端抑制见 h3_director.js absorbSession 的 _running 门。
+
+2026-10-23 追加（用户实况：中断假阳性）：一次 9 段的渲染在第 5 段被取消，
+磁盘留下连续的 1..4，面板计划 9 段 → 旧判据 `planned != disk_count` 立刻喊
+「PACK 改过？缩略图与段号可能错位」。可这份 PACK 一个字都没改，真相只是
+"没渲完"。前端的 _running 门这时恰恰不生效（已经停了），所以必须在判据这一层
+就把两种情况分开：**连续前缀且不超过计划 = 没渲完**；**磁盘超过计划，或段号
+缺号（done < disk_count）= 真漂移**。
+
+守八条：
   ① 不带 segs → drift=False、disk_count 照实返回（老调用方无感）；
   ② segs == 磁盘段数 → drift=False（正常路径）；
-  ③ segs != 磁盘段数 → drift=True 且 disk_count / planned_segs 如实返回；
-  ④ done 仍是「从 1 连续」的磁盘口径（断点信息不能被探测字段带偏）。
+  ③ 磁盘段数 > 面板计划 → drift=True（旧版多切了几段，段号从此错开）；
+  ③' 磁盘是 1..N 连续前缀、N < 面板计划 → drift=False（渲到一半停了）；
+  ③'' 磁盘段号缺号（done < disk_count）→ drift=True（段号已对不上）；
+  ④ done 仍是「从 1 连续」的磁盘口径（断点信息不能被探测字段带偏）；
+  ⑤ 磁盘 0 段（首渲未出片）+ 面板 20 → drift=False（无可错位对象）；
+  ⑥ 磁盘 5 段 + 面板 0（PACK 未解析）→ drift=False（无比对对象）；
+  ⑦ 脏 segs / 会话不存在 → 原形状不炸。
 
 跑法: python tests/test_session_drift.py
 """
@@ -81,13 +98,16 @@ sys.modules["marquee_director"] = _pkg
 sys.modules["marquee_director.common"] = _FakeCommon()
 rd_loader.exec_module(routes)
 
-# --- fixture：一个带 5 个 seg mp4 的会话目录 ---------------------------
+# --- fixture：一个带 5 个 seg mp4 的会话目录 + 一个空目录（首渲未出片）--------
 TMP = tempfile.mkdtemp(prefix="h3_drift_")
 SESS = os.path.join(TMP, "drift_sess")
 os.makedirs(SESS)
 for i in range(1, 6):
     with open(os.path.join(SESS, "seg_%02d.mp4" % i), "wb") as fh:
         fh.write(b"\0" * 64)
+# 空会话目录：只有 manifest 没有 seg_*.mp4 —— 2026-10-18 用户首渲实况
+EMPTY = os.path.join(TMP, "drift_empty")
+os.makedirs(EMPTY)
 
 _real_root = routes._session_root if hasattr(routes, "_session_root") else None
 
@@ -115,24 +135,64 @@ r = routes._session_state("drift_sess", 5)
 check(r.get("drift") is False, "② segs==disk 时 drift=False")
 check(r.get("planned_segs") == 5, "② planned_segs 回显")
 
-# ③ 漂移（用户实况：磁盘 21 vs 面板 20）
-r = routes._session_state("drift_sess", 20)
-check(r.get("drift") is True, "③ segs != disk 时 drift=True")
-check(r.get("disk_count") == 5 and r.get("planned_segs") == 20,
+# ③ 磁盘段数**超过**面板计划 = 真漂移（用户实况：磁盘 21 vs 面板 20）
+r = routes._session_state("drift_sess", 3)
+check(r.get("drift") is True, "③ 磁盘 5 段 > 面板 3 段时要报 drift")
+check(r.get("disk_count") == 5 and r.get("planned_segs") == 3,
       "③ disk_count/planned_segs 应如实返回两边数字")
 check(r.get("done") == 5, "③ done 仍是磁盘连续口径（不能被探测带偏）")
-# 反向漂移（面板比磁盘多）同样要报
-r = routes._session_state("drift_sess", 3)
-check(r.get("drift") is True, "③ 面板少于磁盘也要报 drift")
+
+# ③' 磁盘是 1..N 连续前缀、N < 面板计划 = **渲到一半停了**，不是漂移。
+#    ★ 2026-10-23 改的判据。旧判据是 `planned != disk_count` 一律报漂移，于是
+#    一次 9 段的渲染在第 5 段被取消后，面板对着一份**没改过**的 PACK 喊
+#    「磁盘 4 段 ≠ 当前分镜 9 段（PACK 改过？）已渲缩略图与段号可能错位」——
+#    把"没渲完"说成"数据错了"，用户会去重跑一个本来只要断点续渲的会话。
+#    前端 absorbSession 只在 _running 时抑制这条横幅，而中断之后恰恰不在
+#    running，所以抑制不住，必须在判据这一层就分开。
+r = routes._session_state("drift_sess", 20)
+check(r.get("drift") is False,
+      "③' 磁盘 1..5 连续、面板 20 段 = 没渲完/被中断，不许报漂移（实得 %s）"
+      % r.get("drift"))
+check(r.get("disk_count") == 5 and r.get("planned_segs") == 20,
+      "③' 两边数字仍要如实返回（横幅不亮，但 console 与排查要用）")
+check(r.get("done") == 5, "③' done 仍是 5，断点续渲从第 6 段接着跑")
+
+# ③'' 磁盘段号缺号（done < disk_count）= 段号已经对不上，仍是真漂移
+_gap = os.path.join(SESS, "seg_07.mp4")
+open(_gap, "w").close()
+try:
+    r = routes._session_state("drift_sess", 20)
+    check(r.get("done") == 5 and r.get("disk_count") == 6,
+          "③'' 缺号会话应读到 done=5 / disk=6，实得 %s/%s"
+          % (r.get("done"), r.get("disk_count")))
+    check(r.get("drift") is True, "③'' 段号不连续要报 drift")
+finally:
+    os.remove(_gap)
 
 # ④ 脏输入不炸
 r = routes._session_state("drift_sess", "abc")
 check(r.get("drift") is False, "④ 非数字 segs 退化为不探测")
 check(r.get("planned_segs") is None, "④ 非数字 segs → planned_segs=None")
 
-# ⑤ 会话不存在时仍带新字段的默认形状
+# ⑤ 空目录 + 面板 20 段：首渲未出片，磁盘 0 段 vs 面板 20 → 不判漂移
+#    （2026-10-18 用户实况：刷新落在第一段落盘前，横幅误喊「PACK 改过」）
+r = routes._session_state("drift_empty", 20)
+check(r.get("ok") is True, "⑤ 空会话应找得到")
+check(r.get("disk_count") == 0, "⑤ disk_count 应为 0")
+check(r.get("drift") is False,
+      "⑤ 磁盘 0 段时 drift 必须为 False（首渲假阳性，无可错位对象）")
+check(r.get("segments") == [], "⑤ 空目录无段记录")
+check(r.get("done") == 0, "⑤ done=0")
+
+# ⑥ 面板 0 段（PACK 未解析）+ 磁盘 5 段：无比对对象，不判漂移
+r = routes._session_state("drift_sess", 0)
+check(r.get("drift") is False,
+      "⑥ 面板 0 段时 drift=False（PACK 未解析，段数无比对意义）")
+check(r.get("planned_segs") == 0, "⑥ planned_segs 回显 0")
+
+# ⑦ 会话不存在时仍带新字段的默认形状
 r = routes._session_state("nope")
-check(r.get("ok") is False and r.get("segments") == [], "⑤ 不存在会话保持原形状")
+check(r.get("ok") is False and r.get("segments") == [], "⑦ 不存在会话保持原形状")
 
 shutil.rmtree(TMP, ignore_errors=True)
 
@@ -142,4 +202,4 @@ if FAIL:
         print("  -", m)
     sys.exit(1)
 print("全部通过：段数漂移探测就位（①老调用无感 ②一致不报 ③双向漂移都报 "
-      "④脏输入容错 ⑤done 口径不变）。")
+      "④脏输入容错 ⑤磁盘 0 段不误报 ⑥面板 0 段不误报 ⑦done 口径不变）。")

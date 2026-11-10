@@ -65,6 +65,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import types
 
 import numpy as np
 
@@ -86,17 +87,47 @@ RATES = (32000, 44100, 48000)
 FFMPEG_TOLERANCE_LU = 0.15
 
 
+def _ensure_stub_package():
+    """Register a synthetic parent package for standalone audio_master loads.
+
+    ``audio_master.py`` does ``from .common import log, warn`` at module level,
+    so a bare ``spec_from_file_location`` load dies on the relative import.
+    The real ``common.py`` imports torch (and through the package init,
+    ``comfy.utils``), so we stub it: a print-based ``log``/``warn`` keeps this
+    checker usable offline, which is the whole point. Idempotent -- test 7
+    reloads the module once per env value and every load shares the stub.
+    """
+    pkg_name = "audio_master_check_pkg"
+    if pkg_name + ".common" not in sys.modules:
+        pkg = types.ModuleType(pkg_name)
+        pkg.__path__ = [os.path.dirname(os.path.abspath(MODULE))]
+        sys.modules[pkg_name] = pkg
+        common = types.ModuleType(pkg_name + ".common")
+
+        def _log(msg, *args):
+            print(msg % args if args else msg, file=sys.stderr)
+
+        common.log = _log
+        common.warn = _log
+        sys.modules[pkg_name + ".common"] = common
+    return pkg_name
+
+
 def load_audio_master():
     """Import the module by path, not through the package.
 
     ``marquee_director/__init__.py`` pulls in ``nodes.py``, which imports
     ``comfy.utils`` -- only importable inside a running ComfyUI. Loading the
-    single file keeps this check usable offline, which is the whole point.
-    ``audio_master`` itself needs nothing but numpy and scipy.
+    single file keeps this check usable offline; ``audio_master`` itself needs
+    nothing but numpy and scipy (see ``_ensure_stub_package`` for the ``.common``
+    relative import).
     """
     path = os.path.abspath(MODULE)
-    spec = importlib.util.spec_from_file_location("audio_master_check", path)
+    pkg_name = _ensure_stub_package()
+    spec = importlib.util.spec_from_file_location(
+        pkg_name + ".audio_master", path)
     module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     return module
 
@@ -426,14 +457,27 @@ def check_join_path(am):
     raw = [float(am.measure_lufs(s, fs)) for s in segs]
     done = [am.master_segment(s, fs) for s in segs]
     got = [float(am.measure_lufs(d, fs)) for d in done]
+    # ★ Per-segment delivery targets (2026-10-18): ``master_segment`` lands each
+    #   clip on the loudness ``profile_target`` picked for *that* clip, which is
+    #   TARGET_LUFS only for the neutral class -- dialogue sits at DIALOGUE_LUFS
+    #   and impact-heavy audio at BATTLE_LUFS, on purpose. These four probes
+    #   share one spectrum, so they share one classification and the spread must
+    #   still collapse; what changed is *where* they collapse to. Asserting
+    #   TARGET_LUFS here would pin the old flat-loudness behaviour the per-class
+    #   targets exist to replace.
+    want = [am.profile_target(s, fs) for s in segs]
     raw_spread = max(raw) - min(raw)
     spread = max(got) - min(got)
-    ok = spread <= 0.5 and all(abs(g - am.TARGET_LUFS) <= 0.4 for g in got)
+    ok = (spread <= 0.5
+          and all(abs(g - w) <= 0.4
+                  for g, w in zip(got, want, strict=True)))
     lines.append("   segment spread       %5.2f LU raw -> %5.2f LU mastered   %s"
                  % (raw_spread, spread, "ok" if ok else "FAIL"))
     if not ok:
-        problems.append("per-segment pass left a %.2f LU spread (raw %.2f LU): %s"
-                        % (spread, raw_spread, ["%.2f" % g for g in got]))
+        problems.append("per-segment pass left a %.2f LU spread (raw %.2f LU): "
+                        "%s, wanted %s"
+                        % (spread, raw_spread, ["%.2f" % g for g in got],
+                           ["%.2f" % w for w in want]))
 
     # --- the film pass reaches the target with both shortcuts off ----------
     # ``shape_tone=False`` mirrors what ``_join_audio`` actually passes: the
@@ -450,6 +494,35 @@ def check_join_path(am):
                  % (lufs, tp, am.CEILING_DBTP, "ok" if ok else "FAIL"))
     if not ok:
         problems.append("film pass landed at %.2f LUFS / %.2f dBTP" % (lufs, tp))
+
+    # --- the film pass holds the ceiling in the TRUE-peak domain ------------
+    # normalize=False + pre_limit=False (the join's actual film call) means the
+    # gain loop's limiter never runs. Until 2026-10-18 the only ceiling guard
+    # left was a sample-peak clamp -- a signal whose *samples* sit under the
+    # ceiling but whose intersample peaks do not sailed through, which is the
+    # "right ceiling, wrong domain" failure this tool's docstring warns about.
+    # Probe: fs/4 cosine offset pi/4 (test 4's detector probe) scaled so the
+    # samples stay below the ceiling while the true peak is above it.
+    ceil_lin = 10.0 ** (am.CEILING_DBTP / 20.0)
+    hot = np.cos(2.0 * np.pi * 0.25 * np.arange(fs * 4) + np.pi / 4.0)
+    hot = np.tile(hot * 0.88, (2, 1))
+    hot_sp = float(np.abs(hot).max())
+    hot_tp = am.true_peak(hot, fs)
+    probe_valid = hot_sp <= ceil_lin and hot_tp > ceil_lin
+    film2 = am.master(hot, fs, hp_hz=None, pre_limit=False,
+                      shape_tone=False, normalize=False)
+    got_tp = am.true_peak(film2, fs)
+    enforced = not np.array_equal(film2, hot.astype(np.float32))
+    ok = probe_valid and got_tp <= ceil_lin + 1e-3 and enforced
+    lines.append("   film-pass true peak   sample %.4f, true %.4f -> %.4f "
+                 "(ceil %.4f)   %s"
+                 % (hot_sp, hot_tp, got_tp, ceil_lin, "ok" if ok else "FAIL"))
+    if not ok:
+        problems.append(
+            "master(normalize=False, pre_limit=False) let a %.4f true peak "
+            "through a %.4f ceiling (probe valid=%s, enforced=%s): the film "
+            "pass clamps sample peaks, not true peaks"
+            % (got_tp, ceil_lin, probe_valid, enforced))
 
     # --- hp_hz=None really skips the high-pass -----------------------------
     # It has to: the segments were already high-passed, and two 2nd-order
@@ -590,6 +663,47 @@ def check_save_guard(am):
         problems.append("a gain-capped segment reports as mastered; the join "
                         "would skip a piece that never reached the target")
 
+    # --- snap_target: the no-companion fallback must not re-classify --------
+    # v17 rebuild, measured 2026-10-18: with the .lufs companions swept by
+    # cleanup, the join's fallback ran profile_target on *already-mastered*
+    # audio and picked the wrong class -- a trimmed -14.3 LUFS neutral segment
+    # classified as battle and came back +5.9 dB hot, three dialogue segments
+    # came back +3.4 dB up. snap_target must catch anything already near a
+    # canonical target (the guard then leaves it alone or corrects level only),
+    # and let genuinely raw signals fall through to classification.
+    tone = np.tile(0.05 * np.sin(2.0 * np.pi * 700.0 * np.arange(fs * 8) / fs),
+                   (2, 1))
+    done_t = None
+    for want in (am.BATTLE_LUFS, am.DEFAULT_LUFS, am.DIALOGUE_LUFS):
+        done_t = am.master_segment(tone, fs, target_lufs=want)
+        got = am.snap_target(done_t, fs)
+        ok = got == want
+        lines.append("   snap @ %.0f LUFS       -> %s   %s"
+                     % (want, got, "ok" if ok else "FAIL"))
+        if not ok:
+            problems.append("snap_target returned %s for a segment mastered to "
+                            "%.0f" % (got, want))
+    drifted = done_t * (10.0 ** (-1.4 / 20.0))   # trim + one AAC generation
+    got = am.snap_target(drifted, fs)
+    ok = got == am.DIALOGUE_LUFS
+    lines.append("   snap absorbs 1.4 LU      -> %s   %s"
+                 % (got, "ok" if ok else "FAIL"))
+    if not ok:
+        problems.append("snap_target missed a 1.4 LU-drifted mastered segment")
+    raw = tone * 0.003                           # ~-35 LUFS: far from every tier
+    got = am.snap_target(raw, fs)
+    ok = got is None
+    lines.append("   raw not snapped          -> %s   %s"
+                 % (got, "ok" if ok else "FAIL"))
+    if not ok:
+        problems.append("snap_target caught a raw segment; it would skip the "
+                        "full mastering that raw signal still needs")
+    ok = am.snap_target(np.zeros((2, fs)), fs) is None
+    lines.append("   silence not measurable   -> None   %s"
+                 % ("ok" if ok else "FAIL"))
+    if not ok:
+        problems.append("snap_target answered for unmeasurable silence")
+
     return problems, lines
 
 
@@ -606,9 +720,11 @@ def _load_with_env(value):
         os.environ["MARQUEE_AUDIO_MASTER"] = value
     try:
         path = os.path.abspath(MODULE)
+        pkg_name = _ensure_stub_package()
         spec = importlib.util.spec_from_file_location(
-            "audio_master_env_%s" % value, path)
+            "%s.audio_master_env_%s" % (pkg_name, value), path)
         module = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = module
         spec.loader.exec_module(module)
         return module
     finally:

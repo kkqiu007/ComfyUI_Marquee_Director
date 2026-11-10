@@ -31,6 +31,7 @@ from prompt_pack import (  # noqa: E402
     pack_text,
     pack_dur_spec,
     grid_seconds,
+    chain_seconds,
     HANDOFF_SECONDS,
     MAX_NEW_SECONDS,
     MIN_NEW_SECONDS,
@@ -149,21 +150,23 @@ class TestPromptPack(unittest.TestCase):
 
     def test_segment_durations(self):
         segments, _meta, _issues = self._parse()
-        # ★ 2026-09-30：`_build_segment` 现在把 gen 对齐到 H3 的 **17k+5 帧网格**，
-        #   `new` 取**真实贡献**（网格帧 − 回放帧）。所以「11s 的段」不再等于
-        #   11.0s —— 264 帧不在网格上（网格是 …243 / 260 / 277…），向上取是
-        #   277 帧 = 11.542s。以前解析层报 11.0、渲染层真生成 11.542，两边差
-        #   0.54s 无剧本时间 → 模型即兴发声（"乱说话"）+ 成片比 PACK 头部写的
-        #   总时长长出近 2s。判据直接走生产函数 ``grid_seconds()``，别在本文件
-        #   里再手搓一份 —— 两份实现会各自漂移。
+        # ★ 2026-09-30：`_build_segment` 把 gen 对齐到 H3 的帧网格，`new` 取
+        #   **真实贡献**（网格帧 − 回放帧）。
+        # ★ 2026-10-18：网格从 17k+5 换成**双时钟**的 39+51n —— 段长还必须
+        #   是 3 的倍数，否则模型的音频潜在（40 Hz 对 24 fps）只能四舍五入，
+        #   接缝处每段差 8.3 ms 且逐段累积。11s = 264 帧在 17k+5 上是 277 帧
+        #   （11.542s），在双时钟上是 **294 帧（12.25s）**。
+        #   判据直接走生产函数，别在本文件里再手搓一份 —— 两份实现会各自漂移。
+        #   ★ 注意分工：**回放窗仍走 `grid_seconds`**（锚点只要 17k+5，
+        #     1.6 → 1.625 = 39 帧本来就在双时钟上）；只有段长走 `chain_seconds`。
         handoff = grid_seconds(HANDOFF_SECONDS)
-        self.assertEqual(segments[0]["new_seconds"], round(grid_seconds(11.0), 3))
-        self.assertEqual(segments[0]["gen_seconds"], round(grid_seconds(11.0), 3))
+        self.assertEqual(segments[0]["new_seconds"], round(chain_seconds(11.0), 3))
+        self.assertEqual(segments[0]["gen_seconds"], round(chain_seconds(11.0), 3))
         self.assertEqual(segments[0]["replay_in"], 0.0)
         self.assertEqual(segments[1]["gen_seconds"],
-                         round(grid_seconds(11.0 + handoff), 3))
+                         round(chain_seconds(11.0 + handoff), 3))
         self.assertEqual(segments[1]["new_seconds"],
-                         round(grid_seconds(11.0 + handoff) - handoff, 3))
+                         round(chain_seconds(11.0 + handoff) - handoff, 3))
         self.assertEqual(segments[1]["replay_in"], handoff)
 
     def test_to_shots_json(self):
@@ -173,14 +176,15 @@ class TestPromptPack(unittest.TestCase):
         self.assertEqual(len(board["shots_info"]), 2)
         handoff = grid_seconds(HANDOFF_SECONDS)
         first = board["shots_info"][0]
-        self.assertEqual(first["duration"], round(grid_seconds(11.0), 3))
+        self.assertEqual(first["duration"], round(chain_seconds(11.0), 3))
         # 回放窗是**网格对齐后**的值（1.625），不是规范名义值 1.6。
         self.assertEqual(first["handoff_seconds"], handoff)
         self.assertEqual(first["replay_in"], 0.0)
         self.assertEqual(first["tail_out"], handoff)
         second = board["shots_info"][1]
+        # 第二段同样走双时钟网格；只有回放窗是 17k+5 的 1.625。
         self.assertEqual(second["duration"],
-                         round(grid_seconds(11.0 + handoff) - handoff, 3))
+                         round(chain_seconds(11.0 + handoff) - handoff, 3))
         # last segment has no tail to hand off
         self.assertEqual(second["handoff_seconds"], 0.0)
         self.assertEqual(second["replay_in"], handoff)
@@ -207,11 +211,11 @@ class TestPromptPack(unittest.TestCase):
                          project="曹贼的性价比", mode="Ref2VA (full reference)",
                          aspect="16:9 / 2K / 24fps")
         self.assertIn("Project / 项目", text)
-        # EN 单版：段头是 / EN，不再是 / 中文
-        # ★ 2026-09-30：段头时长是**网格对齐后**的生成值（11.0s → 277 帧 =
-        #   11.542s），与渲染真正吐出的帧数逐帧一致。
+        # ★ 2026-09-30：段头时长是**网格对齐后**的生成值，与渲染真正吐出的
+        #   帧数逐帧一致。2026-10-18 起段长走双时钟网格：11.0s → 294 帧 =
+        #   12.25s（17k+5 上是 277 帧 / 11.542s，音频落不上 40 Hz）。
         self.assertIn("########## S01 / %gs / EN ##########"
-                      % round(grid_seconds(11.0), 3), text)
+                      % round(chain_seconds(11.0), 3), text)
         # ★ 2026-09-27：段头里的回放窗是**网格对齐后**的 1.625（不是名义 1.6），
         #   与 gen 一致。旧断言写 11s+1.6=12.6，正是「解析层 38 帧 / 渲染层
         #   39 帧」不一致的化石。判据直接走生产格式化器 pack_dur_spec，别在本

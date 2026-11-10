@@ -1057,7 +1057,13 @@ class H3ScriptTranslate(io.ComfyNode):
                 " / ".join(s[:12] for s in resid[:3])), fixed
 
         def _translate_single(idx):
-            nonlocal n_done, n_fail, n_retry, n_salv
+            # ★ n_skip 必须在这里声明：函数体里 `n_skip += 1` 是读-改-写，
+            #   没有 nonlocal 时 Python 会把它判成**本函数局部变量**，走到
+            #   「结构行原样透传」那条分支（纯 PACK 头/尾、无中文可译）就抛
+            #   UnboundLocalError: cannot access local variable 'n_skip' ——
+            #   整块翻译直接失败。2026-10-17 自检用 code object 取证：
+            #   n_skip 落在 co_varnames 而非 co_freevars。
+            nonlocal n_done, n_fail, n_retry, n_salv, n_skip
             body, sep = expanded[idx]
             i = idx + 1
             # ★ 结构行（banner / 双语气泡标签）先挖成 [[Sn]]，不送模型、不剥离。

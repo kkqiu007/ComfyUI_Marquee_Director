@@ -56,9 +56,13 @@ from . import frames_cache
 from . import subtitle_qc
 from .common import (
     FPS,
-    generation_length,
+    audio_clock_error_ms,
+    audio_latent_frames,
+    chain_length,
     guide_length_up,
     log,
+    nearest_chain_length,
+    on_both_clocks,
     ordered_autogrow,
     seconds_to_frames,
 )
@@ -430,7 +434,11 @@ def _segment_schema():
 
 def _segment_from_widgets(prompt, seconds, handoff_seconds, seed_override,
                           images=None, videos=None, video_audios=None, audios=None):
-    length = generation_length(seconds_to_frames(seconds))
+    # ★ 与 ``director._shot_plan`` 同口径：段长走双时钟网格（39+51n）。
+    #   下面 ``handoff_seconds`` 与本函数是**互斥输入** —— 这里给出的是段长，
+    #   ``handoff`` 才是锚点窗口（17k+5）。段长不落 3 的倍数时模型音频只能
+    #   四舍五入，接缝音画每段差 8.3 ms 并逐段累积。
+    length = chain_length(seconds_to_frames(seconds))
     # ★ 回放帧必须**向上**对齐到 17k+5，与 director._shot_plan 里
     #   ``replay_frames = guide_length_up(...)`` 完全同一口径。
     #
@@ -448,6 +456,16 @@ def _segment_from_widgets(prompt, seconds, handoff_seconds, seed_override,
             "handoff_seconds (%.2fs -> %d frames) must be shorter than the segment "
             "itself (%.2fs -> %d frames), or the next segment would be nothing but "
             "replay." % (handoff_seconds, handoff, seconds, length))
+    # ★ 音频时钟：17k+5 只管视频网格，音频潜在是 40 Hz。这一段要交出回放帧
+    #   （即它处在接缝上）而长度又不是 3 的倍数时，音频与画面就差几毫秒，
+    #   每道接缝都差这么多、逐段累积到能听出来。只提示，不改长度。
+    if handoff and not on_both_clocks(length):
+        _nearest = nearest_chain_length(length)
+        log("⚠ %d 帧满足 17k+5，但不是 3 的倍数 —— 音频 40 Hz 只能落 %d 步，"
+            "与画面差 %.1f ms，每道接缝都差这么多并逐段累积。最近的合法长度是 "
+            "%d 帧（%.2fs）。",
+            length, audio_latent_frames(length),
+            abs(audio_clock_error_ms(length)), _nearest, _nearest / float(FPS))
     return {
         "prompt": prompt, "seconds": seconds, "length": length, "handoff": handoff,
         "seed": int(seed_override),
@@ -955,26 +973,17 @@ def _safe_script_handoff(seconds, requested, is_last):
       （guide_length_up，向上对齐 17k+5）。用向下对齐会让 1.6s(38 帧) 被
       误判成 22 帧 —— 于是「1.0s 的段 + 1.0s 的锚」这种明显过长的组合会被
       放行，而实际渲染时锚是 39 帧、比整段还长。
+
+    ★ 段长那一侧必须用 ``chain_length`` 而不是 ``generation_length``：这里
+      判的是「锚窗是否比整段短」，整段长度按双时钟网格吸附后才与渲染层
+      一致。两边不同源，1.6s 的锚就能被放进一条实际只有 39 帧的段里。
     """
     if is_last:
         return 0.0
     requested = max(0.0, float(requested))
-    length = generation_length(seconds_to_frames(seconds))
+    length = chain_length(seconds_to_frames(seconds))
     handoff = guide_length_up(seconds_to_frames(requested))
     return requested if handoff < length else 0.0
-
-
-def _settings_for_script(settings, asset):
-    """Let the script board's resolution drive H3, with safe settings fallbacks."""
-    effective = dict(settings)
-    for key in ("width", "height"):
-        try:
-            value = int(asset.get(key) or 0)
-        except (TypeError, ValueError):
-            value = 0
-        if value >= 32:
-            effective[key] = value
-    return effective
 
 
 # ---------------------------------------------------------------------------

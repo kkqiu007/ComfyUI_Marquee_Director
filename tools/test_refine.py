@@ -110,11 +110,19 @@ pack = R.H3RefineNode.execute(
     passes=1, sampler=R.REFINE_FOLLOW_SAMPLER, seed_mode=REFINE_SEED_FOLLOW,
     refine_seed=0, sigmas=[0.9, 0.5, 0.1])[0]
 check("node packs what the engine reads",
-      set(pack) == {"sigmas", "model", "passes", "sampler", "seed_mode", "seed"}
+      set(pack) == {"sigmas", "model", "passes", "sampler", "seed_mode", "seed",
+                    "clear_vram"}
       and pack["passes"] == 1 and pack["sampler"] is None, str(pack))
 
 key_ref = S.segment_key(base_settings(refine=pack), segment(), 39, None)
 check("refine wired: key differs", key_ref != key_plain)
+
+# ★ clear_vram 是**显存策略**，不是渲染参数：它进包（引擎要读），但不进缓存键。
+#   这条断言就是那句话的可执行版本 —— 勾一下不该让任何已渲段失效。
+check("clear_vram does not change the cache key",
+      S.segment_key(base_settings(refine=dict(pack, clear_vram=True)), segment(),
+                    39, None) == key_ref,
+      "clear_vram 混进了缓存键，会让既有会话全量重渲")
 check("passes change: key differs",
       S.segment_key(base_settings(refine=dict(pack, passes=2)), segment(), 39, None)
       != key_ref)
@@ -160,7 +168,8 @@ DIRECTOR_WIDGETS = ["global_prompt", "prompt_lines", "sensitivity",
                     "duration_is_new_content", "unload_every", "crf",
                     "stabilize", "build_timeline", "export_segments",
                     "ref_image_size", "ref_classify", "repair_segment",
-                    "run_segments", "source", "video_path", "seg_cache_codec"]
+                    "run_segments", "source", "video_path", "seg_cache_codec",
+                    "width", "height"]
 check("Director widget order is append-only", names == DIRECTOR_WIDGETS,
       "got %s" % (names,))
 

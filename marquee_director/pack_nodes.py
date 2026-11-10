@@ -118,19 +118,13 @@ def _ref_slots_of_json(raw):
 
 
 def _looks_like_pack(text) -> bool:
-    """粗判一段文本是不是分镜 PACK（而不是被 widget 错位塞进来的普通控件值）。
+    """``pack_override`` 的健壮性守卫 —— 见 ``execute`` 里的注释。
 
-    认三种形态：段标题 ``########## S01 / 11s / EN ##########``、无斜杠段头
-    ``########## S01 ##########``（2026-09-30 起解析层支持，守卫必须同口径，
-    否则实时编辑器覆盖会被静默忽略），或镜内标记 ``[Shot 1]``。
-    用于 ``pack_override`` 的健壮性守卫 —— 见 ``execute`` 里的注释。
+    实现已下沉到 :func:`prompt_pack.looks_like_pack`：``routes._pack_preview``
+    也要用同一条判据（面板显示哪份文本必须与节点渲染哪份一致），而它不该为了
+    一个纯字符串函数把 comfy_api 依赖挂上。这里只留转发，别处不要再抄一份。
     """
-    s = str(text or "")
-    if not s:
-        return False
-    return bool(re.search(r"#{3,}\s*S?\d+[A-Za-z]?\s*/", s)
-                or re.search(r"#{3,}\s*S\d+[A-Za-z]?\s*#{3,}", s)
-                or re.search(r"\[\s*Shot\s*\d+\s*\]", s, re.I))
+    return pp.looks_like_pack(text)
 
 
 class H3PromptPackParser(io.ComfyNode):

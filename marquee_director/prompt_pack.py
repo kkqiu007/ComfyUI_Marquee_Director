@@ -158,13 +158,22 @@ FPS = 24
 _GRID_REMAINDER = 5
 _GRID_STEP = 17
 
+# ★ 相接网格：``17k+5`` ∩ ``3 的倍数`` = ``n ≡ 39 (mod 51)``。
+#   与 ``common.chain_length``（渲染层）是同一算法 —— 见 ``chain_seconds``。
+_CHAIN_STEP = 51
+_CHAIN_MIN = 39
+
 # ★ 2026-09-30：网格向上吸附给「新增时长」带来的最大额外量（秒）。
-#   ``_build_segment`` 把 gen 对齐到 17k+5 后，``new = gen - replay`` 会比作者
-#   写的名义值最多大 ``(_GRID_STEP - 1) / FPS`` = 16/24 ≈ 0.667s（因为向上
-#   对齐最多加 16 帧）。所以「单段新增 ≤ MAX_NEW_SECONDS」这条规范判据必须
-#   带上这个容差，否则每一段都会误报"超过单段上限，建议拆段"——
+#   ``_build_segment`` 把 gen 对齐到网格后，``new = gen - replay`` 会比作者
+#   写的名义值最多大 ``(_CHAIN_STEP - 1) / FPS``（因为向上对齐最多加
+#   ``_CHAIN_STEP - 1`` 帧）。所以「单段新增 ≤ MAX_NEW_SECONDS」这条规范判据
+#   必须带上这个容差，否则每一段都会误报"超过单段上限，建议拆段"。
 #   11.0s 的段在 24fps 下根本无法精确落在网格上（303 帧 → 311 帧 = 11.333s）。
-GRID_SLACK_SECONDS = (_GRID_STEP - 1) / float(FPS)
+#
+# ★ 2026-10-18：段长网格从 17k+5 换成双时钟的 39+51n（见 ``chain_seconds``），
+#   容差随之从 16 帧（0.667s）放大到 50 帧（2.083s）。**这是段长锁进双时钟的
+#   固有成本，不是可以调小的容差** —— 调小只是把误报换成"该拆段的段不报"。
+GRID_SLACK_SECONDS = (_CHAIN_STEP - 1) / float(FPS)
 
 
 def grid_seconds(seconds):
@@ -198,6 +207,40 @@ def grid_seconds(seconds):
     frames = max(5, int(round(secs * FPS)))
     while (frames - _GRID_REMAINDER) % _GRID_STEP != 0:
         frames += 1
+    return frames / float(FPS)
+
+
+def chain_seconds(seconds):
+    """把「段长秒」向上对齐到 H3 的**双时钟**网格，返回对齐后的秒。
+
+    ``grid_seconds`` 对齐到 17k+5（视频网格），本函数再进一步要求帧数是
+    3 的倍数 —— 音频潜在 40 Hz 对 24 fps 画面，不落在这个条件上时模型只能
+    四舍五入，**段内**音画最多差 12.5 ms，每段各自生成自己的音频、误差
+    同号，**逐段累积**，十段就是几十毫秒（实测一条 10 段链里 5 段踩中）。
+
+    ★ 解析层与渲染层必须同源，这就是它存在的全部理由。
+      ``_build_segment`` 把 ``gen`` 对齐到本函数的结果，与
+      ``director._shot_plan`` / ``nodes._segment_from_widgets`` 算出的
+      ``chain_length`` 逐帧一致；写进 storyboard.json 的 ``gen_seconds``
+      和提示词里的段末时间码于是都指向**真实帧数**。两层一旦不同源，多出
+      的帧就成了剧本外的时间，模型只能即兴发声（"乱说话"）。
+
+    ★ **不要**拿它去对齐回放/锚点窗口（``grid_seconds(HANDOFF_SECONDS)``
+      = 1.625s = 39 帧）。39 帧本来就在双时钟网格上，但用户自定义的
+      2.0s 锚（48 帧）会被本函数抬到 90 帧（3.75s），锚窗直接吃掉半段。
+      锚窗只要求 17k+5，那是 ``grid_seconds`` 的活。
+    """
+    try:
+        secs = float(seconds or 0.0)
+    except (TypeError, ValueError):
+        return 0.0
+    if secs <= 0:
+        return 0.0
+    frames = max(5, int(round(secs * FPS)))
+    if frames <= _CHAIN_MIN:
+        return _CHAIN_MIN / float(FPS)
+    frames = _CHAIN_MIN + (
+        (frames - _CHAIN_MIN + _CHAIN_STEP - 1) // _CHAIN_STEP) * _CHAIN_STEP
     return frames / float(FPS)
 
 
@@ -1235,6 +1278,27 @@ def rebuild_pack_block(original: str, blocks, lang=None) -> str:
     for start, end, block in sorted(spans, key=lambda s: -s[0]):
         result[start:end] = block
     return "\n".join(result).strip("\n") + "\n"
+
+
+def looks_like_pack(text) -> bool:
+    """粗判一段文本是不是分镜 PACK（而不是被 widget 错位塞进来的普通控件值）。
+
+    认三种形态：段标题 ``########## S01 / 11s / EN ##########``、无斜杠段头
+    ``########## S01 ##########``（2026-09-30 起解析层支持，守卫必须同口径，
+    否则实时编辑器覆盖会被静默忽略），或镜内标记 ``[Shot 1]``。
+
+    ★ 为什么住在 prompt_pack 而不是 pack_nodes：``pack_override`` 有**两个**
+      消费者 —— 节点 ``execute``（渲染走哪份文本）与 ``routes._pack_preview``
+      （面板显示哪份）。两边判据必须逐字一致，否则面板按源文画时间线、节点按
+      覆盖版渲染，静默分叉。而 pack_nodes 顶层要 ``from comfy_api.latest import io``，
+      HTTP 预览这条路径没有理由为一个纯字符串函数挂上整个 ComfyUI 依赖。
+    """
+    s = str(text or "")
+    if not s:
+        return False
+    return bool(re.search(r"#{3,}\s*S?\d+[A-Za-z]?\s*/", s)
+                or re.search(r"#{3,}\s*S\d+[A-Za-z]?\s*#{3,}", s)
+                or re.search(r"\[\s*Shot\s*\d+\s*\]", s, re.I))
 
 
 # ---------------------------------------------------------------------------
@@ -3535,9 +3599,15 @@ def _build_segment(seg_id, dur_spec, lang, body, default_duration, is_first,
     #   （网格帧 − 回放帧）。这样「提示词时间轴 = shots.json = 实际生成帧数」
     #   三者同源；``_auto_fix`` 再把段末时间码延长到真实终点，模型于是拿到
     #   一段**被完整指定**的时间轴，没有空白可以即兴。
-    #   ``grid_seconds`` 与渲染层 ``generation_length`` 是同一算法（见其
+    #   ``chain_seconds`` 与渲染层 ``common.chain_length`` 是同一算法（见其
     #   docstring），所以这里算出来的帧数与 ``_shot_plan`` 逐帧一致。
-    gen = round(grid_seconds(gen), 3)
+    #
+    # ★ 2026-10-18：这里由 ``grid_seconds`` 换成 ``chain_seconds`` —— 段长要
+    #   同时落在 17k+5 与 3 的倍数（音频 40 Hz）两张网格上，否则每道接缝差
+    #   8.3 ms 并逐段累积。代价是单段最多多 50 帧（2.08s，原为 16 帧），
+    #   但这 50 帧是**同口径**算出来后写进时间码的，是被完整指定的时间，
+    #   不是模型即兴的空白 —— 那才是"乱说话"的来源。
+    gen = round(chain_seconds(gen), 3)
     new = round(gen - replay_in, 3)
     seg = {
         "id": seg_id,

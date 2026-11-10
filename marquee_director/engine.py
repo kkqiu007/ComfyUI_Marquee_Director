@@ -717,6 +717,17 @@ def refine_samples(settings, samples, positive, seed):
     sampler = _refine_sampler(settings, pack)
     refine_seed = _refine_seed(pack, seed)
 
+    # ★ 二采前清显存（可选，默认关；借鉴 AIMixer/ComfyUI_MiniMaxH3_Director
+    #   的 clear_vram_before_refine）。同一段里一采的 UNET 还驻留着，二采紧接着
+    #   就开始 —— 接了另一套「二采模型」时两套同时在显存里，峰值就在这里。
+    #   卸载后 ComfyUI 按需重载，代价是每段多一次加载，所以做成开关而不是默认。
+    #   这是显存策略，不进缓存键（session.segment_key 逐项枚举 refine 字段）。
+    vram_note = ""
+    if pack.get("clear_vram"):
+        free_between_segments(unload_models=True)
+        vram_note = "二采前已卸载模型"
+        log("refine: 二采前卸载模型（clear_vram）")
+
     notes = []
     for i in range(passes):
         # A fresh noise object per pass: two passes sharing one seed would
@@ -757,6 +768,8 @@ def refine_samples(settings, samples, positive, seed):
     note = "%d pass(es), sigmas %s, %s" % (
         passes, shape,
         "跟随一采模型" if pack.get("model") is None else "二采模型")
+    if vram_note:
+        note += "；" + vram_note
     if notes:
         note += "；teacache " + "；".join(notes)
     return samples, note

@@ -113,9 +113,9 @@ def main():
     # by a current build is mastered when it is saved and should read ``yes``;
     # ``no`` means it is still raw -- either an older build's file, or a tail
     # that was deliberately left alone.
-    print("  %-12s %8s %9s %9s %9s %9s  %s"
-          % ("segment", "src", "as-found", "at target", "if mastered", "gain dB",
-             "as-found dBTP"))
+    print("  %-12s %8s %9s %9s %13s %9s %9s  %s"
+          % ("segment", "src", "as-found", "at target", "target(via)",
+             "if re-run", "gain dB", "as-found dBTP"))
     for path, skip in parts:
         sidecar = video_io._wav_path(path)
         clip = video_io.read_audio(sidecar) if os.path.exists(sidecar) else None
@@ -131,12 +131,28 @@ def main():
         want = int(round(kept / float(args.fps) * rate))
         cut = wf[..., start:start + want]
         raw_lufs, raw_tp = measure(audio_master, cut, rate)
-        already = audio_master.is_mastered(cut.detach().cpu().numpy(), rate)
-        m = audio_master.master_segment(cut.detach().cpu().numpy(), rate)
+        np_cut = cut.detach().cpu().numpy()
+        # 与 _join_audio 完全同一条决策链：伴生 → 吸附 → 分类。已母带段
+        # （via=lufs/snap）重跑只做电平校正（hp off / shape off），原始段
+        # （via=class）才走完整处理 —— 报告若不走同一条链，这里显示的
+        # 就不是 join 真会做的事。
+        tgt = video_io._read_lufs_target(path)
+        via = "lufs"
+        if tgt is None:
+            tgt = audio_master.snap_target(np_cut, rate)
+            via = "snap"
+        if tgt is None:
+            tgt = audio_master.profile_target(np_cut, rate)
+            via = "class"
+        already = audio_master.is_mastered(np_cut, rate, target_lufs=tgt)
+        m = audio_master.master_segment(
+            np_cut, rate, target_lufs=tgt,
+            hp_hz=None if via != "class" else audio_master.HIGHPASS_HZ,
+            shape_tone=(via == "class"))
         m_lufs, m_tp = measure(audio_master, m, rate)
-        print("  %-12s %8s %9.2f %9s %9.2f %+9.2f %9.2f"
+        print("  %-12s %8s %9.2f %9s %6.1f(%-4s) %9.2f %+9.2f %9.2f"
               % (os.path.basename(path), src, raw_lufs, "yes" if already else "no",
-                 m_lufs, m_lufs - raw_lufs, raw_tp))
+                 tgt, via, m_lufs, m_lufs - raw_lufs, raw_tp))
 
     audio = video_io._join_audio(parts, args.fps)
     if audio is None:
